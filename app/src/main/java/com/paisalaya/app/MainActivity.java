@@ -202,7 +202,8 @@ public class MainActivity extends Activity {
         items[0].setOnClickListener(v->showHome());
         items[1].setOnClickListener(v->showAdd());
         items[2].setOnClickListener(v->showPeople());
-        items[3].setOnClickListener(v->showTools());\n        items[4].setOnClickListener(v->showSettings());
+        items[3].setOnClickListener(v->showTools());
+        items[4].setOnClickListener(v->showSettings());
         root.addView(n,new LinearLayout.LayoutParams(-1,dp(72)));
     }
 
