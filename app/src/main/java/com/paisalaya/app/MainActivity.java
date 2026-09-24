@@ -2,10 +2,12 @@ package com.paisalaya.app;
 
 import android.app.*;
 import android.content.*;
+import android.content.res.Configuration;
 import android.graphics.*;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.view.*;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
 import org.json.*;
 import java.io.*;
@@ -14,75 +16,169 @@ import java.util.*;
 
 public class MainActivity extends Activity {
     static final String PREF="paisa_laya", TX="transactions";
+    static final String SCREEN_HOME="home", SCREEN_ADD="add", SCREEN_PEOPLE="people", SCREEN_REPORTS="reports";
+
     LinearLayout root, content;
     SharedPreferences prefs;
+    String currentScreen=SCREEN_HOME;
+    String pendingType="Expense";
+
     final int BG=Color.rgb(246,248,244), INK=Color.rgb(25,35,29), GREEN=Color.rgb(36,132,83);
-    final int MINT=Color.rgb(224,246,232), RED=Color.rgb(216,76,76), GOLD=Color.rgb(238,174,65), WHITE=Color.WHITE;
+    final int GREEN_DARK=Color.rgb(18,92,57), MINT=Color.rgb(224,246,232), RED=Color.rgb(216,76,76);
+    final int GOLD=Color.rgb(238,174,65), MUTED=Color.rgb(92,105,96), WHITE=Color.WHITE;
 
     int dp(float v){return (int)(v*getResources().getDisplayMetrics().density+0.5f);}
 
-    @Override public void onCreate(Bundle b){
-        super.onCreate(b);
+    @Override public void onCreate(Bundle state){
+        super.onCreate(state);
         prefs=getSharedPreferences(PREF,0);
-        getWindow().setStatusBarColor(Color.rgb(18,92,57));
+        getWindow().setStatusBarColor(GREEN_DARK);
         getWindow().setNavigationBarColor(BG);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
-        showHome();
+
+        if(state!=null){
+            currentScreen=state.getString("screen",SCREEN_HOME);
+            pendingType=state.getString("type","Expense");
+        }
+        renderCurrent();
+        if(state!=null && SCREEN_ADD.equals(currentScreen)){
+            final String amount=state.getString("amount","");
+            final String category=state.getString("category","");
+            final String note=state.getString("note","");
+            content.postDelayed(()->restoreAddFields(amount,category,note),80);
+        }
+    }
+
+    @Override protected void onSaveInstanceState(Bundle out){
+        out.putString("screen",currentScreen);
+        out.putString("type",pendingType);
+        if(SCREEN_ADD.equals(currentScreen)){
+            View v=content.findViewWithTag("amount");
+            if(v instanceof EditText) out.putString("amount",((EditText)v).getText().toString());
+            v=content.findViewWithTag("category");
+            if(v instanceof EditText) out.putString("category",((EditText)v).getText().toString());
+            v=content.findViewWithTag("note");
+            if(v instanceof EditText) out.putString("note",((EditText)v).getText().toString());
+        }
+        super.onSaveInstanceState(out);
+    }
+
+    void renderCurrent(){
+        if(SCREEN_ADD.equals(currentScreen)) showAddWithType(pendingType);
+        else if(SCREEN_PEOPLE.equals(currentScreen)) showPeople();
+        else if(SCREEN_REPORTS.equals(currentScreen)) showReports();
+        else showHome();
+    }
+
+    @Override public void onConfigurationChanged(Configuration c){
+        super.onConfigurationChanged(c);
+        getWindow().setStatusBarColor(GREEN_DARK);
+        renderCurrent();
     }
 
     TextView tv(String s,float z,int c,boolean bold){
         TextView t=new TextView(this);
         t.setText(s); t.setTextSize(z); t.setTextColor(c);
-        t.setPadding(dp(4),dp(2),dp(4),dp(2));
+        t.setIncludeFontPadding(true);
+        t.setPadding(dp(2),dp(3),dp(2),dp(3));
         if(bold)t.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
         return t;
     }
 
     GradientDrawable bg(int color,float radius){
-        GradientDrawable g=new GradientDrawable(); g.setColor(color); g.setCornerRadius(dp(radius)); return g;
+        GradientDrawable g=new GradientDrawable();
+        g.setColor(color); g.setCornerRadius(dp(radius)); return g;
+    }
+
+    GradientDrawable strokeBg(int color,int stroke,float radius){
+        GradientDrawable g=bg(color,radius); g.setStroke(dp(1),stroke); return g;
     }
 
     LinearLayout box(int color,int pad){
-        LinearLayout l=new LinearLayout(this); l.setOrientation(LinearLayout.VERTICAL);
-        l.setPadding(dp(pad),dp(pad),dp(pad),dp(pad)); l.setBackground(bg(color,32)); return l;
+        LinearLayout l=new LinearLayout(this);
+        l.setOrientation(LinearLayout.VERTICAL);
+        l.setPadding(dp(pad),dp(pad),dp(pad),dp(pad));
+        l.setBackground(bg(color,26));
+        return l;
+    }
+
+    LinearLayout row(){
+        LinearLayout l=new LinearLayout(this);
+        l.setOrientation(LinearLayout.HORIZONTAL);
+        l.setGravity(Gravity.CENTER_VERTICAL);
+        return l;
     }
 
     Button action(String s){
         Button b=new Button(this);
         b.setText(s); b.setTextSize(14); b.setAllCaps(false); b.setTextColor(INK);
-        b.setBackground(bg(WHITE,28)); b.setPadding(dp(12),0,dp(12),0);
-        b.setMinHeight(0); b.setMinWidth(0); b.setStateListAnimator(null);
+        b.setBackground(bg(WHITE,22)); b.setPadding(dp(10),0,dp(10),0);
+        b.setMinHeight(dp(48)); b.setMinWidth(0); b.setStateListAnimator(null);
         return b;
     }
 
     void fieldStyle(EditText e,String hint,float size){
         e.setHint(hint); e.setTextSize(size); e.setSingleLine(true);
-        e.setPadding(dp(18),0,dp(18),0); e.setBackground(bg(WHITE,24));
-        e.setGravity(Gravity.CENTER_VERTICAL); e.setMinHeight(dp(56));
+        e.setPadding(dp(18),0,dp(18),0); e.setBackground(bg(WHITE,20));
+        e.setGravity(Gravity.CENTER_VERTICAL);
+        e.setMinHeight(dp(56));
+    }
+
+    TextView sectionTitle(String text){
+        TextView t=tv(text,19,INK,true);
+        t.setPadding(dp(2),dp(12),dp(2),dp(8));
+        return t;
+    }
+
+    void gap(int h){content.addView(new Space(this),new LinearLayout.LayoutParams(1,dp(h)));}
+
+    void addWrap(View v){
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);
+        content.addView(v,p);
+    }
+
+    void addWrapMargin(View v,int top,int bottom){
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);
+        p.setMargins(0,dp(top),0,dp(bottom)); content.addView(v,p);
     }
 
     void base(String title,String subtitle){
-        root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(BG);
-        LinearLayout head=new LinearLayout(this); head.setOrientation(LinearLayout.VERTICAL);
-        head.setPadding(dp(18),dp(18),dp(18),dp(6));
-        head.addView(tv(title,28,INK,true),new LinearLayout.LayoutParams(-1,dp(58)));
-        head.addView(tv(subtitle,15,Color.rgb(92,105,96),false),new LinearLayout.LayoutParams(-1,dp(34)));
-        root.addView(head,new LinearLayout.LayoutParams(-1,dp(100)));
+        root=new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BG);
 
-        content=new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(16),dp(4),dp(16),dp(18));
-        ScrollView sv=new ScrollView(this); sv.setFillViewport(true); sv.setClipToPadding(false); sv.addView(content);
+        LinearLayout head=new LinearLayout(this);
+        head.setOrientation(LinearLayout.VERTICAL);
+        int top=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE?10:18;
+        head.setPadding(dp(18),dp(top),dp(18),dp(4));
+        TextView titleView=tv(title,28,INK,true);
+        TextView subView=tv(subtitle,15,MUTED,false);
+        head.addView(titleView,new LinearLayout.LayoutParams(-1,-2));
+        head.addView(subView,new LinearLayout.LayoutParams(-1,-2));
+        root.addView(head,new LinearLayout.LayoutParams(-1,-2));
+
+        content=new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(16),dp(4),dp(16),dp(20));
+
+        ScrollView sv=new ScrollView(this);
+        sv.setFillViewport(true);
+        sv.setClipToPadding(false);
+        sv.addView(content);
         root.addView(sv,new LinearLayout.LayoutParams(-1,0,1));
         setContentView(root);
-        content.setAlpha(0f); content.animate().alpha(1f).setDuration(380).start();
-    }
 
-    void add(LinearLayout l,View v,int h){l.addView(v,new LinearLayout.LayoutParams(-1,dp(h)));}
+        content.setAlpha(0f);
+        content.animate().alpha(1f).setDuration(260).start();
+    }
 
     void nav(){
         LinearLayout n=new LinearLayout(this);
-        n.setGravity(Gravity.CENTER); n.setPadding(dp(6),dp(6),dp(6),dp(8));
-        n.setBackground(bg(WHITE,30));
+        n.setOrientation(LinearLayout.HORIZONTAL);
+        n.setGravity(Gravity.CENTER);
+        n.setPadding(dp(6),dp(5),dp(6),dp(7));
+        n.setBackground(bg(WHITE,28));
+
         String[] icons={"⌂","+","♙","▣"};
         String[] labels={"Home","Add","People","Reports"};
         TextView[] items=new TextView[4];
@@ -90,11 +186,15 @@ public class MainActivity extends Activity {
         for(int i=0;i<4;i++){
             TextView item=new TextView(this);
             item.setText(icons[i]+"\n"+labels[i]);
-            item.setTextSize(12); item.setTextColor(INK); item.setGravity(Gravity.CENTER);
-            item.setLineSpacing(0,0.9f); item.setBackground(bg(WHITE,24));
-            item.setPadding(0,0,0,0);
+            item.setTextSize(12);
+            item.setTextColor(i==screenIndex()?GREEN:INK);
+            item.setGravity(Gravity.CENTER);
+            item.setIncludeFontPadding(true);
+            item.setLineSpacing(0,0.92f);
+            item.setBackground(i==screenIndex()?bg(MINT,20):bg(WHITE,20));
+            item.setPadding(0,dp(4),0,dp(4));
             items[i]=item;
-            LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(64),1);
+            LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(62),1);
             if(i>0)p.setMargins(dp(4),0,0,0);
             n.addView(item,p);
         }
@@ -103,13 +203,22 @@ public class MainActivity extends Activity {
         items[1].setOnClickListener(v->showAdd());
         items[2].setOnClickListener(v->showPeople());
         items[3].setOnClickListener(v->showReports());
-        root.addView(n,new LinearLayout.LayoutParams(-1,dp(76)));
+        root.addView(n,new LinearLayout.LayoutParams(-1,dp(72)));
+    }
+
+    int screenIndex(){
+        if(SCREEN_ADD.equals(currentScreen))return 1;
+        if(SCREEN_PEOPLE.equals(currentScreen))return 2;
+        if(SCREEN_REPORTS.equals(currentScreen))return 3;
+        return 0;
     }
 
     JSONArray transactions(){
         try{return new JSONArray(prefs.getString(TX,"[]"));}catch(Exception e){return new JSONArray();}
     }
+
     void save(JSONArray a){prefs.edit().putString(TX,a.toString()).apply();}
+
     double[] totals(){
         double in=0,out=0; JSONArray a=transactions();
         for(int i=0;i<a.length();i++)try{
@@ -118,108 +227,186 @@ public class MainActivity extends Activity {
         }catch(Exception e){}
         return new double[]{in,out};
     }
+
     String money(double x){return String.format(Locale.US,"PKR %,.0f",x);}
 
     void showHome(){
+        currentScreen=SCREEN_HOME;
         base("Paisa Laya","Your money, beautifully organized.");
         double[] t=totals(); double balance=t[0]-t[1];
 
-        LinearLayout hero=box(GREEN,22);
-        hero.addView(tv("TOTAL BALANCE",12,Color.rgb(207,240,218),true),new LinearLayout.LayoutParams(-1,dp(28)));
-        hero.addView(tv(money(balance),32,WHITE,true),new LinearLayout.LayoutParams(-1,dp(60)));
+        LinearLayout hero=box(GREEN,20);
+        hero.addView(tv("TOTAL BALANCE",12,Color.rgb(207,240,218),true));
+        TextView bal=tv(money(balance),32,WHITE,true);
+        hero.addView(bal,new LinearLayout.LayoutParams(-1,-2));
 
-        LinearLayout row=new LinearLayout(this); row.setPadding(0,dp(8),0,0);
-        LinearLayout inc=box(Color.rgb(53,151,99),14);
-        inc.addView(tv("↗  INCOME",11,Color.rgb(210,244,222),true),new LinearLayout.LayoutParams(-1,dp(28)));
-        inc.addView(tv(money(t[0]),17,WHITE,true),new LinearLayout.LayoutParams(-1,dp(40)));
-
-        LinearLayout exp=box(Color.rgb(194,70,70),14);
-        exp.addView(tv("↘  EXPENSE",11,Color.rgb(255,220,220),true),new LinearLayout.LayoutParams(-1,dp(28)));
-        exp.addView(tv(money(t[1]),17,WHITE,true),new LinearLayout.LayoutParams(-1,dp(40)));
-
-        row.addView(inc,new LinearLayout.LayoutParams(0,dp(104),1));
-        LinearLayout.LayoutParams ep=new LinearLayout.LayoutParams(0,dp(104),1); ep.setMargins(dp(10),0,0,0); row.addView(exp,ep);
+        LinearLayout row=row();
+        LinearLayout inc=box(Color.rgb(53,151,99),13);
+        inc.addView(tv("↗  INCOME",11,Color.rgb(210,244,222),true));
+        inc.addView(tv(money(t[0]),17,WHITE,true));
+        LinearLayout exp=box(Color.rgb(194,70,70),13);
+        exp.addView(tv("↘  EXPENSE",11,Color.rgb(255,220,220),true));
+        exp.addView(tv(money(t[1]),17,WHITE,true));
+        row.addView(inc,new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout.LayoutParams ep=new LinearLayout.LayoutParams(0,-2,1);
+        ep.setMargins(dp(10),0,0,0); row.addView(exp,ep);
         hero.addView(row);
-        add(content,hero,174);
+        addWrapMargin(hero,0,10);
 
-        LinearLayout quick=new LinearLayout(this); quick.setPadding(0,dp(12),0,dp(6));
+        LinearLayout quick=row();
         Button add=action("＋  Add expense"), income=action("＋  Add income");
-        quick.addView(add,new LinearLayout.LayoutParams(0,dp(52),1));
-        LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(0,dp(52),1); ip.setMargins(dp(10),0,0,0); quick.addView(income,ip);
-        add.setOnClickListener(v->showAddWithType("Expense")); income.setOnClickListener(v->showAddWithType("Income"));
-        content.addView(quick,new LinearLayout.LayoutParams(-1,dp(70)));
+        quick.addView(add,new LinearLayout.LayoutParams(0,dp(50),1));
+        LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(0,dp(50),1);
+        ip.setMargins(dp(10),0,0,0); quick.addView(income,ip);
+        add.setOnClickListener(v->showAddWithType("Expense"));
+        income.setOnClickListener(v->showAddWithType("Income"));
+        addWrapMargin(quick,0,2);
 
-        content.addView(tv("Spending overview",19,INK,true),new LinearLayout.LayoutParams(-1,dp(42)));
-        LinearLayout chart=box(WHITE,18);
+        addWrap(sectionTitle("Spending overview"));
+        LinearLayout chart=box(WHITE,17);
         double total=t[0]+t[1]; float er=total==0?0:(float)(t[1]/total);
-        chart.addView(tv("Expenses",13,Color.DKGRAY,false),new LinearLayout.LayoutParams(-1,dp(30)));
+        LinearLayout chartTop=row();
+        chartTop.addView(tv("Expenses",13,INK,false),new LinearLayout.LayoutParams(0,-2,1));
+        chartTop.addView(tv(String.format(Locale.US,"%.0f%%",er*100),13,RED,true),new LinearLayout.LayoutParams(-2,-2));
+        chart.addView(chartTop);
         ProgressBar pb=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
         pb.setMax(100); pb.setProgress((int)(er*100)); pb.setProgressDrawable(bg(RED,20));
-        chart.addView(pb,new LinearLayout.LayoutParams(-1,dp(16)));
-        chart.addView(tv(total==0?"No transactions yet":String.format(Locale.US,"%.0f%% of recorded cash flow is expenses",er*100),13,Color.DKGRAY,false),new LinearLayout.LayoutParams(-1,dp(30)));
-        add(content,chart,108);
+        LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-1,dp(14)); pp.setMargins(0,dp(8),0,dp(8)); chart.addView(pb,pp);
+        chart.addView(tv(total==0?"No transactions yet — your spending bar will appear here.":"Expenses compared with your recorded cash flow.",12,MUTED,false));
+        addWrapMargin(chart,0,4);
 
-        content.addView(tv("Recent transactions",19,INK,true),new LinearLayout.LayoutParams(-1,dp(42)));
-        JSONArray a=transactions(); int start=Math.max(0,a.length()-5);
-        if(a.length()==0)content.addView(tv("No transactions yet. Tap Add to get started.",14,Color.DKGRAY,false),new LinearLayout.LayoutParams(-1,dp(38)));
+        addWrap(sectionTitle("Recent transactions"));
+        JSONArray a=transactions();
+        int start=Math.max(0,a.length()-5);
+        if(a.length()==0){
+            LinearLayout empty=box(WHITE,18);
+            TextView icon=tv("＋",28,GREEN,true); icon.setGravity(Gravity.CENTER);
+            empty.addView(icon,new LinearLayout.LayoutParams(-1,dp(40)));
+            TextView eTitle=tv("Start tracking your money",17,INK,true); eTitle.setGravity(Gravity.CENTER);
+            empty.addView(eTitle);
+            TextView eText=tv("Add your first income or expense and Paisa Laya will build your dashboard automatically.",13,MUTED,false);
+            eText.setGravity(Gravity.CENTER); eText.setGravity(Gravity.CENTER_HORIZONTAL);
+            empty.addView(eText);
+            Button first=action("Add my first transaction");
+            first.setTextColor(WHITE); first.setBackground(bg(GREEN,22)); first.setOnClickListener(v->showAdd());
+            LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(-1,dp(50)); fp.setMargins(0,dp(12),0,0); empty.addView(first,fp);
+            addWrapMargin(empty,0,8);
 
-        for(int i=a.length()-1;i>=start;i--)try{
-            JSONObject o=a.getJSONObject(i);
-            LinearLayout card=box(WHITE,14);
-            String icon="Income".equals(o.getString("type"))?"↗":"↘";
-            int c="Income".equals(o.getString("type"))?GREEN:RED;
-            LinearLayout rr=new LinearLayout(this); rr.setGravity(Gravity.CENTER_VERTICAL);
-            rr.addView(tv(icon,24,c,true),new LinearLayout.LayoutParams(dp(48),dp(62)));
-            LinearLayout info=new LinearLayout(this); info.setOrientation(LinearLayout.VERTICAL);
-            info.addView(tv(o.optString("category","Other"),15,INK,true));
-            info.addView(tv(o.optString("note","No note")+"  •  "+o.optString("date",""),12,Color.DKGRAY,false));
-            rr.addView(info,new LinearLayout.LayoutParams(0,dp(62),1));
-            rr.addView(tv(money(o.optDouble("amount")),14,c,true),new LinearLayout.LayoutParams(-2,dp(62)));
-            card.addView(rr); add(content,card,90);
-            Space sp=new Space(this); content.addView(sp,new LinearLayout.LayoutParams(1,dp(7)));
-        }catch(Exception e){}
+            LinearLayout tips=row();
+            tips.addView(tipCard("1","Record","Income & expenses"),new LinearLayout.LayoutParams(0,-2,1));
+            LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(0,-2,1); tp.setMargins(dp(8),0,0,0);
+            tips.addView(tipCard("2","Review","Your spending"),tp);
+            addWrap(tips);
+        } else {
+            for(int i=a.length()-1;i>=start;i--)try{
+                JSONObject o=a.getJSONObject(i);
+                LinearLayout card=box(WHITE,13);
+                LinearLayout rr=row();
+                String icon="Income".equals(o.getString("type"))?"↗":"↘";
+                int c="Income".equals(o.getString("type"))?GREEN:RED;
+                TextView ico=tv(icon,22,c,true); ico.setGravity(Gravity.CENTER);
+                rr.addView(ico,new LinearLayout.LayoutParams(dp(42),dp(62)));
+                LinearLayout info=new LinearLayout(this); info.setOrientation(LinearLayout.VERTICAL);
+                info.addView(tv(o.optString("category","Other"),15,INK,true));
+                info.addView(tv(o.optString("note","No note")+"  •  "+o.optString("date",""),12,MUTED,false));
+                rr.addView(info,new LinearLayout.LayoutParams(0,-2,1));
+                rr.addView(tv(money(o.optDouble("amount")),14,c,true),new LinearLayout.LayoutParams(-2,-2));
+                card.addView(rr); addWrapMargin(card,0,7);
+            }catch(Exception e){}
+        }
+
+        if(a.length()>0){
+            LinearLayout insight=box(MINT,16);
+            insight.addView(tv("Quick insight",13,GREEN,true));
+            String msg;
+            if(t[0]==0) msg="You have recorded expenses but no income yet.";
+            else if(t[1]==0) msg="No expenses recorded yet. Nice and simple.";
+            else if(balance<0) msg="Recorded expenses are currently higher than recorded income.";
+            else msg="You are currently keeping a positive recorded balance.";
+            insight.addView(tv(msg,13,INK,false));
+            addWrapMargin(insight,2,8);
+        }
+
         nav();
+    }
+
+    LinearLayout tipCard(String number,String title,String text){
+        LinearLayout c=box(WHITE,12);
+        TextView n=tv(number,16,GREEN,true); n.setGravity(Gravity.CENTER);
+        n.setBackground(bg(MINT,18)); c.addView(n,new LinearLayout.LayoutParams(dp(34),dp(34)));
+        c.addView(tv(title,13,INK,true));
+        c.addView(tv(text,11,MUTED,false));
+        return c;
     }
 
     void showAdd(){showAddWithType("Expense");}
 
     void showAddWithType(String defaultType){
+        currentScreen=SCREEN_ADD; pendingType=defaultType;
         base("New transaction","Record money in seconds.");
-        EditText amount=new EditText(this); fieldStyle(amount,"Amount in PKR",18); amount.setInputType(2|8192); add(content,amount,60);
+        TextView amountLabel=tv("Amount",13,INK,true); addWrapMargin(amountLabel,0,5);
+        EditText amount=new EditText(this); fieldStyle(amount,"Amount in PKR",18); amount.setInputType(2|8192); amount.setTag("amount"); addWrapMargin(amount,0,10);
 
+        TextView typeLabel=tv("Transaction type",13,INK,true); addWrapMargin(typeLabel,0,5);
         Spinner type=new Spinner(this);
+        type.setPadding(dp(12),0,dp(8),0); type.setBackground(bg(WHITE,20));
         type.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Expense","Income"}));
-        type.setSelection("Income".equals(defaultType)?1:0);
-        add(content,type,56);
+        type.setSelection("Income".equals(defaultType)?1:0); addWrapMargin(type,0,10);
 
-        EditText cat=new EditText(this); fieldStyle(cat,"Category  •  Food, Salary, Bills...",17); add(content,cat,60);
-        EditText note=new EditText(this); fieldStyle(note,"Short note",17); add(content,note,60);
+        TextView catLabel=tv("Category",13,INK,true); addWrapMargin(catLabel,0,5);
+        EditText cat=new EditText(this); fieldStyle(cat,"Food, Salary, Bills...",17); cat.setTag("category"); addWrapMargin(cat,0,10);
 
-        Button saveB=action("Save transaction  →"); saveB.setTextSize(16); saveB.setTextColor(WHITE); saveB.setBackground(bg(GREEN,26)); add(content,saveB,58);
+        TextView noteLabel=tv("Note (optional)",13,INK,true); addWrapMargin(noteLabel,0,5);
+        EditText note=new EditText(this); fieldStyle(note,"Add a short note",17); note.setTag("note"); addWrapMargin(note,0,14);
+
+        Button saveB=action("Save transaction  →");
+        saveB.setTextSize(16); saveB.setTextColor(WHITE); saveB.setBackground(bg(GREEN,24));
+        addWrapMargin(saveB,0,10);
         saveB.setOnClickListener(v->{
             try{
-                double x=Double.parseDouble(amount.getText().toString().trim()); if(x<=0)throw new Exception();
+                double x=Double.parseDouble(amount.getText().toString().trim());
+                if(x<=0)throw new Exception();
                 JSONArray a=transactions(); JSONObject o=new JSONObject();
                 o.put("amount",x); o.put("type",type.getSelectedItem().toString());
                 o.put("category",cat.getText().toString().trim().isEmpty()?"Other":cat.getText().toString().trim());
                 o.put("note",note.getText().toString().trim());
                 o.put("date",new SimpleDateFormat("dd MMM, HH:mm",Locale.US).format(new Date()));
-                a.put(o); save(a); showHome();
+                a.put(o); save(a);
+                ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(amount.getWindowToken(),0);
+                showHome();
             }catch(Exception e){Toast.makeText(this,"Please enter a valid amount.",Toast.LENGTH_SHORT).show();}
         });
+
         nav();
     }
 
+    void restoreAddFields(String amount,String category,String note){
+        View v=content.findViewWithTag("amount"); if(v instanceof EditText)((EditText)v).setText(amount);
+        v=content.findViewWithTag("category"); if(v instanceof EditText)((EditText)v).setText(category);
+        v=content.findViewWithTag("note"); if(v instanceof EditText)((EditText)v).setText(note);
+    }
+
     void showPeople(){
+        currentScreen=SCREEN_PEOPLE;
         base("People & Dues","Keep track of borrowed and owed money.");
-        EditText name=new EditText(this); fieldStyle(name,"Person's name",17); add(content,name,60);
-        EditText amount=new EditText(this); fieldStyle(amount,"Amount in PKR",17); amount.setInputType(2|8192); add(content,amount,60);
-        Spinner kind=new Spinner(this); kind.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"They owe me","I owe them"})); add(content,kind,56);
-        EditText note=new EditText(this); fieldStyle(note,"Note",17); add(content,note,60);
-        Button add=action("Add person  ＋"); add(content,add,56);
-        TextView list=tv("",14,INK,false); content.addView(list); list.setText(prefs.getString("dues",""));
+        addWrapMargin(tv("Add someone you owe or who owes you.",13,MUTED,false),0,10);
+        EditText name=new EditText(this); fieldStyle(name,"Person's name",17); addWrapMargin(name,0,10);
+        EditText amount=new EditText(this); fieldStyle(amount,"Amount in PKR",17); amount.setInputType(2|8192); addWrapMargin(amount,0,10);
+        Spinner kind=new Spinner(this);
+        kind.setPadding(dp(12),0,dp(8),0); kind.setBackground(bg(WHITE,20));
+        kind.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"They owe me","I owe them"})); addWrapMargin(kind,0,10);
+        EditText note=new EditText(this); fieldStyle(note,"Note (optional)",17); addWrapMargin(note,0,12);
+        Button add=action("Add person  ＋"); addWrapMargin(add,0,12);
+
+        TextView listTitle=sectionTitle("Saved people"); addWrap(listTitle);
+        TextView list=tv("",14,INK,false);
+        String saved=prefs.getString("dues","");
+        if(saved.isEmpty()) list.setText("No people added yet.");
+        else list.setText(saved);
+        addWrapMargin(list,0,8);
+
         add.setOnClickListener(v->{
-            if(name.getText().toString().trim().isEmpty())return;
+            if(name.getText().toString().trim().isEmpty()){Toast.makeText(this,"Enter a person's name.",Toast.LENGTH_SHORT).show();return;}
             String line="• "+name.getText()+"  —  "+kind.getSelectedItem()+"  —  PKR "+amount.getText()+"  —  "+note.getText()+"\n";
             String all=prefs.getString("dues","")+line; prefs.edit().putString("dues",all).apply();
             list.setText(all); name.setText(""); amount.setText(""); note.setText("");
@@ -228,38 +415,78 @@ public class MainActivity extends Activity {
     }
 
     void showReports(){
-        base("Reports & Backup","Export or protect your Paisa Laya data.");
-        LinearLayout c=box(WHITE,18); c.addView(tv("Data tools",18,INK,true));
-        Button csv=action("⇩  Export transactions as CSV"), backup=action("☁  Create JSON backup"), restore=action("↥  Restore JSON backup");
-        c.addView(csv,new LinearLayout.LayoutParams(-1,dp(54))); c.addView(backup,new LinearLayout.LayoutParams(-1,dp(54))); c.addView(restore,new LinearLayout.LayoutParams(-1,dp(54)));
-        add(content,c,210);
-        Button clear=action("Clear all transactions"); clear.setTextColor(RED); add(content,clear,56);
-        csv.setOnClickListener(v->exportCsv()); backup.setOnClickListener(v->backup()); restore.setOnClickListener(v->restore());
-        clear.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Clear transactions?").setMessage("This cannot be undone.").setNegativeButton("Cancel",null).setPositiveButton("Clear",(d,w)->{prefs.edit().remove(TX).apply();showReports();}).show());
+        currentScreen=SCREEN_REPORTS;
+        base("Reports & Backup","Export, back up, or manage your data.");
+        LinearLayout c=box(WHITE,17);
+        c.addView(tv("Data tools",18,INK,true));
+        c.addView(tv("Keep a copy of your transactions before changing phones.",12,MUTED,false));
+        Button csv=action("⇩  Export transactions as CSV");
+        Button backup=action("☁  Create JSON backup");
+        Button restore=action("↥  Restore JSON backup");
+        LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-1,dp(52)); bp.setMargins(0,dp(10),0,0); c.addView(csv,bp);
+        LinearLayout.LayoutParams b2=new LinearLayout.LayoutParams(-1,dp(52)); b2.setMargins(0,dp(7),0,0); c.addView(backup,b2);
+        LinearLayout.LayoutParams b3=new LinearLayout.LayoutParams(-1,dp(52)); b3.setMargins(0,dp(7),0,0); c.addView(restore,b3);
+        addWrapMargin(c,0,12);
+
+        LinearLayout info=box(MINT,16);
+        info.addView(tv("Your data stays on this device",15,GREEN,true));
+        info.addView(tv("Use JSON backup to move your Paisa Laya data to another phone.",12,INK,false));
+        addWrapMargin(info,0,12);
+
+        Button clear=action("Clear all transactions");
+        clear.setTextColor(RED); addWrapMargin(clear,0,8);
+
+        csv.setOnClickListener(v->exportCsv());
+        backup.setOnClickListener(v->backup());
+        restore.setOnClickListener(v->restore());
+        clear.setOnClickListener(v->new AlertDialog.Builder(this)
+            .setTitle("Clear transactions?")
+            .setMessage("This cannot be undone.")
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Clear",(d,w)->{prefs.edit().remove(TX).apply();showReports();})
+            .show());
         nav();
     }
 
     void exportCsv(){
         StringBuilder s=new StringBuilder("Date,Type,Category,Amount,Note\n"); JSONArray a=transactions();
-        try{for(int i=0;i<a.length();i++){JSONObject o=a.getJSONObject(i);s.append(o.optString("date")).append(",").append(o.optString("type")).append(",").append(o.optString("category")).append(",").append(o.optDouble("amount")).append(",").append(o.optString("note").replace(","," ")).append("\n");}}catch(Exception e){}
-        Intent in=new Intent(Intent.ACTION_SEND); in.setType("text/csv"); in.putExtra(Intent.EXTRA_TEXT,s.toString()); startActivity(Intent.createChooser(in,"Share CSV"));
+        try{for(int i=0;i<a.length();i++){
+            JSONObject o=a.getJSONObject(i);
+            s.append(o.optString("date")).append(",").append(o.optString("type")).append(",")
+             .append(o.optString("category")).append(",").append(o.optDouble("amount")).append(",")
+             .append(o.optString("note").replace(","," ")).append("\n");
+        }}catch(Exception e){}
+        Intent in=new Intent(Intent.ACTION_SEND); in.setType("text/csv"); in.putExtra(Intent.EXTRA_TEXT,s.toString());
+        startActivity(Intent.createChooser(in,"Share CSV"));
     }
 
-    void backup(){Intent in=new Intent(Intent.ACTION_CREATE_DOCUMENT); in.setType("application/json"); in.putExtra(Intent.EXTRA_TITLE,"paisa-laya-backup.json"); startActivityForResult(in,10);}
-    void restore(){Intent in=new Intent(Intent.ACTION_OPEN_DOCUMENT); in.setType("application/json"); in.addCategory(Intent.CATEGORY_OPENABLE); startActivityForResult(in,11);}
+    void backup(){
+        Intent in=new Intent(Intent.ACTION_CREATE_DOCUMENT); in.setType("application/json");
+        in.putExtra(Intent.EXTRA_TITLE,"paisa-laya-backup.json"); startActivityForResult(in,10);
+    }
+
+    void restore(){
+        Intent in=new Intent(Intent.ACTION_OPEN_DOCUMENT); in.setType("application/json");
+        in.addCategory(Intent.CATEGORY_OPENABLE); startActivityForResult(in,11);
+    }
 
     @Override protected void onActivityResult(int req,int res,Intent data){
-        super.onActivityResult(req,res,data); if(res!=RESULT_OK||data==null)return;
+        super.onActivityResult(req,res,data);
+        if(res!=RESULT_OK||data==null)return;
         try{
             if(req==10){
                 OutputStream out=getContentResolver().openOutputStream(data.getData());
                 JSONObject r=new JSONObject(); r.put("transactions",transactions()); r.put("dues",prefs.getString("dues",""));
-                out.write(r.toString().getBytes()); out.close(); Toast.makeText(this,"Backup saved",Toast.LENGTH_SHORT).show();
+                out.write(r.toString().getBytes()); out.close();
+                Toast.makeText(this,"Backup saved",Toast.LENGTH_SHORT).show();
             }else if(req==11){
-                InputStream in=getContentResolver().openInputStream(data.getData()); BufferedReader br=new BufferedReader(new InputStreamReader(in));
-                StringBuilder s=new StringBuilder(); String line; while((line=br.readLine())!=null)s.append(line); br.close();
+                InputStream in=getContentResolver().openInputStream(data.getData());
+                BufferedReader br=new BufferedReader(new InputStreamReader(in));
+                StringBuilder s=new StringBuilder(); String line;
+                while((line=br.readLine())!=null)s.append(line); br.close();
                 JSONObject r=new JSONObject(s.toString()); JSONArray restored=r.optJSONArray("transactions");
-                prefs.edit().putString(TX,restored==null?"[]":restored.toString()).putString("dues",r.optString("dues","")).apply(); showHome();
+                prefs.edit().putString(TX,restored==null?"[]":restored.toString()).putString("dues",r.optString("dues","")).apply();
+                showHome();
             }
         }catch(Exception e){Toast.makeText(this,"Could not process the file.",Toast.LENGTH_SHORT).show();}
     }
