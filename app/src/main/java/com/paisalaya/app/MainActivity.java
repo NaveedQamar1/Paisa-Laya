@@ -32,6 +32,7 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
         prefs=getSharedPreferences(PREF,0);
+        applyPreferencesTheme();
         getWindow().setStatusBarColor(GREEN_DARK);
         getWindow().setNavigationBarColor(BG);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
@@ -66,6 +67,8 @@ public class MainActivity extends Activity {
     void renderCurrent(){
         if(SCREEN_ADD.equals(currentScreen)) showAddWithType(pendingType);
         else if(SCREEN_PEOPLE.equals(currentScreen)) showPeople();
+        else if(SCREEN_TOOLS.equals(currentScreen)) showTools();
+        else if(SCREEN_SETTINGS.equals(currentScreen)) showSettings();
         else if(SCREEN_REPORTS.equals(currentScreen)) showReports();
         else showHome();
     }
