@@ -179,9 +179,9 @@ public class MainActivity extends Activity {
         n.setPadding(dp(6),dp(5),dp(6),dp(7));
         n.setBackground(bg(WHITE,28));
 
-        String[] icons={"⌂","+","♙","▣"};
-        String[] labels={"Home","Add","People","Reports"};
-        TextView[] items=new TextView[4];
+        String[] icons={"⌂","+","♙","↔","⚙"};
+        String[] labels={"Home","Add","People","Tools","Settings"};
+        TextView[] items=new TextView[5];
 
         for(int i=0;i<5;i++){
             TextView item=new TextView(this);
@@ -210,7 +210,8 @@ public class MainActivity extends Activity {
     int screenIndex(){
         if(SCREEN_ADD.equals(currentScreen))return 1;
         if(SCREEN_PEOPLE.equals(currentScreen))return 2;
-        if(SCREEN_REPORTS.equals(currentScreen))return 3;
+        if(SCREEN_TOOLS.equals(currentScreen))return 3;
+        if(SCREEN_SETTINGS.equals(currentScreen))return 4;
         return 0;
     }
 
@@ -441,6 +442,64 @@ public class MainActivity extends Activity {
             Intent i=new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://wa.me/"+phone.replace("+","")+"?text="+java.net.URLEncoder.encode(msg,"UTF-8")));
             startActivity(i);
         }catch(Exception e){Toast.makeText(this,"WhatsApp could not be opened.",Toast.LENGTH_SHORT).show();}
+    }
+
+    void showTools(){
+        currentScreen=SCREEN_TOOLS;
+        base("Tools","Currency conversion and gold-rate information.");
+        addWrap(sectionTitle("Currency converter"));
+        EditText amount=new EditText(this); fieldStyle(amount,"Amount",17); amount.setInputType(2|8192); addWrapMargin(amount,0,8);
+        Spinner from=new Spinner(this), to=new Spinner(this);
+        String[] currencies={"PKR","USD","AED","SAR","GBP","EUR","CAD","AUD","INR","JPY"};
+        ArrayAdapter<String> adapter=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,currencies);
+        from.setAdapter(adapter); to.setAdapter(adapter); from.setSelection(0); to.setSelection(1);
+        LinearLayout rr=row(); rr.addView(from,new LinearLayout.LayoutParams(0,dp(52),1));
+        LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(0,dp(52),1); tp.setMargins(dp(8),0,0,0); rr.addView(to,tp); addWrapMargin(rr,0,8);
+        TextView result=tv("Enter an amount and tap Convert.",15,MUTED,false); addWrapMargin(result,4,8);
+        Button convert=action("Convert"); convert.setTextColor(WHITE); convert.setBackground(bg(GREEN,22)); addWrapMargin(convert,0,14);
+        convert.setOnClickListener(v->{ try{ double a=Double.parseDouble(amount.getText().toString().trim()); String f=from.getSelectedItem().toString(), t=to.getSelectedItem().toString(); if(f.equals(t)){result.setText(String.format(Locale.US,"%.2f %s",a,t));return;} result.setText("Loading live rate…"); new Thread(()->{ try{ String json=httpGet("https://open.er-api.com/v6/latest/"+f); JSONObject rootJ=new JSONObject(json); double rate=rootJ.getJSONObject("rates").getDouble(t); double value=a*rate; runOnUiThread(()->result.setText(String.format(Locale.US,"%.2f %s = %.2f %s",a,f,value,t))); }catch(Exception e){runOnUiThread(()->result.setText("Could not load the live rate. Check your internet connection."));} }).start(); }catch(Exception e){result.setText("Please enter a valid amount.");} });
+        addWrap(sectionTitle("Gold rates in Pakistan"));
+        TextView gold=tv("Loading current gold rates…",14,MUTED,false); addWrapMargin(gold,0,8);
+        TextView source=tv("Source: goldrateinpakistan.org",12,MUTED,false); addWrapMargin(source,0,12);
+        Button refresh=action("Refresh gold rates"); addWrapMargin(refresh,0,10); refresh.setOnClickListener(v->loadGoldRates(gold));
+        TextView note=tv("Rates are indicative and may change during the day. 30-day chart data will be added when the source provides historical values.",12,MUTED,false); addWrap(note);
+        loadGoldRates(gold); nav();
+    }
+
+    void loadGoldRates(TextView target){
+        target.setText("Loading current gold rates…");
+        new Thread(()->{ try{ String json=httpGet("https://goldrateinpakistan.org/api/rates.json"); JSONObject j=new JSONObject(json); StringBuilder s=new StringBuilder(); s.append("24K: ").append(j.optString("24k",j.optString("24K","—"))).append("\n"); s.append("22K: ").append(j.optString("22k",j.optString("22K","—"))).append("\n"); s.append("21K: ").append(j.optString("21k",j.optString("21K","—"))).append("\n"); s.append("18K: ").append(j.optString("18k",j.optString("18K","—"))); runOnUiThread(()->target.setText(s.toString())); }catch(Exception e){runOnUiThread(()->target.setText("Gold-rate service is currently unavailable."));} }).start();
+    }
+
+    String httpGet(String address) throws Exception{
+        java.net.HttpURLConnection con=(java.net.HttpURLConnection)new java.net.URL(address).openConnection(); con.setConnectTimeout(8000); con.setReadTimeout(10000); con.setRequestMethod("GET"); con.setRequestProperty("User-Agent","PaisaLaya/1.0");
+        InputStream in=con.getInputStream(); BufferedReader br=new BufferedReader(new InputStreamReader(in)); StringBuilder s=new StringBuilder(); String line; while((line=br.readLine())!=null)s.append(line); br.close(); con.disconnect(); return s.toString();
+    }
+
+    void showSettings(){
+        currentScreen=SCREEN_SETTINGS;
+        base("Settings","Make Paisa Laya feel right for you.");
+        addWrap(sectionTitle("Appearance"));
+        Spinner theme=new Spinner(this); theme.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"System","Light","Dark"}));
+        String savedTheme=prefs.getString("theme","System"); theme.setSelection(savedTheme.equals("Light")?1:savedTheme.equals("Dark")?2:0); addWrapMargin(theme,0,10);
+        theme.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){} public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){String val=pos==1?"Light":pos==2?"Dark":"System"; if(!prefs.getString("theme","System").equals(val)){prefs.edit().putString("theme",val).apply();applyPreferencesTheme();renderCurrent();}}});
+        Spinner accent=new Spinner(this); accent.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Green","Blue","Purple","Gold"})); String ac=prefs.getString("accent","Green"); accent.setSelection(ac.equals("Blue")?1:ac.equals("Purple")?2:ac.equals("Gold")?3:0); addWrapMargin(accent,0,10);
+        accent.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){} public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){String val=new String[]{"Green","Blue","Purple","Gold"}[pos]; if(!prefs.getString("accent","Green").equals(val)){prefs.edit().putString("accent",val).apply();applyPreferencesTheme();renderCurrent();}}});
+        addWrap(sectionTitle("Default currency"));
+        Spinner currency=new Spinner(this); String[] cs={"PKR","USD","AED","SAR","GBP","EUR"}; currency.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,cs)); String dc=prefs.getString("currency","PKR"); for(int i=0;i<cs.length;i++)if(cs[i].equals(dc))currency.setSelection(i); addWrapMargin(currency,0,12);
+        currency.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){} public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){prefs.edit().putString("currency",cs[pos]).apply();}});
+        addWrap(sectionTitle("Data & reminders"));
+        Button reports=action("Reports & Backup"); addWrapMargin(reports,0,8); reports.setOnClickListener(v->showReports());
+        Button wa=action("WhatsApp reminders"); addWrapMargin(wa,0,8); wa.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("WhatsApp reminders").setMessage("In People & Dues, save a WhatsApp number and tap WhatsApp to open a ready-made reminder. Paisa Laya never sends messages automatically.").setPositiveButton("OK",null).show());
+        Button about=action("About Paisa Laya"); addWrapMargin(about,0,8); about.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Paisa Laya").setMessage("Simple personal money tracking, dues, currency conversion and gold-rate tools. Your transaction data is stored locally on this device.").setPositiveButton("OK",null).show());
+        addWrap(tv("Tip: create a JSON backup before changing phones.",12,MUTED,false)); nav();
+    }
+
+    void applyPreferencesTheme(){
+        String theme=prefs.getString("theme","System"); boolean dark=theme.equals("Dark"); if(theme.equals("System")) dark=(getResources().getConfiguration().uiMode&Configuration.UI_MODE_NIGHT_MASK)==Configuration.UI_MODE_NIGHT_YES;
+        BG=dark?Color.rgb(20,24,22):Color.rgb(246,248,244); INK=dark?Color.WHITE:Color.rgb(25,35,29); WHITE=dark?Color.rgb(38,44,41):Color.WHITE; MUTED=dark?Color.rgb(180,190,184):Color.rgb(92,105,96);
+        String a=prefs.getString("accent","Green"); if(a.equals("Blue")){GREEN=Color.rgb(43,105,190);GREEN_DARK=Color.rgb(26,72,135);MINT=dark?Color.rgb(35,55,80):Color.rgb(226,238,255);} else if(a.equals("Purple")){GREEN=Color.rgb(117,76,170);GREEN_DARK=Color.rgb(78,48,115);MINT=dark?Color.rgb(61,47,77):Color.rgb(239,229,252);} else if(a.equals("Gold")){GREEN=Color.rgb(184,132,36);GREEN_DARK=Color.rgb(119,83,19);MINT=dark?Color.rgb(70,59,34):Color.rgb(250,241,215);} else {GREEN=Color.rgb(36,132,83);GREEN_DARK=Color.rgb(18,92,57);MINT=dark?Color.rgb(38,67,50):Color.rgb(224,246,232);}
+        getWindow().setStatusBarColor(GREEN_DARK); getWindow().setNavigationBarColor(BG); getWindow().getDecorView().setSystemUiVisibility(dark?0:View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
     }
 
     void showReports(){
