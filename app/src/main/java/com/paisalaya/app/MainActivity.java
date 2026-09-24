@@ -16,16 +16,16 @@ import java.util.*;
 
 public class MainActivity extends Activity {
     static final String PREF="paisa_laya", TX="transactions";
-    static final String SCREEN_HOME="home", SCREEN_ADD="add", SCREEN_PEOPLE="people", SCREEN_REPORTS="reports";
+    static final String SCREEN_HOME="home", SCREEN_ADD="add", SCREEN_PEOPLE="people", SCREEN_TOOLS="tools", SCREEN_REPORTS="reports", SCREEN_SETTINGS="settings";
 
     LinearLayout root, content;
     SharedPreferences prefs;
     String currentScreen=SCREEN_HOME;
     String pendingType="Expense";
 
-    final int BG=Color.rgb(246,248,244), INK=Color.rgb(25,35,29), GREEN=Color.rgb(36,132,83);
-    final int GREEN_DARK=Color.rgb(18,92,57), MINT=Color.rgb(224,246,232), RED=Color.rgb(216,76,76);
-    final int GOLD=Color.rgb(238,174,65), MUTED=Color.rgb(92,105,96), WHITE=Color.WHITE;
+    int BG=Color.rgb(246,248,244), INK=Color.rgb(25,35,29), GREEN=Color.rgb(36,132,83);
+    int GREEN_DARK=Color.rgb(18,92,57), MINT=Color.rgb(224,246,232), RED=Color.rgb(216,76,76);
+    int GOLD=Color.rgb(238,174,65), MUTED=Color.rgb(92,105,96), WHITE=Color.WHITE;
 
     int dp(float v){return (int)(v*getResources().getDisplayMetrics().density+0.5f);}
 
@@ -183,7 +183,7 @@ public class MainActivity extends Activity {
         String[] labels={"Home","Add","People","Reports"};
         TextView[] items=new TextView[4];
 
-        for(int i=0;i<4;i++){
+        for(int i=0;i<5;i++){
             TextView item=new TextView(this);
             item.setText(icons[i]+"\n"+labels[i]);
             item.setTextSize(12);
@@ -202,7 +202,7 @@ public class MainActivity extends Activity {
         items[0].setOnClickListener(v->showHome());
         items[1].setOnClickListener(v->showAdd());
         items[2].setOnClickListener(v->showPeople());
-        items[3].setOnClickListener(v->showReports());
+        items[3].setOnClickListener(v->showTools());\n        items[4].setOnClickListener(v->showSettings());
         root.addView(n,new LinearLayout.LayoutParams(-1,dp(72)));
     }
 
@@ -386,32 +386,60 @@ public class MainActivity extends Activity {
         v=content.findViewWithTag("note"); if(v instanceof EditText)((EditText)v).setText(note);
     }
 
+
     void showPeople(){
         currentScreen=SCREEN_PEOPLE;
         base("People & Dues","Keep track of borrowed and owed money.");
         addWrapMargin(tv("Add someone you owe or who owes you.",13,MUTED,false),0,10);
         EditText name=new EditText(this); fieldStyle(name,"Person's name",17); addWrapMargin(name,0,10);
         EditText amount=new EditText(this); fieldStyle(amount,"Amount in PKR",17); amount.setInputType(2|8192); addWrapMargin(amount,0,10);
-        Spinner kind=new Spinner(this);
-        kind.setPadding(dp(12),0,dp(8),0); kind.setBackground(bg(WHITE,20));
+        Spinner kind=new Spinner(this); kind.setPadding(dp(12),0,dp(8),0); kind.setBackground(bg(WHITE,20));
         kind.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"They owe me","I owe them"})); addWrapMargin(kind,0,10);
+        EditText phone=new EditText(this); fieldStyle(phone,"WhatsApp number (e.g. +923001234567)",15); phone.setInputType(3); addWrapMargin(phone,0,10);
         EditText note=new EditText(this); fieldStyle(note,"Note (optional)",17); addWrapMargin(note,0,12);
         Button add=action("Add person  ＋"); addWrapMargin(add,0,12);
-
-        TextView listTitle=sectionTitle("Saved people"); addWrap(listTitle);
-        TextView list=tv("",14,INK,false);
-        String saved=prefs.getString("dues","");
-        if(saved.isEmpty()) list.setText("No people added yet.");
-        else list.setText(saved);
-        addWrapMargin(list,0,8);
-
+        addWrap(sectionTitle("Saved people"));
+        LinearLayout listBox=box(WHITE,14); addWrapMargin(listBox,0,8);
+        String saved=prefs.getString("dues_json","[]"); JSONArray people=new JSONArray(); try{people=new JSONArray(saved);}catch(Exception ignored){}
+        if(people.length()==0) listBox.addView(tv("No people added yet.",13,MUTED,false));
+        for(int i=0;i<people.length();i++) addPersonCard(listBox,people.optJSONObject(i),i);
+        JSONArray initialPeople=people;
         add.setOnClickListener(v->{
-            if(name.getText().toString().trim().isEmpty()){Toast.makeText(this,"Enter a person's name.",Toast.LENGTH_SHORT).show();return;}
-            String line="• "+name.getText()+"  —  "+kind.getSelectedItem()+"  —  PKR "+amount.getText()+"  —  "+note.getText()+"\n";
-            String all=prefs.getString("dues","")+line; prefs.edit().putString("dues",all).apply();
-            list.setText(all); name.setText(""); amount.setText(""); note.setText("");
+            String n=name.getText().toString().trim(), am=amount.getText().toString().trim();
+            if(n.isEmpty()||am.isEmpty()){Toast.makeText(this,"Enter a name and amount.",Toast.LENGTH_SHORT).show();return;}
+            try{
+                JSONArray a; try{a=new JSONArray(prefs.getString("dues_json","[]"));}catch(Exception e){a=new JSONArray();}
+                JSONObject o=new JSONObject();o.put("name",n);o.put("amount",Double.parseDouble(am));o.put("kind",kind.getSelectedItem().toString());o.put("phone",phone.getText().toString().trim());o.put("note",note.getText().toString().trim());a.put(o);
+                prefs.edit().putString("dues_json",a.toString()).apply(); showPeople();
+            }catch(Exception e){Toast.makeText(this,"Please enter a valid amount.",Toast.LENGTH_SHORT).show();}
         });
         nav();
+    }
+
+    void addPersonCard(LinearLayout parent,JSONObject o,int index){
+        LinearLayout card=box(MINT,12);
+        LinearLayout r=row();
+        LinearLayout info=new LinearLayout(this);info.setOrientation(LinearLayout.VERTICAL);
+        String kind=o.optString("kind","They owe me"); int col=kind.startsWith("They")?GREEN:RED;
+        info.addView(tv(o.optString("name","Person"),16,INK,true));
+        info.addView(tv(kind+"  •  "+money(o.optDouble("amount"))+(o.optString("note").isEmpty()?"":"  •  "+o.optString("note")),12,MUTED,false));
+        r.addView(info,new LinearLayout.LayoutParams(0,-2,1));
+        Button wa=action("WhatsApp");wa.setTextSize(12);wa.setTextColor(GREEN);r.addView(wa,new LinearLayout.LayoutParams(dp(96),dp(44)));
+        card.addView(r);
+        wa.setOnClickListener(v->whatsappReminder(o));
+        parent.addView(card,new LinearLayout.LayoutParams(-1,-2));
+        if(index<999)parent.addView(new Space(this),new LinearLayout.LayoutParams(1,dp(7)));
+    }
+
+    void whatsappReminder(JSONObject o){
+        String phone=o.optString("phone","").replaceAll("[^0-9+]","");
+        if(phone.isEmpty()){Toast.makeText(this,"Add a WhatsApp number for this person first.",Toast.LENGTH_SHORT).show();return;}
+        String name=o.optString("name","there"), amount=money(o.optDouble("amount")); boolean theyOwe=o.optString("kind","").startsWith("They");
+        String msg=theyOwe?"Hi "+name+", just a friendly reminder about the "+amount+" pending amount. Please let me know when you expect to settle it. Thank you!":"Hi "+name+", just a friendly reminder regarding the "+amount+" I need to settle with you. Please let me know if anything is needed from my side. Thank you!";
+        try{
+            Intent i=new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://wa.me/"+phone.replace("+","")+"?text="+java.net.URLEncoder.encode(msg,"UTF-8")));
+            startActivity(i);
+        }catch(Exception e){Toast.makeText(this,"WhatsApp could not be opened.",Toast.LENGTH_SHORT).show();}
     }
 
     void showReports(){
