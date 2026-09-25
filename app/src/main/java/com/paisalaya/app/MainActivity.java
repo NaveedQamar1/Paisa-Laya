@@ -1276,7 +1276,7 @@ public class MainActivity extends Activity {
 
         Button reports=action("Reports & Backup"); addWrapMargin(reports,0,8); reports.setOnClickListener(v->showReports());
         Button wa=action("WhatsApp reminders"); addWrapMargin(wa,0,8); wa.setOnClickListener(v->new AlertDialog.Builder(this,isDarkMode()?AlertDialog.THEME_DEVICE_DEFAULT_DARK:AlertDialog.THEME_DEVICE_DEFAULT_LIGHT).setTitle("WhatsApp reminders").setMessage("In People & Dues, choose a person from your phone contacts and tap WhatsApp to prepare a ready-made reminder. Paisa Laya never sends messages automatically.").setPositiveButton("OK",null).show());
-        Button about=action("About Paisa Laya"); addWrapMargin(about,0,8); about.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Paisa Laya").setMessage("Simple personal money tracking, dues, currency conversion and gold-rate tools. Your transaction data is stored locally on this device.").setPositiveButton("OK",null).show());
+        Button about=action("About Paisa Laya"); addWrapMargin(about,0,8); about.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Paisa Laya").setMessage("Simple personal money tracking, dues, currency conversion and gold-rate tools. Your transaction data is stored locally on this device unless you enable Google account sync. When enabled, Paisa Laya stores its sync data in Google Drive's private app-data area for the authorized Google account. PDF invoices are created on your device and are only shared when you choose to share them.").setPositiveButton("OK",null).show());
         addWrap(tv("Tip: create a JSON backup before changing phones.",12,MUTED,false)); nav();
     }
 
@@ -1304,7 +1304,7 @@ public class MainActivity extends Activity {
 
         LinearLayout info=box(MINT,16);
         info.addView(tv("Your data stays on this device",15,GREEN,true));
-        info.addView(tv("Use JSON backup to move your Paisa Laya data to another phone.",12,INK,false));
+        info.addView(tv("Use JSON backup to move your Paisa Laya data to another phone. PDF invoices can be created from each person's record.",12,INK,false));
         addWrapMargin(info,0,12);
 
         Button clear=action("Clear all transactions");
