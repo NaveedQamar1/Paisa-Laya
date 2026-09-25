@@ -13,6 +13,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -35,13 +38,23 @@ jobs:
         with:
           gradle-version: "8.10"
 
-      - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+      - name: Clean build
+        run: gradle clean --stacktrace
+
+      - name: Build debug APK without build cache
+        run: gradle assembleDebug --no-build-cache --stacktrace
+
+      - name: Verify APK contents
+        run: |
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "People & Dues"
+          unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "Currency converter"
+          unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "24K gold only"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Paisa-Laya-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-
-# Build verification trigger
+          if-no-files-found: error
+          retention-days: 30
