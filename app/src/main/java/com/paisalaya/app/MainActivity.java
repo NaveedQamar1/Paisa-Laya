@@ -22,6 +22,8 @@ public class MainActivity extends Activity {
     SharedPreferences prefs;
     String currentScreen=SCREEN_HOME;
     String pendingType="Expense";
+    final ArrayDeque<String> screenHistory=new ArrayDeque<>();
+    boolean renderingScreen=false;
 
     int BG=Color.rgb(246,248,244), INK=Color.rgb(25,35,29), GREEN=Color.rgb(36,132,83);
     int GREEN_DARK=Color.rgb(18,92,57), MINT=Color.rgb(224,246,232), RED=Color.rgb(216,76,76);
@@ -65,12 +67,66 @@ public class MainActivity extends Activity {
     }
 
     void renderCurrent(){
+        renderingScreen=true;
         if(SCREEN_ADD.equals(currentScreen)) showAddWithType(pendingType);
         else if(SCREEN_PEOPLE.equals(currentScreen)) showPeople();
         else if(SCREEN_TOOLS.equals(currentScreen)) showTools();
         else if(SCREEN_SETTINGS.equals(currentScreen)) showSettings();
         else if(SCREEN_REPORTS.equals(currentScreen)) showReports();
         else showHome();
+        renderingScreen=false;
+    }
+
+    void recordNavigation(String target){
+        if(!target.equals(currentScreen) && !renderingScreen) screenHistory.push(currentScreen);
+        currentScreen=target;
+    }
+
+    boolean isDarkMode(){
+        String theme=prefs.getString("theme","System");
+        if(theme.equals("Dark")) return true;
+        if(theme.equals("Light")) return false;
+        return (getResources().getConfiguration().uiMode&Configuration.UI_MODE_NIGHT_MASK)==Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    ArrayAdapter<String> spinnerAdapter(String[] values){
+        return new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,values){
+            TextView style(TextView v){
+                v.setTextColor(INK); v.setTextSize(15); v.setGravity(Gravity.CENTER_VERTICAL);
+                v.setPadding(dp(12),0,dp(12),0); v.setBackgroundColor(WHITE); return v;
+            }
+            @Override public View getView(int position,View convertView,android.view.ViewGroup parent){
+                TextView v=(TextView)super.getView(position,convertView,parent); return style(v);
+            }
+            @Override public View getDropDownView(int position,View convertView,android.view.ViewGroup parent){
+                TextView v=(TextView)super.getDropDownView(position,convertView,parent); return style(v);
+            }
+        };
+    }
+
+    @Override public void onBackPressed(){
+        if(isKeyboardVisible()){
+            ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(getWindow().getDecorView().getWindowToken(),0);
+            View focused=getCurrentFocus(); if(focused!=null) focused.clearFocus();
+            return;
+        }
+        if(!screenHistory.isEmpty()){
+            currentScreen=screenHistory.pop();
+            renderCurrent();
+            return;
+        }
+        new AlertDialog.Builder(this,isDarkMode()?AlertDialog.THEME_DEVICE_DEFAULT_DARK:AlertDialog.THEME_DEVICE_DEFAULT_LIGHT)
+            .setTitle("Exit Paisa Laya?")
+            .setMessage("Are you sure you want to close the app?")
+            .setNegativeButton("Stay",null)
+            .setPositiveButton("Exit",(d,w)->finish())
+            .show();
+    }
+
+    boolean isKeyboardVisible(){
+        View decor=getWindow().getDecorView();
+        Rect r=new Rect(); decor.getWindowVisibleDisplayFrame(r);
+        return decor.getHeight()-r.bottom>dp(180);
     }
 
     @Override public void onConfigurationChanged(Configuration c){
@@ -121,7 +177,7 @@ public class MainActivity extends Activity {
     }
 
     void fieldStyle(EditText e,String hint,float size){
-        e.setHint(hint); e.setTextSize(size); e.setSingleLine(true);
+        e.setHint(hint); e.setTextSize(size); e.setSingleLine(true); e.setTextColor(INK); e.setHintTextColor(MUTED);
         e.setPadding(dp(18),0,dp(18),0); e.setBackground(bg(WHITE,20));
         e.setGravity(Gravity.CENTER_VERTICAL);
         e.setMinHeight(dp(56));
@@ -236,6 +292,7 @@ public class MainActivity extends Activity {
     String money(double x){return String.format(Locale.US,"PKR %,.0f",x);}
 
     void showHome(){
+        recordNavigation(SCREEN_HOME);
         currentScreen=SCREEN_HOME;
         base("Paisa Laya","Your money, beautifully organized.");
         double[] t=totals(); double balance=t[0]-t[1];
@@ -347,6 +404,7 @@ public class MainActivity extends Activity {
     void showAdd(){showAddWithType("Expense");}
 
     void showAddWithType(String defaultType){
+        recordNavigation(SCREEN_ADD);
         currentScreen=SCREEN_ADD; pendingType=defaultType;
         base("New transaction","Record money in seconds.");
         TextView amountLabel=tv("Amount",13,INK,true); addWrapMargin(amountLabel,0,5);
@@ -355,7 +413,7 @@ public class MainActivity extends Activity {
         TextView typeLabel=tv("Transaction type",13,INK,true); addWrapMargin(typeLabel,0,5);
         Spinner type=new Spinner(this);
         type.setPadding(dp(12),0,dp(8),0); type.setBackground(bg(WHITE,20));
-        type.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Expense","Income"}));
+        type.setAdapter(spinnerAdapter(new String[]{"Expense","Income"}));
         type.setSelection("Income".equals(defaultType)?1:0); addWrapMargin(type,0,10);
 
         TextView catLabel=tv("Category",13,INK,true); addWrapMargin(catLabel,0,5);
@@ -393,13 +451,14 @@ public class MainActivity extends Activity {
 
 
     void showPeople(){
+        recordNavigation(SCREEN_PEOPLE);
         currentScreen=SCREEN_PEOPLE;
         base("People & Dues","Keep track of borrowed and owed money.");
         addWrapMargin(tv("Add someone you owe or who owes you.",13,MUTED,false),0,10);
         EditText name=new EditText(this); fieldStyle(name,"Person's name",17); addWrapMargin(name,0,10);
         EditText amount=new EditText(this); fieldStyle(amount,"Amount in PKR",17); amount.setInputType(2|8192); addWrapMargin(amount,0,10);
         Spinner kind=new Spinner(this); kind.setPadding(dp(12),0,dp(8),0); kind.setBackground(bg(WHITE,20));
-        kind.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"They owe me","I owe them"})); addWrapMargin(kind,0,10);
+        kind.setAdapter(spinnerAdapter(new String[]{"They owe me","I owe them"})); addWrapMargin(kind,0,10);
         EditText phone=new EditText(this); fieldStyle(phone,"WhatsApp number (e.g. +923001234567)",15); phone.setInputType(3); addWrapMargin(phone,0,10);
         EditText note=new EditText(this); fieldStyle(note,"Note (optional)",17); addWrapMargin(note,0,12);
         Button add=action("Add person  ＋"); addWrapMargin(add,0,12);
@@ -448,6 +507,7 @@ public class MainActivity extends Activity {
     }
 
     void showTools(){
+        recordNavigation(SCREEN_TOOLS);
         currentScreen=SCREEN_TOOLS;
         base("Tools","Currency conversion and gold-rate information.");
         addWrap(sectionTitle("Currency converter"));
@@ -500,20 +560,21 @@ public class MainActivity extends Activity {
     }
 
     void showSettings(){
+        recordNavigation(SCREEN_SETTINGS);
         currentScreen=SCREEN_SETTINGS;
         base("Settings","Make Paisa Laya feel right for you.");
         addWrap(sectionTitle("Appearance"));
-        Spinner theme=new Spinner(this); theme.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"System","Light","Dark"}));
+        Spinner theme=new Spinner(this); theme.setAdapter(spinnerAdapter(new String[]{"System","Light","Dark"}));
         String savedTheme=prefs.getString("theme","System"); theme.setSelection(savedTheme.equals("Light")?1:savedTheme.equals("Dark")?2:0); addWrapMargin(theme,0,10);
         theme.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){} public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){String val=pos==1?"Light":pos==2?"Dark":"System"; if(!prefs.getString("theme","System").equals(val)){prefs.edit().putString("theme",val).apply();applyPreferencesTheme();renderCurrent();}}});
-        Spinner accent=new Spinner(this); accent.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Green","Blue","Purple","Gold"})); String ac=prefs.getString("accent","Green"); accent.setSelection(ac.equals("Blue")?1:ac.equals("Purple")?2:ac.equals("Gold")?3:0); addWrapMargin(accent,0,10);
+        Spinner accent=new Spinner(this); accent.setAdapter(spinnerAdapter(new String[]{"Green","Blue","Purple","Gold"})); String ac=prefs.getString("accent","Green"); accent.setSelection(ac.equals("Blue")?1:ac.equals("Purple")?2:ac.equals("Gold")?3:0); addWrapMargin(accent,0,10);
         accent.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){} public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){String val=new String[]{"Green","Blue","Purple","Gold"}[pos]; if(!prefs.getString("accent","Green").equals(val)){prefs.edit().putString("accent",val).apply();applyPreferencesTheme();renderCurrent();}}});
         addWrap(sectionTitle("Default currency"));
-        Spinner currency=new Spinner(this); String[] cs={"PKR","USD","AED","SAR","GBP","EUR"}; currency.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,cs)); String dc=prefs.getString("currency","PKR"); for(int i=0;i<cs.length;i++)if(cs[i].equals(dc))currency.setSelection(i); addWrapMargin(currency,0,12);
+        Spinner currency=new Spinner(this); String[] cs={"PKR","USD","AED","SAR","GBP","EUR"}; currency.setAdapter(spinnerAdapter(cs)); String dc=prefs.getString("currency","PKR"); for(int i=0;i<cs.length;i++)if(cs[i].equals(dc))currency.setSelection(i); addWrapMargin(currency,0,12);
         currency.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){} public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){prefs.edit().putString("currency",cs[pos]).apply();}});
         addWrap(sectionTitle("Data & reminders"));
         Button reports=action("Reports & Backup"); addWrapMargin(reports,0,8); reports.setOnClickListener(v->showReports());
-        Button wa=action("WhatsApp reminders"); addWrapMargin(wa,0,8); wa.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("WhatsApp reminders").setMessage("In People & Dues, save a WhatsApp number and tap WhatsApp to open a ready-made reminder. Paisa Laya never sends messages automatically.").setPositiveButton("OK",null).show());
+        Button wa=action("WhatsApp reminders"); addWrapMargin(wa,0,8); wa.setOnClickListener(v->new AlertDialog.Builder(this,isDarkMode()?AlertDialog.THEME_DEVICE_DEFAULT_DARK:AlertDialog.THEME_DEVICE_DEFAULT_LIGHT).setTitle("WhatsApp reminders").setMessage("In People & Dues, save a WhatsApp number and tap WhatsApp to open a ready-made reminder. Paisa Laya never sends messages automatically.").setPositiveButton("OK",null).show());
         Button about=action("About Paisa Laya"); addWrapMargin(about,0,8); about.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Paisa Laya").setMessage("Simple personal money tracking, dues, currency conversion and gold-rate tools. Your transaction data is stored locally on this device.").setPositiveButton("OK",null).show());
         addWrap(tv("Tip: create a JSON backup before changing phones.",12,MUTED,false)); nav();
     }
@@ -526,6 +587,7 @@ public class MainActivity extends Activity {
     }
 
     void showReports(){
+        recordNavigation(SCREEN_REPORTS);
         currentScreen=SCREEN_REPORTS;
         base("Reports & Backup","Export, back up, or manage your data.");
         LinearLayout c=box(WHITE,17);
