@@ -743,16 +743,12 @@ public class MainActivity extends Activity {
             JSONObject j=new JSONObject(json), gold=j.optJSONObject("gold"), rate=gold==null?null:gold.optJSONObject("24k");
             if(rate==null)throw new Exception("24K data missing");
             double value=rate.optDouble("per_tola",Double.NaN); if(Double.isNaN(value))throw new Exception("24K rate missing");
-            String text="24K gold"; String amount="Rs "+String.format(Locale.US,"%,.0f",value);
+            String amount="Rs "+String.format(Locale.US,"%,.0f",value);
             String updated=j.optString("updated_at","");
             if(!updated.isEmpty())amount+=" • "+updated;
-            runOnUiThread(()->{
-                target.setText("");
-                View p=(View)target.getParent();
-                if(p instanceof LinearLayout)((LinearLayout)p).addView(tv(text,13,INK,true),0);
-                target.setText(amount);
-            });
-        }catch(Exception e){runOnUiThread(()->target.setText("24K gold rate unavailable. Tap Refresh to try again."));}});
+            final String displayAmount=amount;
+            runOnUiThread(()->target.setText(displayAmount));
+        }catch(Exception e){runOnUiThread(()->target.setText("24K gold rate unavailable. Tap Refresh to try again."));}}).start();
     }
 
     String httpGet(String address) throws Exception{
