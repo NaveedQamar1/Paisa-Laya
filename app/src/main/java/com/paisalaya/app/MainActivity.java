@@ -946,6 +946,7 @@ public class MainActivity extends Activity {
     }
 
     void loadGoldRates(TextView target,TextView tenGram,TextView oneGram,TextView meta){
+        target.setContentDescription("24K gold only");
         target.setText("Loading…"); tenGram.setText("—"); oneGram.setText("—"); meta.setText("Per tola • latest available");
         new Thread(()->{try{
             String json=httpGet("https://goldrateinpakistan.org/api/rates.json");
