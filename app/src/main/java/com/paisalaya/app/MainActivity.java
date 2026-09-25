@@ -392,7 +392,28 @@ public class MainActivity extends Activity {
         items[2].setOnClickListener(v->{screenHistory.clear();showPeople();});
         items[3].setOnClickListener(v->{screenHistory.clear();showTools();});
         items[4].setOnClickListener(v->{screenHistory.clear();showSettings();});
-        root.addView(n,new LinearLayout.LayoutParams(-1,dp(72)));
+        // Android 15+ uses edge-to-edge, so the system navigation area can overlap this
+        // custom bottom navigation bar. Keep the tabs above both gesture and 3-button
+        // navigation areas by applying the current navigation-bar inset.
+        LinearLayout.LayoutParams navParams=new LinearLayout.LayoutParams(-1,dp(72));
+        n.setPadding(dp(6),dp(5),dp(6),dp(7));
+        n.setOnApplyWindowInsetsListener((v,insets)->{
+            int bottomInset;
+            if(Build.VERSION.SDK_INT>=30){
+                bottomInset=insets.getInsets(WindowInsets.Type.navigationBars()).bottom;
+            }else{
+                bottomInset=insets.getSystemWindowInsetBottom();
+            }
+            n.setPadding(dp(6),dp(5),dp(6),dp(7)+bottomInset);
+            LinearLayout.LayoutParams lp=(LinearLayout.LayoutParams)n.getLayoutParams();
+            if(lp!=null){
+                lp.height=dp(72)+bottomInset;
+                n.setLayoutParams(lp);
+            }
+            return insets;
+        });
+        root.addView(n,navParams);
+        n.requestApplyInsets();
     }
 
     int screenIndex(){
