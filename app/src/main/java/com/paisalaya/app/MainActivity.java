@@ -11,6 +11,10 @@ import android.view.inputmethod.InputMethodManager;
 import android.provider.ContactsContract;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
+import android.os.Build;
+import android.hardware.biometrics.BiometricPrompt;
+import android.security.keystore.KeyProperties;
+import android.view.Window;
 import android.widget.*;
 import org.json.*;
 import java.io.*;
@@ -27,6 +31,7 @@ public class MainActivity extends Activity {
     String pendingType="Expense";
     final ArrayDeque<String> screenHistory=new ArrayDeque<>();
     boolean renderingScreen=false;
+    boolean unlockedThisLaunch=false;
 
     int BG=Color.rgb(246,248,244), INK=Color.rgb(25,35,29), GREEN=Color.rgb(36,132,83);
     int GREEN_DARK=Color.rgb(18,92,57), MINT=Color.rgb(224,246,232), RED=Color.rgb(216,76,76);
@@ -76,7 +81,8 @@ public class MainActivity extends Activity {
         sub.animate().alpha(1f).setStartDelay(420).setDuration(420).start();
 
         welcome.postDelayed(()->{
-            renderCurrent();
+            if(state==null && isLockEnabled() && !unlockedThisLaunch) showLockScreen();
+            else renderCurrent();
             if(state!=null && SCREEN_ADD.equals(currentScreen)){
                 final String amount=state.getString("amount","");
                 final String category=state.getString("category","");
@@ -98,6 +104,60 @@ public class MainActivity extends Activity {
             if(v instanceof EditText) out.putString("note",((EditText)v).getText().toString());
         }
         super.onSaveInstanceState(out);
+    }
+
+    boolean isLockEnabled(){ return prefs.getBoolean("app_lock",false) && !prefs.getString("lock_pin_hash","").isEmpty(); }
+
+    String hashPin(String pin){
+        try{
+            java.security.MessageDigest md=java.security.MessageDigest.getInstance("SHA-256");
+            byte[] b=md.digest(pin.getBytes("UTF-8")); StringBuilder s=new StringBuilder();
+            for(byte x:b)s.append(String.format(Locale.US,"%02x",x)); return s.toString();
+        }catch(Exception e){return "";}
+    }
+
+    boolean verifyPin(String pin){ return hashPin(pin).equals(prefs.getString("lock_pin_hash","")); }
+
+    void setupPin(boolean enabling){
+        final EditText p1=new EditText(this); fieldStyle(p1,"Enter 4–8 digit PIN",17); p1.setInputType(2|16);
+        final EditText p2=new EditText(this); fieldStyle(p2,"Confirm PIN",17); p2.setInputType(2|16);
+        LinearLayout box=new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL); box.setPadding(dp(4),dp(4),dp(4),0); box.addView(p1); box.addView(p2,new LinearLayout.LayoutParams(-1,dp(56)));
+        dialogBuilder().setTitle(enabling?"Set app lock PIN":"Change app lock PIN").setView(box)
+            .setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();
+        final AlertDialog d=dialogBuilder().setTitle(enabling?"Set app lock PIN":"Change app lock PIN").setView(box).setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();
+        d.setOnShowListener(x->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String a=p1.getText().toString().trim(), b=p2.getText().toString().trim();
+            if(!a.matches("\\d{4,8}") || !a.equals(b)){ Toast.makeText(this,"Enter matching 4–8 digit PINs.",Toast.LENGTH_SHORT).show(); return; }
+            prefs.edit().putBoolean("app_lock",true).putString("lock_pin_hash",hashPin(a)).apply();
+            feedback("App lock enabled",ToneGenerator.TONE_PROP_ACK); d.dismiss(); renderCurrent();
+        })); d.show();
+    }
+
+    void showLockScreen(){
+        LinearLayout lock=new LinearLayout(this); lock.setOrientation(LinearLayout.VERTICAL); lock.setGravity(Gravity.CENTER); lock.setPadding(dp(28),dp(28),dp(28),dp(28)); lock.setBackgroundColor(BG);
+        TextView mark=tv("₨",42,WHITE,true); mark.setGravity(Gravity.CENTER); mark.setBackground(bg(GREEN,34)); lock.addView(mark,new LinearLayout.LayoutParams(dp(78),dp(78)));
+        TextView title=tv("Paisa Laya is locked",25,INK,true); title.setGravity(Gravity.CENTER); lock.addView(title,new LinearLayout.LayoutParams(-1,-2));
+        TextView sub=tv("Enter your PIN to continue.",14,MUTED,false); sub.setGravity(Gravity.CENTER); lock.addView(sub);
+        EditText pin=new EditText(this); fieldStyle(pin,"PIN",20); pin.setInputType(2|16); pin.setGravity(Gravity.CENTER); lock.addView(pin,new LinearLayout.LayoutParams(-1,dp(56)));
+        Button unlock=action("Unlock"); unlock.setTextColor(WHITE); unlock.setBackground(bg(GREEN,22)); lock.addView(unlock,new LinearLayout.LayoutParams(-1,dp(52)));
+        Button biometric=action("Use biometric / device security"); biometric.setTextColor(GREEN); biometric.setBackground(strokeBg(WHITE,GREEN,22));
+        if(Build.VERSION.SDK_INT>=28){ lock.addView(biometric,new LinearLayout.LayoutParams(-1,dp(52))); biometric.setOnClickListener(v->authenticateBiometric()); } else biometric.setVisibility(View.GONE);
+        TextView error=tv("",13,RED,false); error.setGravity(Gravity.CENTER); lock.addView(error);
+        setContentView(lock);
+        unlock.setOnClickListener(v->{ if(verifyPin(pin.getText().toString())){ unlockedThisLaunch=true; feedback("Unlocked",ToneGenerator.TONE_PROP_ACK); renderCurrent(); } else error.setText("Incorrect PIN. Please try again."); });
+        pin.requestFocus();
+    }
+
+    void authenticateBiometric(){
+        if(Build.VERSION.SDK_INT<28)return;
+        try{
+            BiometricPrompt prompt=new BiometricPrompt.Builder(this).setTitle("Unlock Paisa Laya").setSubtitle("Use your biometric or device screen lock").setDescription("Your financial data stays protected on this device.").setNegativeButton("Use PIN",getMainExecutor(),(d,w)->{}).build();
+            prompt.authenticate(new BiometricPrompt.CryptoObject((javax.crypto.Cipher)null),getMainExecutor(),new BiometricPrompt.AuthenticationCallback(){
+                @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result){ runOnUiThread(()->{unlockedThisLaunch=true; feedback("Unlocked",ToneGenerator.TONE_PROP_ACK); renderCurrent();}); }
+                @Override public void onAuthenticationError(int code,CharSequence msg){ }
+                @Override public void onAuthenticationFailed(){ Toast.makeText(MainActivity.this,"Biometric not recognized.",Toast.LENGTH_SHORT).show(); }
+            });
+        }catch(Exception e){ Toast.makeText(this,"Biometric security is not available. Use your PIN.",Toast.LENGTH_SHORT).show(); }
     }
 
     void renderCurrent(){
@@ -769,7 +829,17 @@ public class MainActivity extends Activity {
         addWrap(sectionTitle("Default currency"));
         Spinner currency=new Spinner(this); spinnerStyle(currency); String[] cs={"PKR","USD","AED","SAR","GBP","EUR"}; currency.setAdapter(spinnerAdapter(cs)); String dc=prefs.getString("currency","PKR"); for(int i=0;i<cs.length;i++)if(cs[i].equals(dc))currency.setSelection(i); addWrapMargin(currency,0,12);
         currency.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){} public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){prefs.edit().putString("currency",cs[pos]).apply();}});
+        addWrap(sectionTitle("Security"));
+        Switch lockSwitch=new Switch(this); lockSwitch.setText("App lock"); lockSwitch.setTextSize(16); lockSwitch.setTextColor(INK); lockSwitch.setChecked(isLockEnabled());
+        lockSwitch.setPadding(dp(8),dp(6),dp(8),dp(6)); addWrapMargin(lockSwitch,0,6);
+        Button pinButton=action("Set / change PIN"); addWrapMargin(pinButton,0,8); pinButton.setVisibility(lockSwitch.isChecked()?View.VISIBLE:View.GONE);
+        Switch bioSwitch=new Switch(this); bioSwitch.setText("Biometric / device security"); bioSwitch.setTextSize(16); bioSwitch.setTextColor(INK); bioSwitch.setChecked(prefs.getBoolean("biometric_lock",false));
+        bioSwitch.setEnabled(Build.VERSION.SDK_INT>=28 && lockSwitch.isChecked()); bioSwitch.setVisibility(lockSwitch.isChecked()?View.VISIBLE:View.GONE); addWrapMargin(bioSwitch,0,10);
+        lockSwitch.setOnCheckedChangeListener((button,checked)->{ if(checked){ setupPin(true); } else { prefs.edit().putBoolean("app_lock",false).putBoolean("biometric_lock",false).apply(); bioSwitch.setChecked(false); bioSwitch.setEnabled(false); bioSwitch.setVisibility(View.GONE); pinButton.setVisibility(View.GONE); feedback("App lock disabled",ToneGenerator.TONE_PROP_ACK); } });
+        pinButton.setOnClickListener(v->setupPin(false));
+        bioSwitch.setOnCheckedChangeListener((button,checked)->prefs.edit().putBoolean("biometric_lock",checked).apply());
         addWrap(sectionTitle("Data & reminders"));
+
         Button reports=action("Reports & Backup"); addWrapMargin(reports,0,8); reports.setOnClickListener(v->showReports());
         Button wa=action("WhatsApp reminders"); addWrapMargin(wa,0,8); wa.setOnClickListener(v->new AlertDialog.Builder(this,isDarkMode()?AlertDialog.THEME_DEVICE_DEFAULT_DARK:AlertDialog.THEME_DEVICE_DEFAULT_LIGHT).setTitle("WhatsApp reminders").setMessage("In People & Dues, choose a person from your phone contacts and tap WhatsApp to prepare a ready-made reminder. Paisa Laya never sends messages automatically.").setPositiveButton("OK",null).show());
         Button about=action("About Paisa Laya"); addWrapMargin(about,0,8); about.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Paisa Laya").setMessage("Simple personal money tracking, dues, currency conversion and gold-rate tools. Your transaction data is stored locally on this device.").setPositiveButton("OK",null).show());
