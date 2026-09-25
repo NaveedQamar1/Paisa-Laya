@@ -50,6 +50,8 @@ jobs:
           unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "People & Dues"
           unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "Currency converter"
           unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "24K gold only"
+          unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "PDF invoice"
+          unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "Google account sync"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
