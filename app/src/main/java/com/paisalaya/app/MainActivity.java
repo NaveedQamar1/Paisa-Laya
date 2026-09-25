@@ -471,7 +471,27 @@ public class MainActivity extends Activity {
 
     void loadGoldRates(TextView target){
         target.setText("Loading current gold rates…");
-        new Thread(()->{ try{ String json=httpGet("https://goldrateinpakistan.org/api/rates.json"); JSONObject j=new JSONObject(json); StringBuilder s=new StringBuilder(); s.append("24K: ").append(j.optString("24k",j.optString("24K","—"))).append("\n"); s.append("22K: ").append(j.optString("22k",j.optString("22K","—"))).append("\n"); s.append("21K: ").append(j.optString("21k",j.optString("21K","—"))).append("\n"); s.append("18K: ").append(j.optString("18k",j.optString("18K","—"))); runOnUiThread(()->target.setText(s.toString())); }catch(Exception e){runOnUiThread(()->target.setText("Gold-rate service is currently unavailable."));} }).start();
+        new Thread(()->{ try{
+            String json=httpGet("https://goldrateinpakistan.org/api/rates.json");
+            JSONObject j=new JSONObject(json);
+            JSONObject gold=j.optJSONObject("gold");
+            if(gold==null) throw new Exception("Gold data missing");
+            StringBuilder s=new StringBuilder();
+            s.append("24K: Rs ").append(formatGold(gold.optJSONObject("24k"))).append(" / tola").append("\n");
+            s.append("22K: Rs ").append(formatGold(gold.optJSONObject("22k"))).append(" / tola").append("\n");
+            s.append("21K: Rs ").append(formatGold(gold.optJSONObject("21k"))).append(" / tola").append("\n");
+            s.append("18K: Rs ").append(formatGold(gold.optJSONObject("18k"))).append(" / tola");
+            String updated=j.optString("updated_at","");
+            if(!updated.isEmpty()) s.append("\nUpdated: ").append(updated);
+            runOnUiThread(()->target.setText(s.toString()));
+        }catch(Exception e){runOnUiThread(()->target.setText("Gold-rate service is currently unavailable. Please tap Refresh and try again."));} }).start();
+    }
+
+    String formatGold(JSONObject rate){
+        if(rate==null) return "—";
+        double value=rate.optDouble("per_tola",Double.NaN);
+        if(Double.isNaN(value)) return "—";
+        return String.format(Locale.US,"%,.0f",value);
     }
 
     String httpGet(String address) throws Exception{
