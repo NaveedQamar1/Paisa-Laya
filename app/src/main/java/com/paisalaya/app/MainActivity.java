@@ -387,11 +387,11 @@ public class MainActivity extends Activity {
             n.addView(item,p);
         }
 
-        items[0].setOnClickListener(v->showHome());
-        items[1].setOnClickListener(v->showAdd());
-        items[2].setOnClickListener(v->showPeople());
-        items[3].setOnClickListener(v->showTools());
-        items[4].setOnClickListener(v->showSettings());
+        items[0].setOnClickListener(v->{screenHistory.clear();showHome();});
+        items[1].setOnClickListener(v->{screenHistory.clear();showAdd();});
+        items[2].setOnClickListener(v->{screenHistory.clear();showPeople();});
+        items[3].setOnClickListener(v->{screenHistory.clear();showTools();});
+        items[4].setOnClickListener(v->{screenHistory.clear();showSettings();});
         root.addView(n,new LinearLayout.LayoutParams(-1,dp(72)));
     }
 
