@@ -47,11 +47,12 @@ jobs:
       - name: Verify APK contents
         run: |
           test -f app/build/outputs/apk/debug/app-debug.apk
-          unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "People & Dues"
-          unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "Currency converter"
-          unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "24K gold only"
-          unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "PDF invoice"
-          unzip -p app/build/outputs/apk/debug/app-debug.apk classes2.dex | strings | grep -q "Google account sync"
+          for needle in "People & Dues" "Currency converter" "24K gold only" "PDF invoice" "Google account sync"; do
+            if ! unzip -p app/build/outputs/apk/debug/app-debug.apk "classes*.dex" | strings | grep -Fq "$needle"; then
+              echo "Missing APK feature string: $needle"
+              exit 1
+            fi
+          done
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
