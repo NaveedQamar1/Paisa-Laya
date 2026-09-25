@@ -24,7 +24,7 @@ import java.util.*;
 
 public class MainActivity extends Activity {
     static final String PREF="paisa_laya", TX="transactions";
-    static final String SCREEN_HOME="home", SCREEN_ADD="add", SCREEN_PEOPLE="people", SCREEN_TOOLS="tools", SCREEN_REPORTS="reports", SCREEN_SETTINGS="settings", SCREEN_NOTIFICATIONS="notifications";
+    static final String SCREEN_HOME="home", SCREEN_ADD="add", SCREEN_PEOPLE="people", SCREEN_TOOLS="tools", SCREEN_REPORTS="reports", SCREEN_SETTINGS="settings", SCREEN_NOTIFICATIONS="notifications", SCREEN_CURRENCIES="currencies";
 
     LinearLayout root, content;
     SharedPreferences prefs;
@@ -171,6 +171,7 @@ public class MainActivity extends Activity {
         else if(SCREEN_SETTINGS.equals(currentScreen)) showSettings();
         else if(SCREEN_REPORTS.equals(currentScreen)) showReports();
         else if(SCREEN_NOTIFICATIONS.equals(currentScreen)) showNotifications();
+        else if(SCREEN_CURRENCIES.equals(currentScreen)) showCurrenciesMore();
         else showHome();
         renderingScreen=false;
     }
@@ -819,21 +820,24 @@ public class MainActivity extends Activity {
             }catch(Exception e){result.setText("Please enter a valid amount.");}
         });
 
-        addWrap(sectionTitle("Currency rates"));
+        addWrap(sectionTitle("Pakistan open-market currency rates"));
         LinearLayout rateTable=box(WHITE,12);
-        addRateRow(rateTable,"Currency","1 PKR =","Rate",true);
-        TextView ratesStatus=tv("Loading live currency rates…",13,MUTED,false); rateTable.addView(ratesStatus);
-        addWrapMargin(rateTable,0,12); loadCurrencyRates(rateTable,ratesStatus);
+        addRateRow(rateTable,"Currency","Buying (PKR)","Selling (PKR)",true);
+        TextView ratesStatus=tv("Loading FOREX.com.pk rates…",13,MUTED,false); rateTable.addView(ratesStatus);
+        addWrapMargin(rateTable,0,8); loadCurrencyRates(rateTable,ratesStatus,true);
+
+        Button more=action("View more currencies"); more.setTextColor(WHITE); more.setBackground(bg(GREEN,22));
+        addWrapMargin(more,0,14); more.setOnClickListener(v->showCurrenciesMore());
 
         addWrap(sectionTitle("Gold rate in Pakistan"));
         LinearLayout goldTable=box(WHITE,12);
         addRateRow(goldTable,"Gold","Purity","Per tola",true);
         TextView goldStatus=tv("Loading 24K gold rate…",13,MUTED,false); goldTable.addView(goldStatus);
         addWrapMargin(goldTable,0,8); loadGoldRates(goldStatus);
-        addWrapMargin(tv("24K gold only • per tola • Source: goldrateinpakistan.org",12,MUTED,false),0,8);
+        addWrapMargin(tv("24K gold only • per tola",12,MUTED,false),0,8);
 
         Button refresh=action("Refresh rates"); refresh.setTextColor(WHITE); refresh.setBackground(bg(GREEN,22));
-        addWrapMargin(refresh,0,10); refresh.setOnClickListener(v->{loadCurrencyRates(rateTable,ratesStatus);loadGoldRates(goldStatus);});
+        addWrapMargin(refresh,0,10); refresh.setOnClickListener(v->{loadCurrencyRates(rateTable,ratesStatus,true);loadGoldRates(goldStatus);});
         nav();
     }
 
@@ -847,24 +851,72 @@ public class MainActivity extends Activity {
         if(header)parent.addView(new Space(this),new LinearLayout.LayoutParams(1,dp(7)));
     }
 
-    void loadCurrencyRates(LinearLayout table,TextView status){
+    void showCurrenciesMore(){
+        recordNavigation(SCREEN_CURRENCIES);
+        currentScreen=SCREEN_CURRENCIES;
+        base("More currencies","FOREX.com.pk Pakistan open-market rates.");
+        LinearLayout table=box(WHITE,12);
+        addRateRow(table,"Currency","Buying (PKR)","Selling (PKR)",true);
+        TextView status=tv("Loading FOREX.com.pk rates…",13,MUTED,false);
+        table.addView(status);
+        addWrapMargin(table,0,10);
+        loadCurrencyRates(table,status,false);
+
+        TextView source=tv("Source: FOREX.com.pk • Rates are provided for public reference and may vary by dealer.",11,MUTED,false);
+        addWrapMargin(source,0,10);
+
+        Button refresh=action("Refresh rates"); refresh.setTextColor(WHITE); refresh.setBackground(bg(GREEN,22));
+        addWrapMargin(refresh,0,8); refresh.setOnClickListener(v->loadCurrencyRates(table,status,false));
+        nav();
+    }
+
+    void addCurrencyRateRow(LinearLayout table,String code,String buying,String selling){
+        LinearLayout r=row();
+        r.addView(tv("1 "+code,13,INK,true),new LinearLayout.LayoutParams(0,-2,1));
+        r.addView(tv("Rs "+buying,13,INK,false),new LinearLayout.LayoutParams(0,-2,1));
+        r.addView(tv("Rs "+selling,13,INK,false),new LinearLayout.LayoutParams(0,-2,1));
+        table.addView(r);
+        table.addView(new Space(this),new LinearLayout.LayoutParams(1,dp(5)));
+    }
+
+    void loadCurrencyRates(LinearLayout table,TextView status,boolean topOnly){
         while(table.getChildCount()>2)table.removeViewAt(2);
         status.setVisibility(View.VISIBLE);
         table.addView(status);
         new Thread(()->{
             try{
-                String json=httpGet("https://open.er-api.com/v6/latest/PKR");
-                JSONObject rates=new JSONObject(json).getJSONObject("rates");
-                String[] cs={"USD","AED","SAR","GBP","EUR","CAD","AUD","INR","JPY"};
+                String html=httpGet("https://www.forex.com.pk/");
+                String text=html.replaceAll("(?s)<script.*?</script>"," ").replaceAll("(?s)<style.*?</style>"," ")
+                    .replaceAll("<[^>]+>"," ").replace("&nbsp;"," ").replaceAll("\\s+"," ").trim();
+                String[] codes={"USD","GBP","EUR","AED","SAR","AUD","CAD","CNY","JPY"};
+                String[] names={"US Dollar","UK Pound Sterling","Euro","U.A.E Dirham","Saudi Riyal","Australian Dollar","Canadian Dollar","China Yuan","Japanese Yen"};
+                ArrayList<String[]> rows=new ArrayList<>();
+                String updated="";
+                java.util.regex.Matcher um=java.util.regex.Pattern.compile("Updated at\\s*:\\s*([^C]+?)\\s+Currency\\s+Buying\\s+Selling",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
+                if(um.find()) updated=um.group(1).trim();
+                for(int i=0;i<names.length;i++){
+                    java.util.regex.Matcher m=java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(names[i])+"\\s+([0-9.,]+)\\s+([0-9.,]+)",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
+                    if(m.find()) rows.add(new String[]{codes[i],m.group(1),m.group(2)});
+                }
                 runOnUiThread(()->{
                     table.removeView(status);
-                    for(String c:cs){
-                        double one=rates.optDouble(c,Double.NaN);
-                        if(!Double.isNaN(one)) addRateRow(table,c,"1 PKR",String.format(Locale.US,"%.6f %s",one,c),false);
+                    int count=0;
+                    for(String[] r:rows){
+                        if(topOnly && count>=5)break;
+                        addCurrencyRateRow(table,r[0],r[1],r[2]); count++;
                     }
-                    table.addView(tv("Base: PKR • live exchange rates",11,MUTED,false));
+                    if(rows.isEmpty()){
+                        status.setText("FOREX.com.pk rates unavailable. Tap Refresh to try again.");
+                        table.addView(status);
+                    }else{
+                        String u=updated;
+                        if(u.isEmpty()) u="Latest available";
+                        table.addView(tv("Updated: "+u+" • 1 foreign currency = PKR",11,MUTED,false));
+                    }
                 });
-            }catch(Exception e){runOnUiThread(()->status.setText("Currency rates unavailable. Tap Refresh to try again."));}
+            }catch(Exception e){
+                runOnUiThread(()->status.setText("FOREX.com.pk rates unavailable. Tap Refresh to try again."));
+            }
         }).start();
     }
 
@@ -881,11 +933,6 @@ public class MainActivity extends Activity {
             final String displayAmount=amount;
             runOnUiThread(()->target.setText(displayAmount));
         }catch(Exception e){runOnUiThread(()->target.setText("24K gold rate unavailable. Tap Refresh to try again."));}}).start();
-    }
-
-    String httpGet(String address) throws Exception{
-        java.net.HttpURLConnection con=(java.net.HttpURLConnection)new java.net.URL(address).openConnection(); con.setConnectTimeout(8000); con.setReadTimeout(10000); con.setRequestMethod("GET"); con.setRequestProperty("User-Agent","PaisaLaya/1.0");
-        InputStream in=con.getInputStream(); BufferedReader br=new BufferedReader(new InputStreamReader(in)); StringBuilder s=new StringBuilder(); String line; while((line=br.readLine())!=null)s.append(line); br.close(); con.disconnect(); return s.toString();
     }
 
     void showSettings(){
