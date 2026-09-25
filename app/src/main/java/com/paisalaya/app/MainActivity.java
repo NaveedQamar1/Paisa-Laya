@@ -24,7 +24,7 @@ import java.util.*;
 
 public class MainActivity extends Activity {
     static final String PREF="paisa_laya", TX="transactions";
-    static final String SCREEN_HOME="home", SCREEN_ADD="add", SCREEN_PEOPLE="people", SCREEN_TOOLS="tools", SCREEN_REPORTS="reports", SCREEN_SETTINGS="settings";
+    static final String SCREEN_HOME="home", SCREEN_ADD="add", SCREEN_PEOPLE="people", SCREEN_TOOLS="tools", SCREEN_REPORTS="reports", SCREEN_SETTINGS="settings", SCREEN_NOTIFICATIONS="notifications";
 
     LinearLayout root, content;
     SharedPreferences prefs;
@@ -33,6 +33,7 @@ public class MainActivity extends Activity {
     final ArrayDeque<String> screenHistory=new ArrayDeque<>();
     boolean renderingScreen=false;
     boolean unlockedThisLaunch=false;
+    final SimpleDateFormat dueFormat=new SimpleDateFormat("yyyy-MM-dd",Locale.US);
 
     int BG=Color.rgb(246,248,244), INK=Color.rgb(25,35,29), GREEN=Color.rgb(36,132,83);
     int GREEN_DARK=Color.rgb(18,92,57), MINT=Color.rgb(224,246,232), RED=Color.rgb(216,76,76);
@@ -43,6 +44,8 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
         prefs=getSharedPreferences(PREF,0);
+        createNotificationChannel();
+        if(getIntent().getBooleanExtra("open_notifications",false)) currentScreen=SCREEN_NOTIFICATIONS;
         applyPreferencesTheme();
         getWindow().setStatusBarColor(GREEN_DARK);
         getWindow().setNavigationBarColor(BG);
@@ -123,8 +126,6 @@ public class MainActivity extends Activity {
         final EditText p1=new EditText(this); fieldStyle(p1,"Enter 4–8 digit PIN",17); p1.setInputType(2|16);
         final EditText p2=new EditText(this); fieldStyle(p2,"Confirm PIN",17); p2.setInputType(2|16);
         LinearLayout box=new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL); box.setPadding(dp(4),dp(4),dp(4),0); box.addView(p1); box.addView(p2,new LinearLayout.LayoutParams(-1,dp(56)));
-        dialogBuilder().setTitle(enabling?"Set app lock PIN":"Change app lock PIN").setView(box)
-            .setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();
         final AlertDialog d=dialogBuilder().setTitle(enabling?"Set app lock PIN":"Change app lock PIN").setView(box).setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();
         d.setOnShowListener(x->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             String a=p1.getText().toString().trim(), b=p2.getText().toString().trim();
@@ -142,7 +143,7 @@ public class MainActivity extends Activity {
         EditText pin=new EditText(this); fieldStyle(pin,"PIN",20); pin.setInputType(2|16); pin.setGravity(Gravity.CENTER); lock.addView(pin,new LinearLayout.LayoutParams(-1,dp(56)));
         Button unlock=action("Unlock"); unlock.setTextColor(WHITE); unlock.setBackground(bg(GREEN,22)); lock.addView(unlock,new LinearLayout.LayoutParams(-1,dp(52)));
         Button biometric=action("Use biometric / device security"); biometric.setTextColor(GREEN); biometric.setBackground(strokeBg(WHITE,GREEN,22));
-        if(Build.VERSION.SDK_INT>=28){ lock.addView(biometric,new LinearLayout.LayoutParams(-1,dp(52))); biometric.setOnClickListener(v->authenticateBiometric()); } else biometric.setVisibility(View.GONE);
+        if(Build.VERSION.SDK_INT>=28 && prefs.getBoolean("biometric_lock",false)){ lock.addView(biometric,new LinearLayout.LayoutParams(-1,dp(52))); biometric.setOnClickListener(v->authenticateBiometric()); } else biometric.setVisibility(View.GONE);
         TextView error=tv("",13,RED,false); error.setGravity(Gravity.CENTER); lock.addView(error);
         setContentView(lock);
         unlock.setOnClickListener(v->{ if(verifyPin(pin.getText().toString())){ unlockedThisLaunch=true; feedback("Unlocked",ToneGenerator.TONE_PROP_ACK); renderCurrent(); } else error.setText("Incorrect PIN. Please try again."); });
@@ -169,6 +170,7 @@ public class MainActivity extends Activity {
         else if(SCREEN_TOOLS.equals(currentScreen)) showTools();
         else if(SCREEN_SETTINGS.equals(currentScreen)) showSettings();
         else if(SCREEN_REPORTS.equals(currentScreen)) showReports();
+        else if(SCREEN_NOTIFICATIONS.equals(currentScreen)) showNotifications();
         else showHome();
         renderingScreen=false;
     }
@@ -309,13 +311,20 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(BG);
 
         LinearLayout head=new LinearLayout(this);
-        head.setOrientation(LinearLayout.VERTICAL);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
         int top=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE?10:18;
-        head.setPadding(dp(18),dp(top),dp(18),dp(4));
+        head.setPadding(dp(18),dp(top),dp(12),dp(4));
+        LinearLayout headText=new LinearLayout(this);
+        headText.setOrientation(LinearLayout.VERTICAL);
         TextView titleView=tv(title,28,INK,true);
         TextView subView=tv(subtitle,15,MUTED,false);
-        head.addView(titleView,new LinearLayout.LayoutParams(-1,-2));
-        head.addView(subView,new LinearLayout.LayoutParams(-1,-2));
+        headText.addView(titleView,new LinearLayout.LayoutParams(-1,-2));
+        headText.addView(subView,new LinearLayout.LayoutParams(-1,-2));
+        head.addView(headText,new LinearLayout.LayoutParams(0,-2,1));
+        Button bell=action("🔔"); bell.setTextSize(19); bell.setContentDescription("Notifications"); bell.setBackground(bg(WHITE,22));
+        LinearLayout.LayoutParams bellP=new LinearLayout.LayoutParams(dp(52),dp(52)); bellP.setMargins(dp(8),0,0,0); head.addView(bell,bellP);
+        bell.setOnClickListener(v->showNotifications());
         root.addView(head,new LinearLayout.LayoutParams(-1,-2));
 
         content=new LinearLayout(this);
@@ -597,6 +606,14 @@ public class MainActivity extends Activity {
         addWrap(hiddenPhone);
         choose.setOnClickListener(v->chooseContact(contact,hiddenPhone,name));
 
+        TextView dueLabel=tv("Due date (optional)",13,INK,true); addWrapMargin(dueLabel,0,5);
+        LinearLayout dueRow=row();
+        EditText dueDate=new EditText(this); fieldStyle(dueDate,"Select due date",16); dueDate.setFocusable(false); dueDate.setClickable(true);
+        Button pickDue=action("📅"); pickDue.setTextColor(WHITE); pickDue.setBackground(bg(GREEN,22));
+        dueRow.addView(dueDate,new LinearLayout.LayoutParams(0,dp(56),1));
+        LinearLayout.LayoutParams dueBtnP=new LinearLayout.LayoutParams(dp(58),dp(56)); dueBtnP.setMargins(dp(8),0,0,0); dueRow.addView(pickDue,dueBtnP);
+        addWrapMargin(dueRow,0,10);
+        View.OnClickListener duePicker=v->showDueDatePicker(dueDate); dueDate.setOnClickListener(duePicker); pickDue.setOnClickListener(duePicker);
         EditText note=new EditText(this); fieldStyle(note,"Note (optional)",17); addWrapMargin(note,0,12);
         Button add=action("＋  Add person");
         add.setTextColor(WHITE); add.setTextSize(16); add.setBackground(bg(GREEN,24));
@@ -618,7 +635,8 @@ public class MainActivity extends Activity {
                 JSONObject o=new JSONObject();
                 o.put("name",n); o.put("amount",value); o.put("kind",kind.getSelectedItem().toString());
                 o.put("phone",hiddenPhone.getText().toString().trim()); o.put("note",note.getText().toString().trim());
-                o.put("settled",false); a.put(o);
+                String due=dueDate.getText().toString().trim(); if(!due.isEmpty()) o.put("due_date",due);
+                o.put("settled",false); a.put(o); if(!due.isEmpty()){scheduleDueNotification(o);ensureNotificationPermission();}
                 prefs.edit().putString("dues_json",a.toString()).apply();
                 feedback("Person added",ToneGenerator.TONE_PROP_ACK);
                 showPeople();
@@ -638,6 +656,8 @@ public class MainActivity extends Activity {
         info.addView(tv(o.optString("name","Person"),16,INK,true));
         String status=settled?"  •  SETTLED":"";
         info.addView(tv(kind+"  •  "+money(o.optDouble("amount"))+status+(o.optString("note").isEmpty()?"":"  •  "+o.optString("note")),12,MUTED,false));
+        String due=o.optString("due_date","");
+        if(!due.isEmpty()) info.addView(tv(dueStatus(due),12,dueIsOverdue(due)?RED:GREEN,true));
         top.addView(info,new LinearLayout.LayoutParams(0,-2,1));
 
         Button mark=action(settled?"Settled":"Mark");
@@ -648,6 +668,9 @@ public class MainActivity extends Activity {
         card.addView(top);
 
         if(!settled){
+            Button dueEdit=action("📅 Due date"); dueEdit.setTextColor(GREEN); dueEdit.setBackground(bg(WHITE,20));
+            LinearLayout.LayoutParams dep=new LinearLayout.LayoutParams(-1,dp(44)); dep.setMargins(0,dp(9),0,0); card.addView(dueEdit,dep);
+            dueEdit.setOnClickListener(v->editPersonDueDate(index));
             Button wa=action("Prepare WhatsApp reminder");
             wa.setTextColor(GREEN); wa.setBackground(bg(WHITE,20));
             LinearLayout.LayoutParams wp=new LinearLayout.LayoutParams(-1,dp(44)); wp.setMargins(0,dp(9),0,0);
@@ -709,6 +732,53 @@ public class MainActivity extends Activity {
             Intent i=new Intent(Intent.ACTION_SEND); i.setType("text/plain"); i.putExtra(Intent.EXTRA_TEXT,msg);
             startActivity(Intent.createChooser(i,"Send reminder with"));
         }catch(Exception e){Toast.makeText(this,"No messaging app is available.",Toast.LENGTH_SHORT).show();}
+    }
+
+    void createNotificationChannel(){
+        if(Build.VERSION.SDK_INT>=26){
+            NotificationChannel c=new NotificationChannel("due_reminders","Payment & Receiving reminders",NotificationManager.IMPORTANCE_HIGH);
+            c.setDescription("Reminders for Paisa Laya due dates.");
+            NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE); if(nm!=null)nm.createNotificationChannel(c);
+        }
+    }
+    void ensureNotificationPermission(){
+        if(Build.VERSION.SDK_INT>=33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},44);
+    }
+    void showDueDatePicker(EditText target){
+        Calendar c=Calendar.getInstance(); String existing=target.getText().toString().trim();
+        try{if(!existing.isEmpty()){Date d=dueFormat.parse(existing);if(d!=null)c.setTime(d);}}catch(Exception ignored){}
+        new DatePickerDialog(this,(view,y,m,day)->{Calendar picked=Calendar.getInstance();picked.set(y,m,day);target.setText(dueFormat.format(picked.getTime()));},c.get(Calendar.YEAR),c.get(Calendar.MONTH),c.get(Calendar.DAY_OF_MONTH)).show();
+    }
+    boolean dueIsOverdue(String due){
+        try{Date d=dueFormat.parse(due);if(d==null)return false;Calendar t=Calendar.getInstance();t.set(Calendar.HOUR_OF_DAY,0);t.set(Calendar.MINUTE,0);t.set(Calendar.SECOND,0);t.set(Calendar.MILLISECOND,0);return d.before(t.getTime());}catch(Exception e){return false;}
+    }
+    String dueStatus(String due){
+        try{Date d=dueFormat.parse(due);Calendar t=Calendar.getInstance();Calendar x=Calendar.getInstance();x.setTime(d);if(t.get(Calendar.YEAR)==x.get(Calendar.YEAR)&&t.get(Calendar.DAY_OF_YEAR)==x.get(Calendar.DAY_OF_YEAR))return "Due today • "+due;return (d.before(new Date())?"Overdue • ":"Due • ")+due;}catch(Exception e){return "Due • "+due;}
+    }
+    void scheduleDueNotification(JSONObject o){
+        try{String due=o.optString("due_date","");if(due.isEmpty()||o.optBoolean("settled",false))return;Date date=dueFormat.parse(due);if(date==null)return;Calendar w=Calendar.getInstance();w.setTime(date);w.set(Calendar.HOUR_OF_DAY,9);w.set(Calendar.MINUTE,0);w.set(Calendar.SECOND,0);w.set(Calendar.MILLISECOND,0);if(w.getTimeInMillis()<=System.currentTimeMillis())return;
+            int id=Math.abs((o.optString("name","")+"|"+due).hashCode());Intent in=new Intent(this,DueNotificationReceiver.class);in.putExtra("name",o.optString("name","there"));in.putExtra("amount",o.optDouble("amount",0));in.putExtra("kind",o.optString("kind","They owe me"));
+            PendingIntent pi=PendingIntent.getBroadcast(this,id,in,PendingIntent.FLAG_UPDATE_CURRENT|(Build.VERSION.SDK_INT>=23?PendingIntent.FLAG_IMMUTABLE:0));AlarmManager am=(AlarmManager)getSystemService(ALARM_SERVICE);if(am!=null)am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,w.getTimeInMillis(),pi);
+        }catch(Exception ignored){}
+    }
+    void editPersonDueDate(int index){
+        EditText date=new EditText(this);fieldStyle(date,"Select due date",16);date.setFocusable(false);
+        try{JSONArray a=new JSONArray(prefs.getString("dues_json","[]"));date.setText(a.getJSONObject(index).optString("due_date",""));}catch(Exception ignored){}
+        date.setOnClickListener(v->showDueDatePicker(date));
+        dialogBuilder().setTitle("Payment / receiving due date").setView(date).setNegativeButton("Cancel",null).setPositiveButton("Save",(d,w)->{try{JSONArray a=new JSONArray(prefs.getString("dues_json","[]"));JSONObject o=a.getJSONObject(index);String due=date.getText().toString().trim();if(due.isEmpty())o.remove("due_date");else{o.put("due_date",due);scheduleDueNotification(o);ensureNotificationPermission();}updatePeople(a);showPeople();}catch(Exception e){Toast.makeText(this,"Could not update the due date.",Toast.LENGTH_SHORT).show();}}).show();
+    }
+    void showNotifications(){
+        recordNavigation(SCREEN_NOTIFICATIONS);currentScreen=SCREEN_NOTIFICATIONS;base("Notifications","Payment and receiving reminders.");
+        addWrapMargin(tv("Upcoming & overdue",19,INK,true),0,8);LinearLayout list=box(WHITE,14);
+        try{JSONArray a=new JSONArray(prefs.getString("dues_json","[]"));boolean any=false;for(int i=0;i<a.length();i++){JSONObject o=a.getJSONObject(i);if(o.optBoolean("settled",false))continue;String due=o.optString("due_date","");if(due.isEmpty())continue;any=true;boolean receive=o.optString("kind","").startsWith("They");LinearLayout card=box(dueIsOverdue(due)?Color.rgb(255,238,238):MINT,12);card.addView(tv(o.optString("name","Person"),16,INK,true));card.addView(tv((receive?"Receive ":"Pay ")+money(o.optDouble("amount")),14,receive?GREEN:RED,true));card.addView(tv(dueStatus(due),12,MUTED,false));Button people=action("Open People & Dues");people.setTextColor(GREEN);LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-1,dp(42));pp.setMargins(0,dp(8),0,0);card.addView(people,pp);people.setOnClickListener(v->{currentScreen=SCREEN_PEOPLE;screenHistory.clear();showPeople();});list.addView(card,new LinearLayout.LayoutParams(-1,-2));}if(!any)list.addView(tv("No active due-date reminders yet. Add a due date to a person and Paisa Laya will remind you automatically.",13,MUTED,false));}catch(Exception e){list.addView(tv("Could not load reminders.",13,RED,false));}
+        addWrapMargin(list,0,12);Button add=action("＋  Add a due date");add.setTextColor(WHITE);add.setBackground(bg(GREEN,22));addWrapMargin(add,0,8);add.setOnClickListener(v->showPeople());Button permission=action("Enable notifications");permission.setTextColor(GREEN);addWrapMargin(permission,0,8);permission.setOnClickListener(v->ensureNotificationPermission());addWrap(tv("Reminder time: 9:00 AM on the selected due date. Notifications are generated on this device.",11,MUTED,false));nav();
+    }
+    public static class DueNotificationReceiver extends BroadcastReceiver{
+        @Override public void onReceive(Context context,Intent intent){
+            String name=intent.getStringExtra("name");double amount=intent.getDoubleExtra("amount",0);String kind=intent.getStringExtra("kind");boolean receive=kind!=null&&kind.startsWith("They");String title=receive?"Payment due to be received":"Payment due";String text=(receive?"Receive ":"Pay ")+String.format(Locale.US,"PKR %,.0f",amount)+(receive?" from ":" to ")+(name==null?"person":name);
+            Intent open=new Intent(context,MainActivity.class);open.putExtra("open_notifications",true);open.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);PendingIntent pi=PendingIntent.getActivity(context,9001,open,PendingIntent.FLAG_UPDATE_CURRENT|(Build.VERSION.SDK_INT>=23?PendingIntent.FLAG_IMMUTABLE:0));
+            Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(context,"due_reminders"):new Notification.Builder(context);b.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(title).setContentText(text).setAutoCancel(true).setContentIntent(pi).setPriority(Notification.PRIORITY_HIGH);NotificationManager nm=(NotificationManager)context.getSystemService(Context.NOTIFICATION_SERVICE);if(nm!=null)nm.notify(Math.abs((name==null?"":name).hashCode()),b.build());
+        }
     }
 
     void showTools(){
