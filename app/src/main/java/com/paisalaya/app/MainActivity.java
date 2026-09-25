@@ -177,7 +177,20 @@ public class MainActivity extends Activity {
     }
 
     void recordNavigation(String target){
-        if(!target.equals(currentScreen) && !renderingScreen) screenHistory.push(currentScreen);
+        if(target.equals(SCREEN_HOME)){
+            screenHistory.clear();
+            currentScreen=SCREEN_HOME;
+            return;
+        }
+        if(!target.equals(currentScreen) && !renderingScreen){
+            if(screenHistory.isEmpty() && !SCREEN_HOME.equals(currentScreen)){
+                screenHistory.push(SCREEN_HOME);
+            }else if(!screenHistory.isEmpty() && screenHistory.peek().equals(target)){
+                screenHistory.pop();
+            }else{
+                screenHistory.push(currentScreen);
+            }
+        }
         currentScreen=target;
     }
 
@@ -215,8 +228,12 @@ public class MainActivity extends Activity {
             View focused=getCurrentFocus(); if(focused!=null) focused.clearFocus();
             return;
         }
-        if(!screenHistory.isEmpty()){
-            currentScreen=screenHistory.pop();
+        if(!SCREEN_HOME.equals(currentScreen)){
+            if(!screenHistory.isEmpty()){
+                currentScreen=screenHistory.pop();
+            }else{
+                currentScreen=SCREEN_HOME;
+            }
             renderCurrent();
             return;
         }
@@ -323,8 +340,8 @@ public class MainActivity extends Activity {
         headText.addView(titleView,new LinearLayout.LayoutParams(-1,-2));
         headText.addView(subView,new LinearLayout.LayoutParams(-1,-2));
         head.addView(headText,new LinearLayout.LayoutParams(0,-2,1));
-        Button bell=action("🔔"); bell.setTextSize(19); bell.setContentDescription("Notifications"); bell.setBackground(bg(WHITE,22));
-        LinearLayout.LayoutParams bellP=new LinearLayout.LayoutParams(dp(52),dp(52)); bellP.setMargins(dp(8),0,0,0); head.addView(bell,bellP);
+        Button bell=action("🔔"); bell.setTextSize(16); bell.setContentDescription("Notifications"); bell.setBackground(bg(WHITE,18));
+        LinearLayout.LayoutParams bellP=new LinearLayout.LayoutParams(dp(42),dp(42)); bellP.setMargins(dp(6),0,0,0); head.addView(bell,bellP);
         bell.setOnClickListener(v->showNotifications());
         root.addView(head,new LinearLayout.LayoutParams(-1,-2));
 
@@ -437,10 +454,10 @@ public class MainActivity extends Activity {
 
         LinearLayout row=row();
         LinearLayout inc=box(Color.rgb(53,151,99),13);
-        inc.addView(tv("↗  INCOME",11,Color.rgb(210,244,222),true));
+        inc.addView(tv("↘  INCOME",11,Color.rgb(210,244,222),true));
         inc.addView(tv(money(t[0]),17,WHITE,true));
         LinearLayout exp=box(Color.rgb(194,70,70),13);
-        exp.addView(tv("↘  EXPENSE",11,Color.rgb(255,220,220),true));
+        exp.addView(tv("↗  EXPENSE",11,Color.rgb(255,220,220),true));
         exp.addView(tv(money(t[1]),17,WHITE,true));
         row.addView(inc,new LinearLayout.LayoutParams(0,-2,1));
         LinearLayout.LayoutParams ep=new LinearLayout.LayoutParams(0,-2,1);
@@ -497,7 +514,7 @@ public class MainActivity extends Activity {
                 JSONObject o=a.getJSONObject(i);
                 LinearLayout card=box(WHITE,13);
                 LinearLayout rr=row();
-                String icon="Income".equals(o.getString("type"))?"↗":"↘";
+                String icon="Income".equals(o.getString("type"))?"↘":"↗";
                 int c="Income".equals(o.getString("type"))?GREEN:RED;
                 TextView ico=tv(icon,22,c,true); ico.setGravity(Gravity.CENTER);
                 rr.addView(ico,new LinearLayout.LayoutParams(dp(42),dp(62)));
