@@ -344,9 +344,9 @@ public class MainActivity extends Activity {
         return new AlertDialog.Builder(this,isDarkMode()?AlertDialog.THEME_DEVICE_DEFAULT_DARK:AlertDialog.THEME_DEVICE_DEFAULT_LIGHT);
     }
 
-    void chooseContact(TextView selected,EditText hiddenPhone){
+    void chooseContact(TextView selected,EditText hiddenPhone,EditText nameField){
         try{
-            selected.setTag(hiddenPhone);
+            selected.setTag(new Object[]{hiddenPhone,nameField});
             Intent pick=new Intent(Intent.ACTION_PICK,ContactsContract.CommonDataKinds.Phone.CONTENT_URI);
             startActivityForResult(pick,21);
         }catch(Exception e){Toast.makeText(this,"Contacts could not be opened.",Toast.LENGTH_SHORT).show();}
@@ -533,7 +533,7 @@ public class MainActivity extends Activity {
 
         EditText hiddenPhone=new EditText(this); hiddenPhone.setVisibility(View.GONE);
         addWrap(hiddenPhone);
-        choose.setOnClickListener(v->chooseContact(contact,hiddenPhone));
+        choose.setOnClickListener(v->chooseContact(contact,hiddenPhone,name));
 
         EditText note=new EditText(this); fieldStyle(note,"Note (optional)",17); addWrapMargin(note,0,12);
         Button add=action("＋  Add person");
@@ -586,6 +586,12 @@ public class MainActivity extends Activity {
         card.addView(top);
 
         if(!settled){
+            Button wa=action("Prepare WhatsApp reminder");
+            wa.setTextColor(GREEN); wa.setBackground(bg(WHITE,20));
+            LinearLayout.LayoutParams wp=new LinearLayout.LayoutParams(-1,dp(44)); wp.setMargins(0,dp(9),0,0);
+            card.addView(wa,wp);
+            wa.setOnClickListener(v->whatsappReminder(o));
+
             Button settle=action(kind.startsWith("They")?"Received amount  ✓":"Returned amount  ✓");
             settle.setTextColor(WHITE); settle.setBackground(bg(kind.startsWith("They")?GREEN:RED,20));
             LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-1,dp(46)); sp.setMargins(0,dp(9),0,0);
@@ -838,12 +844,12 @@ public class MainActivity extends Activity {
         in.addCategory(Intent.CATEGORY_OPENABLE); startActivityForResult(in,11);
     }
 
-    TextView findViewByText(View rootView,String text){
-        if(rootView instanceof TextView && text.equals(((TextView)rootView).getText().toString())) return (TextView)rootView;
+    TextView findContactView(View rootView){
+        if(rootView instanceof TextView && ((TextView)rootView).getTag() instanceof Object[]) return (TextView)rootView;
         if(rootView instanceof ViewGroup){
             ViewGroup g=(ViewGroup)rootView;
             for(int i=0;i<g.getChildCount();i++){
-                TextView found=findViewByText(g.getChildAt(i),text);
+                TextView found=findContactView(g.getChildAt(i));
                 if(found!=null)return found;
             }
         }
@@ -863,15 +869,16 @@ public class MainActivity extends Activity {
                     String n=c.getString(0), p=c.getString(1);
                     View decor=getWindow().getDecorView();
                     // The current People screen owns the selected contact TextView through its tag.
-                    TextView selected=null;
-                    // Re-find the label by its displayed placeholder/text.
-                    selected=findViewByText(decor,"No contact selected");
-                    if(selected==null)selected=findViewByText(decor,n);
+                    TextView selected=findContactView(decor);
                     if(selected!=null){
                         selected.setText(n+"  •  "+p);
                         selected.setTextColor(INK);
                         Object tag=selected.getTag();
-                        if(tag instanceof EditText)((EditText)tag).setText(p);
+                        if(tag instanceof Object[]){
+                            Object[] fields=(Object[])tag;
+                            if(fields.length>0 && fields[0] instanceof EditText)((EditText)fields[0]).setText(p);
+                            if(fields.length>1 && fields[1] instanceof EditText)((EditText)fields[1]).setText(n);
+                        }
                     }
                 }
                 if(c!=null)c.close();
