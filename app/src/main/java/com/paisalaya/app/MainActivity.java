@@ -1068,6 +1068,24 @@ public class MainActivity extends Activity {
         return null;
     }
 
+    String httpGet(String url) throws Exception{
+        java.net.HttpURLConnection conn=null;
+        try{
+            conn=(java.net.HttpURLConnection)new java.net.URL(url).openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(10000);
+            conn.setRequestProperty("User-Agent","Paisa-Laya/1.1");
+            int code=conn.getResponseCode();
+            if(code<200 || code>=300) throw new IOException("HTTP "+code);
+            BufferedReader br=new BufferedReader(new InputStreamReader(conn.getInputStream()));
+            StringBuilder s=new StringBuilder(); String line;
+            while((line=br.readLine())!=null)s.append(line).append('\n');
+            br.close();
+            return s.toString();
+        }finally{ if(conn!=null) conn.disconnect(); }
+    }
+
     @Override protected void onActivityResult(int req,int res,Intent data){
         super.onActivityResult(req,res,data);
         if(res!=RESULT_OK||data==null)return;
