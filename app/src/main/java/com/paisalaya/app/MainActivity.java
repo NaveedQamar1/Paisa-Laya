@@ -5,6 +5,9 @@ import android.content.*;
 import android.content.res.Configuration;
 import android.graphics.*;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.pdf.PdfDocument;
+import android.print.pdf.PrintedPdfDocument;
+import android.print.PrintAttributes;
 import android.os.Bundle;
 import android.view.*;
 import android.view.inputmethod.InputMethodManager;
@@ -14,6 +17,7 @@ import android.media.ToneGenerator;
 import android.os.Build;
 import android.hardware.biometrics.BiometricPrompt;
 import android.os.CancellationSignal;
+import android.content.IntentSender;
 import android.security.keystore.KeyProperties;
 import android.view.Window;
 import android.widget.*;
@@ -21,9 +25,20 @@ import org.json.*;
 import java.io.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import com.google.android.gms.auth.api.identity.AuthorizationClient;
+import com.google.android.gms.auth.api.identity.AuthorizationRequest;
+import com.google.android.gms.auth.api.identity.AuthorizationResult;
+import com.google.android.gms.auth.api.identity.Identity;
+import com.google.android.gms.common.api.Scope;
 
 public class MainActivity extends Activity {
     static final String PREF="paisa_laya", TX="transactions";
+    static final String SYNC_FILE="paisa_laya_sync.json";
+    static final String DRIVE_APPDATA_SCOPE="https://www.googleapis.com/auth/drive.appdata";
     static final String SCREEN_HOME="home", SCREEN_ADD="add", SCREEN_PEOPLE="people", SCREEN_TOOLS="tools", SCREEN_REPORTS="reports", SCREEN_SETTINGS="settings", SCREEN_NOTIFICATIONS="notifications", SCREEN_CURRENCIES="currencies";
 
     LinearLayout root, content;
@@ -33,6 +48,8 @@ public class MainActivity extends Activity {
     final ArrayDeque<String> screenHistory=new ArrayDeque<>();
     boolean renderingScreen=false;
     boolean unlockedThisLaunch=false;
+    boolean syncBusy=false;
+    JSONObject pendingInvoice=null;
     final SimpleDateFormat dueFormat=new SimpleDateFormat("yyyy-MM-dd",Locale.US);
 
     int BG=Color.rgb(246,248,244), INK=Color.rgb(25,35,29), GREEN=Color.rgb(36,132,83);
@@ -87,6 +104,9 @@ public class MainActivity extends Activity {
         welcome.postDelayed(()->{
             if(state==null && isLockEnabled() && !unlockedThisLaunch) showLockScreen();
             else renderCurrent();
+            if(prefs.getBoolean("google_sync_enabled",false)){
+                new android.os.Handler().postDelayed(()->googleSync(),1200);
+            }
             if(state!=null && SCREEN_ADD.equals(currentScreen)){
                 final String amount=state.getString("amount","");
                 final String category=state.getString("category","");
@@ -428,7 +448,15 @@ public class MainActivity extends Activity {
         try{return new JSONArray(prefs.getString(TX,"[]"));}catch(Exception e){return new JSONArray();}
     }
 
-    void save(JSONArray a){prefs.edit().putString(TX,a.toString()).apply();}
+    void save(JSONArray a){
+        prefs.edit().putString(TX,a.toString()).putLong("local_data_updated",System.currentTimeMillis()).apply();
+        autoSyncIfEnabled();
+    }
+    void autoSyncIfEnabled(){
+        if(prefs.getBoolean("google_sync_enabled",false) && !syncBusy){
+            new android.os.Handler().postDelayed(this::googleSync,700);
+        }
+    }
 
     double[] totals(){
         double in=0,out=0; JSONArray a=transactions();
@@ -706,6 +734,12 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams delp=new LinearLayout.LayoutParams(dp(72),dp(44)); delp.setMargins(dp(6),0,0,0); top.addView(del,delp);
         card.addView(top);
 
+        Button invoice=action("PDF invoice");
+        invoice.setTextColor(GREEN); invoice.setBackground(bg(WHITE,20));
+        LinearLayout.LayoutParams invp=new LinearLayout.LayoutParams(-1,dp(44)); invp.setMargins(0,dp(9),0,0);
+        card.addView(invoice,invp);
+        invoice.setOnClickListener(v->requestInvoicePdf(o));
+        
         if(!settled){
             Button dueEdit=action("📅 Due date"); dueEdit.setTextColor(GREEN); dueEdit.setBackground(bg(WHITE,20));
             LinearLayout.LayoutParams dep=new LinearLayout.LayoutParams(-1,dp(44)); dep.setMargins(0,dp(9),0,0); card.addView(dueEdit,dep);
@@ -727,7 +761,10 @@ public class MainActivity extends Activity {
         del.setOnClickListener(v->confirmDeletePerson(index));
     }
 
-    void updatePeople(JSONArray people){prefs.edit().putString("dues_json",people.toString()).apply();}
+    void updatePeople(JSONArray people){
+        prefs.edit().putString("dues_json",people.toString()).putLong("local_data_updated",System.currentTimeMillis()).apply();
+        autoSyncIfEnabled();
+    }
 
     void togglePerson(int index){
         try{
@@ -1001,6 +1038,203 @@ public class MainActivity extends Activity {
         }catch(Exception e){runOnUiThread(()->{target.setText("Rate unavailable");meta.setText("Tap Refresh to try again");});}}).start();
     }
 
+    void requestInvoicePdf(JSONObject person){
+        pendingInvoice=person;
+        String safe=person.optString("name","person").replaceAll("[^a-zA-Z0-9_-]+","_");
+        Intent in=new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        in.addCategory(Intent.CATEGORY_OPENABLE);
+        in.setType("application/pdf");
+        in.putExtra(Intent.EXTRA_TITLE,"Paisa-Laya-Invoice-"+safe+".pdf");
+        startActivityForResult(in,31);
+    }
+
+    void writeInvoicePdf(android.net.Uri uri,JSONObject person){
+        try{
+            PdfDocument doc=new PdfDocument();
+            PdfDocument.PageInfo info=new PdfDocument.PageInfo.Builder(595,842,1).create();
+            PdfDocument.Page page=doc.startPage(info);
+            Canvas c=page.getCanvas();
+            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.NORMAL));
+            p.setColor(Color.rgb(25,35,29));
+            p.setTextSize(12);
+            
+            p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));
+            p.setTextSize(30); p.setColor(GREEN);
+            c.drawText("Paisa Laya",42,58,p);
+            p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.NORMAL));
+            p.setTextSize(11); p.setColor(Color.rgb(92,105,96));
+            c.drawText("Payment / Due Statement",42,80,p);
+            
+            p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));
+            p.setTextSize(18); p.setColor(Color.rgb(25,35,29));
+            c.drawText("INVOICE / STATEMENT",42,125,p);
+            p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.NORMAL));
+            p.setTextSize(11); p.setColor(Color.rgb(92,105,96));
+            String invoiceNo="PL-"+new SimpleDateFormat("yyyyMMdd-HHmmss",Locale.US).format(new Date());
+            c.drawText("Invoice No: "+invoiceNo,42,146,p);
+            c.drawText("Issue date: "+new SimpleDateFormat("dd MMM yyyy",Locale.US).format(new Date()),42,163,p);
+            
+            p.setColor(Color.rgb(224,246,232));
+            c.drawRoundRect(35,190,560,330,18,18,p);
+            p.setColor(Color.rgb(25,35,29));
+            p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD)); p.setTextSize(18);
+            c.drawText(person.optString("name","Person"),55,225,p);
+            p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.NORMAL)); p.setTextSize(12);
+            String phone=person.optString("phone","");
+            if(!phone.isEmpty())c.drawText("Phone: "+phone,55,246,p);
+            c.drawText(person.optString("kind","They owe me"),55,267,p);
+            String due=person.optString("due_date","");
+            c.drawText("Due date: "+(due.isEmpty()?"Not specified":due),55,288,p);
+            String status=person.optBoolean("settled",false)?"SETTLED":(due.isEmpty()?"OUTSTANDING":(dueIsOverdue(due)?"OVERDUE":"DUE"));
+            p.setColor(person.optBoolean("settled",false)?GREEN:(dueIsOverdue(due)?RED:GREEN));
+            p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD)); p.setTextSize(12);
+            c.drawText("STATUS: "+status,55,310,p);
+            
+            double amount=person.optDouble("amount",0);
+            double remaining=person.optBoolean("settled",false)?0:amount;
+            p.setColor(Color.rgb(25,35,29)); p.setTextSize(13); p.setTypeface(Typeface.DEFAULT);
+            c.drawText("Original amount",55,370,p);
+            c.drawText("Amount remaining",55,410,p);
+            p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD)); p.setTextSize(20);
+            c.drawText(money(amount),385,370,p);
+            p.setColor(GREEN); c.drawText(money(remaining),385,410,p);
+            
+            p.setColor(Color.rgb(220,225,220)); c.drawRect(45,435,550,436,p);
+            p.setColor(Color.rgb(92,105,96)); p.setTypeface(Typeface.DEFAULT); p.setTextSize(12);
+            c.drawText("Note",45,468,p);
+            p.setColor(Color.rgb(25,35,29)); p.setTextSize(13);
+            String note=person.optString("note","");
+            c.drawText(note.isEmpty()?"No note provided.":note,45,491,p);
+            
+            p.setColor(Color.rgb(92,105,96)); p.setTextSize(10);
+            c.drawText("Prepared with Paisa Laya • Personal money tracking",45,785,p);
+            c.drawText("This is a personal statement of the recorded amount and due date.",45,802,p);
+            
+            doc.finishPage(page);
+            OutputStream out=getContentResolver().openOutputStream(uri);
+            doc.writeTo(out); out.close(); doc.close();
+            
+            Intent share=new Intent(Intent.ACTION_SEND);
+            share.setType("application/pdf");
+            share.putExtra(Intent.EXTRA_STREAM,uri);
+            share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(share,"Send Paisa Laya invoice"));
+            Toast.makeText(this,"PDF invoice created",Toast.LENGTH_SHORT).show();
+        }catch(Exception e){
+            Toast.makeText(this,"Could not create the PDF invoice.",Toast.LENGTH_SHORT).show();
+        }finally{pendingInvoice=null;}
+    }
+
+    void googleSync(){
+        if(syncBusy)return;
+        AuthorizationRequest request=AuthorizationRequest.builder()
+            .setRequestedScopes(Collections.singletonList(new Scope(DRIVE_APPDATA_SCOPE)))
+            .build();
+        Identity.getAuthorizationClient(this).authorize(request)
+            .addOnSuccessListener(result->{
+                if(result.hasResolution()){
+                    try{
+                        startIntentSenderForResult(result.getPendingIntent().getIntentSender(),42,null,0,0,0,null);
+                    }catch(IntentSender.SendIntentException e){
+                        Toast.makeText(this,"Google authorization could not be opened.",Toast.LENGTH_SHORT).show();
+                    }
+                }else{
+                    syncWithDriveToken(result.getAccessToken());
+                }
+            })
+            .addOnFailureListener(e->Toast.makeText(this,"Google sync authorization failed. Check Google/Drive setup.",Toast.LENGTH_LONG).show());
+    }
+
+    JSONObject buildSyncPayload() throws Exception{
+        JSONObject data=new JSONObject();
+        data.put("schema",1);
+        data.put("updated_at",prefs.getLong("local_data_updated",System.currentTimeMillis()));
+        data.put("transactions",transactions());
+        data.put("dues",new JSONArray(prefs.getString("dues_json","[]")));
+        return data;
+    }
+
+    void syncWithDriveToken(String token){
+        if(token==null||token.isEmpty()){Toast.makeText(this,"Google authorization did not return an access token.",Toast.LENGTH_SHORT).show();return;}
+        syncBusy=true;
+        new Thread(()->{
+            try{
+                JSONObject local=buildSyncPayload();
+                JSONObject cloud=findDriveSyncFile(token);
+                if(cloud==null){
+                    createDriveSyncFile(token,local);
+                    prefs.edit().putBoolean("google_sync_enabled",true).apply();
+                    runOnUiThread(()->{syncBusy=false;Toast.makeText(this,"Google sync connected • data uploaded",Toast.LENGTH_SHORT).show();renderCurrent();});
+                    return;
+                }
+                String id=cloud.optString("id","");
+                JSONObject remote=downloadDriveSyncFile(token,id);
+                long lt=local.optLong("updated_at",0), rt=remote.optLong("updated_at",0);
+                if(rt>lt){
+                    JSONArray tx=remote.optJSONArray("transactions");
+                    JSONArray dues=remote.optJSONArray("dues");
+                    prefs.edit()
+                        .putString(TX,tx==null?"[]":tx.toString())
+                        .putString("dues_json",dues==null?"[]":dues.toString())
+                        .putLong("local_data_updated",rt)
+                        .putBoolean("google_sync_enabled",true).apply();
+                }else if(lt>rt){
+                    updateDriveSyncFile(token,id,local);
+                    prefs.edit().putBoolean("google_sync_enabled",true).apply();
+                }else{
+                    prefs.edit().putBoolean("google_sync_enabled",true).apply();
+                }
+                runOnUiThread(()->{syncBusy=false;Toast.makeText(this,"Google sync complete",Toast.LENGTH_SHORT).show();renderCurrent();});
+            }catch(Exception e){
+                syncBusy=false;
+                runOnUiThread(()->Toast.makeText(this,"Google sync failed: "+e.getMessage(),Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
+    JSONObject findDriveSyncFile(String token) throws Exception{
+        String q=URLEncoder.encode("name='"+SYNC_FILE+"' and 'appDataFolder' in parents and trashed=false","UTF-8");
+        String url="https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q="+q+"&fields=files(id,name,modifiedTime)";
+        String body=driveHttp("GET",url,token,null,null);
+        JSONObject r=new JSONObject(body); JSONArray files=r.optJSONArray("files");
+        return files!=null&&files.length()>0?files.getJSONObject(0):null;
+    }
+
+    JSONObject downloadDriveSyncFile(String token,String id) throws Exception{
+        String body=driveHttp("GET","https://www.googleapis.com/drive/v3/files/"+URLEncoder.encode(id,"UTF-8")+"?alt=media",token,null,null);
+        return new JSONObject(body);
+    }
+
+    void createDriveSyncFile(String token,JSONObject data) throws Exception{
+        String boundary="PaisalayaanBoundary"+System.currentTimeMillis();
+        JSONObject meta=new JSONObject();meta.put("name",SYNC_FILE);meta.put("parents",new JSONArray().put("appDataFolder"));
+        String body="--"+boundary+"\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"+meta.toString()+"\r\n"
+            +"--"+boundary+"\r\nContent-Type: application/json\r\n\r\n"+data.toString()+"\r\n--"+boundary+"--";
+        driveHttp("POST","https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",token,body,"multipart/related; boundary="+boundary);
+    }
+
+    void updateDriveSyncFile(String token,String id,JSONObject data) throws Exception{
+        driveHttp("PATCH","https://www.googleapis.com/upload/drive/v3/files/"+URLEncoder.encode(id,"UTF-8")+"?uploadType=media",token,data.toString(),"application/json");
+    }
+
+    String driveHttp(String method,String url,String token,String body,String contentType) throws Exception{
+        HttpURLConnection c=(HttpURLConnection)new URL(url).openConnection();
+        c.setRequestMethod(method); c.setConnectTimeout(12000); c.setReadTimeout(15000);
+        c.setRequestProperty("Authorization","Bearer "+token);
+        c.setRequestProperty("Accept","application/json");
+        if(body!=null){
+            c.setDoOutput(true); c.setRequestProperty("Content-Type",contentType==null?"application/json":contentType);
+            OutputStream out=c.getOutputStream();out.write(body.getBytes(StandardCharsets.UTF_8));out.close();
+        }
+        int code=c.getResponseCode();
+        InputStream stream=code>=200&&code<300?c.getInputStream():c.getErrorStream();
+        BufferedReader br=new BufferedReader(new InputStreamReader(stream,StandardCharsets.UTF_8));
+        StringBuilder sb=new StringBuilder();String line;while((line=br.readLine())!=null)sb.append(line);br.close();c.disconnect();
+        if(code<200||code>=300)throw new IOException("Drive HTTP "+code);
+        return sb.toString();
+    }
+
     void showSettings(){
         recordNavigation(SCREEN_SETTINGS);
         currentScreen=SCREEN_SETTINGS;
@@ -1023,6 +1257,21 @@ public class MainActivity extends Activity {
         lockSwitch.setOnCheckedChangeListener((button,checked)->{ if(checked){ setupPin(true); } else { prefs.edit().putBoolean("app_lock",false).putBoolean("biometric_lock",false).apply(); bioSwitch.setChecked(false); bioSwitch.setEnabled(false); bioSwitch.setVisibility(View.GONE); pinButton.setVisibility(View.GONE); feedback("App lock disabled",ToneGenerator.TONE_PROP_ACK); } });
         pinButton.setOnClickListener(v->setupPin(false));
         bioSwitch.setOnCheckedChangeListener((button,checked)->prefs.edit().putBoolean("biometric_lock",checked).apply());
+        LinearLayout syncCard=box(MINT,16);
+        syncCard.addView(tv("Google account sync",17,GREEN,true));
+        syncCard.addView(tv("Sync your people, dues and transactions across phones using your Google account. Paisa Laya uses Google's private app data area, which is only accessible to this app for your account.",12,INK,false));
+        Button syncNow=action("☁  Connect / sync Google account");
+        syncNow.setTextColor(WHITE); syncNow.setBackground(bg(GREEN,22));
+        LinearLayout.LayoutParams sp1=new LinearLayout.LayoutParams(-1,dp(50)); sp1.setMargins(0,dp(10),0,dp(7)); syncCard.addView(syncNow,sp1);
+        Button syncOff=action("Disable Google sync on this device");
+        syncOff.setTextColor(GREEN); syncOff.setBackground(bg(WHITE,20));
+        syncCard.addView(syncOff,new LinearLayout.LayoutParams(-1,dp(46)));
+        TextView syncStatus=tv(prefs.getBoolean("google_sync_enabled",false)?"Google sync is enabled on this device.":"Google sync is not connected.",11,MUTED,false);
+        LinearLayout.LayoutParams ssp=new LinearLayout.LayoutParams(-1,-2); ssp.setMargins(0,dp(7),0,0); syncCard.addView(syncStatus,ssp);
+        syncNow.setOnClickListener(v->googleSync());
+        syncOff.setOnClickListener(v->{prefs.edit().putBoolean("google_sync_enabled",false).apply();Toast.makeText(this,"Google sync disabled on this device.",Toast.LENGTH_SHORT).show();renderCurrent();});
+        addWrapMargin(syncCard,0,12);
+
         addWrap(sectionTitle("Data & reminders"));
 
         Button reports=action("Reports & Backup"); addWrapMargin(reports,0,8); reports.setOnClickListener(v->showReports());
@@ -1129,6 +1378,18 @@ public class MainActivity extends Activity {
         super.onActivityResult(req,res,data);
         if(res!=RESULT_OK||data==null)return;
         try{
+            if(req==31){
+                if(pendingInvoice!=null) writeInvoicePdf(data.getData(),pendingInvoice);
+                return;
+            }
+            if(req==42){
+                try{
+                    AuthorizationResult ar=Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(data);
+                    if(ar!=null && ar.getAccessToken()!=null) syncWithDriveToken(ar.getAccessToken());
+                    else Toast.makeText(this,"Google authorization was cancelled.",Toast.LENGTH_SHORT).show();
+                }catch(Exception e){Toast.makeText(this,"Google authorization failed.",Toast.LENGTH_LONG).show();}
+                return;
+            }
             if(req==21){
                 android.net.Uri uri=data.getData();
                 android.database.Cursor c=getContentResolver().query(uri,
