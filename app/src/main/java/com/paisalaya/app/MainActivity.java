@@ -809,13 +809,15 @@ public class MainActivity extends Activity {
                 double a=Double.parseDouble(amount.getText().toString().trim());
                 String f=from.getSelectedItem().toString(), t=to.getSelectedItem().toString();
                 if(f.equals(t)){result.setText(String.format(Locale.US,"%.2f %s",a,t));return;}
-                result.setText("Loading live rate…");
+                result.setText("Loading FOREX.com.pk rate…");
                 new Thread(()->{
                     try{
-                        String json=httpGet("https://open.er-api.com/v6/latest/"+f);
-                        JSONObject rootJ=new JSONObject(json); double rate=rootJ.getJSONObject("rates").getDouble(t); double value=a*rate;
+                        String html=httpGet("https://www.forex.com.pk/");
+                        double fPkr=parseForexMid(html,f), tPkr=parseForexMid(html,t);
+                        if(Double.isNaN(fPkr)||Double.isNaN(tPkr)) throw new Exception("Currency unavailable");
+                        double value=a*(fPkr/tPkr);
                         runOnUiThread(()->result.setText(String.format(Locale.US,"%.2f %s = %.2f %s",a,f,value,t)));
-                    }catch(Exception e){runOnUiThread(()->result.setText("Could not load the live rate. Check your internet connection."));}
+                    }catch(Exception e){runOnUiThread(()->result.setText("Could not load the FOREX.com.pk rate. Check your internet connection."));}
                 }).start();
             }catch(Exception e){result.setText("Please enter a valid amount.");}
         });
@@ -830,14 +832,24 @@ public class MainActivity extends Activity {
         addWrapMargin(more,0,14); more.setOnClickListener(v->showCurrenciesMore());
 
         addWrap(sectionTitle("Gold rate in Pakistan"));
-        LinearLayout goldTable=box(WHITE,12);
-        addRateRow(goldTable,"Gold","Purity","Per tola",true);
-        TextView goldStatus=tv("Loading 24K gold rate…",13,MUTED,false); goldTable.addView(goldStatus);
-        addWrapMargin(goldTable,0,8); loadGoldRates(goldStatus);
-        addWrapMargin(tv("24K gold only • per tola",12,MUTED,false),0,8);
+        LinearLayout goldCard=box(WHITE,16);
+        TextView goldTitle=tv("24K GOLD",13,GOLD,true);
+        goldCard.addView(goldTitle);
+        TextView goldStatus=tv("Loading latest gold rate…",27,INK,true);
+        goldCard.addView(goldStatus,new LinearLayout.LayoutParams(-1,-2));
+        TextView goldMeta=tv("Per tola • latest available",12,MUTED,false);
+        goldCard.addView(goldMeta);
+        LinearLayout goldStats=row();
+        LinearLayout g10=box(MINT,11); g10.addView(tv("10 GRAMS",10,GREEN,true)); TextView g10v=tv("—",16,INK,true); g10.addView(g10v);
+        LinearLayout g1=box(MINT,11); g1.addView(tv("1 GRAM",10,GREEN,true)); TextView g1v=tv("—",16,INK,true); g1.addView(g1v);
+        goldStats.addView(g10,new LinearLayout.LayoutParams(0,-2,1)); LinearLayout.LayoutParams g1p=new LinearLayout.LayoutParams(0,-2,1);g1p.setMargins(dp(8),0,0,0);goldStats.addView(g1,g1p);
+        goldCard.addView(goldStats,new LinearLayout.LayoutParams(-1,-2));
+        TextView goldSource=tv("Source: GoldRateInPakistan • 24K only",11,MUTED,false);
+        goldCard.addView(goldSource);
+        addWrapMargin(goldCard,0,10); loadGoldRates(goldStatus,g10v,g1v,goldMeta);
 
         Button refresh=action("Refresh rates"); refresh.setTextColor(WHITE); refresh.setBackground(bg(GREEN,22));
-        addWrapMargin(refresh,0,10); refresh.setOnClickListener(v->{loadCurrencyRates(rateTable,ratesStatus,true);loadGoldRates(goldStatus);});
+        addWrapMargin(refresh,0,10); refresh.setOnClickListener(v->{loadCurrencyRates(rateTable,ratesStatus,true);loadGoldRates(goldStatus,g10v,g1v,goldMeta);});
         nav();
     }
 
@@ -877,6 +889,19 @@ public class MainActivity extends Activity {
         r.addView(tv("Rs "+selling,13,INK,false),new LinearLayout.LayoutParams(0,-2,1));
         table.addView(r);
         table.addView(new Space(this),new LinearLayout.LayoutParams(1,dp(5)));
+    }
+
+    double parseForexMid(String html,String code) throws Exception{
+        if("PKR".equals(code)) return 1.0;
+        String[] names={"USD:US Dollar","GBP:UK Pound Sterling","EUR:Euro","AED:U.A.E Dirham","SAR:Saudi Riyal","AUD:Australian Dollar","CAD:Canadian Dollar","CNY:China Yuan","JPY:Japanese Yen"};
+        String name=null;
+        for(String item:names){String[] p=item.split(":");if(p[0].equals(code)){name=p[1];break;}}
+        if(name==null) throw new Exception("Unsupported currency");
+        String text=html.replaceAll("(?s)<script.*?</script>"," ").replaceAll("(?s)<style.*?</style>"," ").replaceAll("<[^>]+>"," ").replace("&nbsp;"," ").replaceAll("\\s+"," ").trim();
+        java.util.regex.Matcher m=java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(name)+"\\s+([0-9.,]+)\\s+([0-9.,]+)",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
+        if(!m.find()) throw new Exception("Rate not found");
+        double buy=Double.parseDouble(m.group(1).replace(",","")), sell=Double.parseDouble(m.group(2).replace(",",""));
+        return (buy+sell)/2.0;
     }
 
     void loadCurrencyRates(LinearLayout table,TextView status,boolean topOnly){
@@ -920,19 +945,21 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    void loadGoldRates(TextView target){
-        target.setText("Loading 24K gold rate…");
+    void loadGoldRates(TextView target,TextView tenGram,TextView oneGram,TextView meta){
+        target.setText("Loading…"); tenGram.setText("—"); oneGram.setText("—"); meta.setText("Per tola • latest available");
         new Thread(()->{try{
             String json=httpGet("https://goldrateinpakistan.org/api/rates.json");
             JSONObject j=new JSONObject(json), gold=j.optJSONObject("gold"), rate=gold==null?null:gold.optJSONObject("24k");
             if(rate==null)throw new Exception("24K data missing");
-            double value=rate.optDouble("per_tola",Double.NaN); if(Double.isNaN(value))throw new Exception("24K rate missing");
-            String amount="Rs "+String.format(Locale.US,"%,.0f",value);
+            double tola=rate.optDouble("per_tola",Double.NaN); if(Double.isNaN(tola))throw new Exception("24K rate missing");
+            double perGram=tola/11.6638125, per10=perGram*10;
             String updated=j.optString("updated_at","");
-            if(!updated.isEmpty())amount+=" • "+updated;
-            final String displayAmount=amount;
-            runOnUiThread(()->target.setText(displayAmount));
-        }catch(Exception e){runOnUiThread(()->target.setText("24K gold rate unavailable. Tap Refresh to try again."));}}).start();
+            String main="Rs "+String.format(Locale.US,"%,.0f",tola);
+            String ten="Rs "+String.format(Locale.US,"%,.0f",per10);
+            String one="Rs "+String.format(Locale.US,"%,.0f",perGram);
+            String detail=updated.isEmpty()?"Per tola • latest available":"Per tola • Updated "+updated;
+            runOnUiThread(()->{target.setText(main);tenGram.setText(ten);oneGram.setText(one);meta.setText(detail);});
+        }catch(Exception e){runOnUiThread(()->{target.setText("Rate unavailable");meta.setText("Tap Refresh to try again");});}}).start();
     }
 
     void showSettings(){
