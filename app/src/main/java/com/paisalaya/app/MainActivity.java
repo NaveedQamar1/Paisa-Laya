@@ -152,7 +152,7 @@ public class MainActivity extends Activity {
         if(Build.VERSION.SDK_INT<28)return;
         try{
             BiometricPrompt prompt=new BiometricPrompt.Builder(this).setTitle("Unlock Paisa Laya").setSubtitle("Use your biometric or device screen lock").setDescription("Your financial data stays protected on this device.").setNegativeButton("Use PIN",getMainExecutor(),(d,w)->{}).build();
-            prompt.authenticate(new BiometricPrompt.CryptoObject((javax.crypto.Cipher)null),getMainExecutor(),new BiometricPrompt.AuthenticationCallback(){
+            prompt.authenticate(getMainExecutor(),new BiometricPrompt.AuthenticationCallback(){
                 @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result){ runOnUiThread(()->{unlockedThisLaunch=true; feedback("Unlocked",ToneGenerator.TONE_PROP_ACK); renderCurrent();}); }
                 @Override public void onAuthenticationError(int code,CharSequence msg){ }
                 @Override public void onAuthenticationFailed(){ Toast.makeText(MainActivity.this,"Biometric not recognized.",Toast.LENGTH_SHORT).show(); }
