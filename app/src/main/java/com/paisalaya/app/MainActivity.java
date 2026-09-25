@@ -8,6 +8,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.view.*;
 import android.view.inputmethod.InputMethodManager;
+import android.provider.ContactsContract;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 import android.widget.*;
 import org.json.*;
 import java.io.*;
@@ -37,19 +40,50 @@ public class MainActivity extends Activity {
         applyPreferencesTheme();
         getWindow().setStatusBarColor(GREEN_DARK);
         getWindow().setNavigationBarColor(BG);
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
-
+        getWindow().getDecorView().setSystemUiVisibility(isDarkMode()?0:View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         if(state!=null){
             currentScreen=state.getString("screen",SCREEN_HOME);
             pendingType=state.getString("type","Expense");
         }
-        renderCurrent();
-        if(state!=null && SCREEN_ADD.equals(currentScreen)){
-            final String amount=state.getString("amount","");
-            final String category=state.getString("category","");
-            final String note=state.getString("note","");
-            content.postDelayed(()->restoreAddFields(amount,category,note),80);
-        }
+        showWelcomeScreen(state);
+    }
+
+    void showWelcomeScreen(Bundle state){
+        LinearLayout welcome=new LinearLayout(this);
+        welcome.setOrientation(LinearLayout.VERTICAL);
+        welcome.setGravity(Gravity.CENTER);
+        welcome.setBackgroundColor(BG);
+        welcome.setPadding(dp(30),dp(30),dp(30),dp(30));
+
+        TextView mark=tv("₨",52,WHITE,true);
+        mark.setGravity(Gravity.CENTER);
+        mark.setBackground(bg(GREEN,40));
+        welcome.addView(mark,new LinearLayout.LayoutParams(dp(94),dp(94)));
+
+        TextView title=tv("Paisa Laya",34,INK,true);
+        title.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(-1,-2);
+        tp.setMargins(0,dp(22),0,dp(2)); welcome.addView(title,tp);
+
+        TextView sub=tv("Your money, beautifully organized.",15,MUTED,false);
+        sub.setGravity(Gravity.CENTER); welcome.addView(sub);
+        setContentView(welcome);
+
+        mark.setScaleX(.65f); mark.setScaleY(.65f); mark.setAlpha(.15f);
+        title.setAlpha(0f); sub.setAlpha(0f);
+        mark.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(520).start();
+        title.animate().alpha(1f).setStartDelay(260).setDuration(420).start();
+        sub.animate().alpha(1f).setStartDelay(420).setDuration(420).start();
+
+        welcome.postDelayed(()->{
+            renderCurrent();
+            if(state!=null && SCREEN_ADD.equals(currentScreen)){
+                final String amount=state.getString("amount","");
+                final String category=state.getString("category","");
+                final String note=state.getString("note","");
+                content.postDelayed(()->restoreAddFields(amount,category,note),80);
+            }
+        },900);
     }
 
     @Override protected void onSaveInstanceState(Bundle out){
@@ -102,6 +136,12 @@ public class MainActivity extends Activity {
                 TextView v=(TextView)super.getDropDownView(position,convertView,parent); return style(v);
             }
         };
+    }
+
+    void spinnerStyle(Spinner s){
+        s.setPopupBackgroundDrawable(bg(WHITE,18));
+        s.setBackground(bg(WHITE,20));
+        s.setPadding(dp(12),0,dp(8),0);
     }
 
     @Override public void onBackPressed(){
@@ -291,6 +331,27 @@ public class MainActivity extends Activity {
 
     String money(double x){return String.format(Locale.US,"PKR %,.0f",x);}
 
+    void feedback(String message,int tone){
+        Toast.makeText(this,"✓  "+message,Toast.LENGTH_SHORT).show();
+        try{
+            ToneGenerator tg=new ToneGenerator(AudioManager.STREAM_NOTIFICATION,75);
+            tg.startTone(tone,120);
+            new android.os.Handler().postDelayed(tg::release,180);
+        }catch(Exception ignored){}
+    }
+
+    AlertDialog.Builder dialogBuilder(){
+        return new AlertDialog.Builder(this,isDarkMode()?AlertDialog.THEME_DEVICE_DEFAULT_DARK:AlertDialog.THEME_DEVICE_DEFAULT_LIGHT);
+    }
+
+    void chooseContact(TextView selected,EditText hiddenPhone){
+        try{
+            selected.setTag(hiddenPhone);
+            Intent pick=new Intent(Intent.ACTION_PICK,ContactsContract.CommonDataKinds.Phone.CONTENT_URI);
+            startActivityForResult(pick,21);
+        }catch(Exception e){Toast.makeText(this,"Contacts could not be opened.",Toast.LENGTH_SHORT).show();}
+    }
+
     void showHome(){
         recordNavigation(SCREEN_HOME);
         currentScreen=SCREEN_HOME;
@@ -411,8 +472,7 @@ public class MainActivity extends Activity {
         EditText amount=new EditText(this); fieldStyle(amount,"Amount in PKR",18); amount.setInputType(2|8192); amount.setTag("amount"); addWrapMargin(amount,0,10);
 
         TextView typeLabel=tv("Transaction type",13,INK,true); addWrapMargin(typeLabel,0,5);
-        Spinner type=new Spinner(this);
-        type.setPadding(dp(12),0,dp(8),0); type.setBackground(bg(WHITE,20));
+        Spinner type=new Spinner(this); spinnerStyle(type);
         type.setAdapter(spinnerAdapter(new String[]{"Expense","Income"}));
         type.setSelection("Income".equals(defaultType)?1:0); addWrapMargin(type,0,10);
 
@@ -435,6 +495,7 @@ public class MainActivity extends Activity {
                 o.put("note",note.getText().toString().trim());
                 o.put("date",new SimpleDateFormat("dd MMM, HH:mm",Locale.US).format(new Date()));
                 a.put(o); save(a);
+                feedback("Transaction saved",ToneGenerator.TONE_PROP_ACK);
                 ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(amount.getWindowToken(),0);
                 showHome();
             }catch(Exception e){Toast.makeText(this,"Please enter a valid amount.",Toast.LENGTH_SHORT).show();}
@@ -454,104 +515,238 @@ public class MainActivity extends Activity {
         recordNavigation(SCREEN_PEOPLE);
         currentScreen=SCREEN_PEOPLE;
         base("People & Dues","Keep track of borrowed and owed money.");
+
         addWrapMargin(tv("Add someone you owe or who owes you.",13,MUTED,false),0,10);
         EditText name=new EditText(this); fieldStyle(name,"Person's name",17); addWrapMargin(name,0,10);
         EditText amount=new EditText(this); fieldStyle(amount,"Amount in PKR",17); amount.setInputType(2|8192); addWrapMargin(amount,0,10);
-        Spinner kind=new Spinner(this); kind.setPadding(dp(12),0,dp(8),0); kind.setBackground(bg(WHITE,20));
+
+        Spinner kind=new Spinner(this); spinnerStyle(kind);
         kind.setAdapter(spinnerAdapter(new String[]{"They owe me","I owe them"})); addWrapMargin(kind,0,10);
-        EditText phone=new EditText(this); fieldStyle(phone,"WhatsApp number (e.g. +923001234567)",15); phone.setInputType(3); addWrapMargin(phone,0,10);
+
+        TextView contact=tv("No contact selected",14,MUTED,false);
+        Button choose=action("Choose from contacts");
+        choose.setTextColor(WHITE); choose.setBackground(bg(GREEN,22));
+        LinearLayout contactRow=row();
+        contactRow.addView(contact,new LinearLayout.LayoutParams(0,dp(50),1));
+        LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(dp(175),dp(50)); cp.setMargins(dp(8),0,0,0);
+        contactRow.addView(choose,cp); addWrapMargin(contactRow,0,10);
+
+        EditText hiddenPhone=new EditText(this); hiddenPhone.setVisibility(View.GONE);
+        addWrap(hiddenPhone);
+        choose.setOnClickListener(v->chooseContact(contact,hiddenPhone));
+
         EditText note=new EditText(this); fieldStyle(note,"Note (optional)",17); addWrapMargin(note,0,12);
-        Button add=action("Add person  ＋"); addWrapMargin(add,0,12);
+        Button add=action("＋  Add person");
+        add.setTextColor(WHITE); add.setTextSize(16); add.setBackground(bg(GREEN,24));
+        addWrapMargin(add,0,16);
+
         addWrap(sectionTitle("Saved people"));
         LinearLayout listBox=box(WHITE,14); addWrapMargin(listBox,0,8);
-        String saved=prefs.getString("dues_json","[]"); JSONArray people=new JSONArray(); try{people=new JSONArray(saved);}catch(Exception ignored){}
+        JSONArray people=new JSONArray();
+        try{people=new JSONArray(prefs.getString("dues_json","[]"));}catch(Exception ignored){}
         if(people.length()==0) listBox.addView(tv("No people added yet.",13,MUTED,false));
         for(int i=0;i<people.length();i++) addPersonCard(listBox,people.optJSONObject(i),i);
-        JSONArray initialPeople=people;
+
         add.setOnClickListener(v->{
             String n=name.getText().toString().trim(), am=amount.getText().toString().trim();
             if(n.isEmpty()||am.isEmpty()){Toast.makeText(this,"Enter a name and amount.",Toast.LENGTH_SHORT).show();return;}
             try{
+                double value=Double.parseDouble(am); if(value<=0)throw new Exception();
                 JSONArray a; try{a=new JSONArray(prefs.getString("dues_json","[]"));}catch(Exception e){a=new JSONArray();}
-                JSONObject o=new JSONObject();o.put("name",n);o.put("amount",Double.parseDouble(am));o.put("kind",kind.getSelectedItem().toString());o.put("phone",phone.getText().toString().trim());o.put("note",note.getText().toString().trim());a.put(o);
-                prefs.edit().putString("dues_json",a.toString()).apply(); showPeople();
+                JSONObject o=new JSONObject();
+                o.put("name",n); o.put("amount",value); o.put("kind",kind.getSelectedItem().toString());
+                o.put("phone",hiddenPhone.getText().toString().trim()); o.put("note",note.getText().toString().trim());
+                o.put("settled",false); a.put(o);
+                prefs.edit().putString("dues_json",a.toString()).apply();
+                feedback("Person added",ToneGenerator.TONE_PROP_ACK);
+                showPeople();
             }catch(Exception e){Toast.makeText(this,"Please enter a valid amount.",Toast.LENGTH_SHORT).show();}
         });
         nav();
     }
 
     void addPersonCard(LinearLayout parent,JSONObject o,int index){
-        LinearLayout card=box(MINT,12);
-        LinearLayout r=row();
-        LinearLayout info=new LinearLayout(this);info.setOrientation(LinearLayout.VERTICAL);
-        String kind=o.optString("kind","They owe me"); int col=kind.startsWith("They")?GREEN:RED;
+        if(o==null)return;
+        boolean settled=o.optBoolean("settled",false);
+        LinearLayout card=box(settled?WHITE:MINT,12);
+        LinearLayout top=row();
+        LinearLayout info=new LinearLayout(this); info.setOrientation(LinearLayout.VERTICAL);
+        String kind=o.optString("kind","They owe me");
+        int col=kind.startsWith("They")?GREEN:RED;
         info.addView(tv(o.optString("name","Person"),16,INK,true));
-        info.addView(tv(kind+"  •  "+money(o.optDouble("amount"))+(o.optString("note").isEmpty()?"":"  •  "+o.optString("note")),12,MUTED,false));
-        r.addView(info,new LinearLayout.LayoutParams(0,-2,1));
-        Button wa=action("WhatsApp");wa.setTextSize(12);wa.setTextColor(GREEN);r.addView(wa,new LinearLayout.LayoutParams(dp(96),dp(44)));
-        card.addView(r);
-        wa.setOnClickListener(v->whatsappReminder(o));
+        String status=settled?"  •  SETTLED":"";
+        info.addView(tv(kind+"  •  "+money(o.optDouble("amount"))+status+(o.optString("note").isEmpty()?"":"  •  "+o.optString("note")),12,MUTED,false));
+        top.addView(info,new LinearLayout.LayoutParams(0,-2,1));
+
+        Button mark=action(settled?"Settled":"Mark");
+        mark.setTextSize(12); mark.setTextColor(settled?MUTED:col);
+        top.addView(mark,new LinearLayout.LayoutParams(dp(72),dp(44)));
+        Button del=action("Delete"); del.setTextSize(12); del.setTextColor(RED);
+        LinearLayout.LayoutParams delp=new LinearLayout.LayoutParams(dp(72),dp(44)); delp.setMargins(dp(6),0,0,0); top.addView(del,delp);
+        card.addView(top);
+
+        if(!settled){
+            Button settle=action(kind.startsWith("They")?"Received amount  ✓":"Returned amount  ✓");
+            settle.setTextColor(WHITE); settle.setBackground(bg(kind.startsWith("They")?GREEN:RED,20));
+            LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-1,dp(46)); sp.setMargins(0,dp(9),0,0);
+            card.addView(settle,sp);
+            settle.setOnClickListener(v->settlePerson(index));
+        }
         parent.addView(card,new LinearLayout.LayoutParams(-1,-2));
-        if(index<999)parent.addView(new Space(this),new LinearLayout.LayoutParams(1,dp(7)));
+        mark.setOnClickListener(v->togglePerson(index));
+        del.setOnClickListener(v->confirmDeletePerson(index));
+    }
+
+    void updatePeople(JSONArray people){prefs.edit().putString("dues_json",people.toString()).apply();}
+
+    void togglePerson(int index){
+        try{
+            JSONArray a=new JSONArray(prefs.getString("dues_json","[]"));
+            JSONObject o=a.getJSONObject(index); o.put("settled",!o.optBoolean("settled",false));
+            updatePeople(a); feedback(o.optBoolean("settled")?"Marked settled":"Marked active",ToneGenerator.TONE_PROP_ACK); showPeople();
+        }catch(Exception e){Toast.makeText(this,"Could not update this person.",Toast.LENGTH_SHORT).show();}
+    }
+
+    void settlePerson(int index){
+        try{
+            JSONArray a=new JSONArray(prefs.getString("dues_json","[]"));
+            JSONObject o=a.getJSONObject(index); o.put("settled",true);
+            updatePeople(a);
+            boolean received=o.optString("kind","").startsWith("They");
+            feedback(received?"Amount received":"Amount returned",received?ToneGenerator.TONE_PROP_ACK:ToneGenerator.TONE_PROP_BEEP);
+            showPeople();
+        }catch(Exception e){Toast.makeText(this,"Could not update this person.",Toast.LENGTH_SHORT).show();}
+    }
+
+    void confirmDeletePerson(int index){
+        dialogBuilder().setTitle("Delete person?")
+            .setMessage("This will remove the saved person and their due from Paisa Laya.")
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Delete",(d,w)->{
+                try{
+                    JSONArray a=new JSONArray(prefs.getString("dues_json","[]"));
+                    if(index>=0&&index<a.length())a.remove(index);
+                    updatePeople(a); feedback("Person deleted",ToneGenerator.TONE_PROP_NACK); showPeople();
+                }catch(Exception e){Toast.makeText(this,"Could not delete this person.",Toast.LENGTH_SHORT).show();}
+            }).show();
     }
 
     void whatsappReminder(JSONObject o){
-        String phone=o.optString("phone","").replaceAll("[^0-9+]","");
-        if(phone.isEmpty()){Toast.makeText(this,"Add a WhatsApp number for this person first.",Toast.LENGTH_SHORT).show();return;}
-        String name=o.optString("name","there"), amount=money(o.optDouble("amount")); boolean theyOwe=o.optString("kind","").startsWith("They");
-        String msg=theyOwe?"Hi "+name+", just a friendly reminder about the "+amount+" pending amount. Please let me know when you expect to settle it. Thank you!":"Hi "+name+", just a friendly reminder regarding the "+amount+" I need to settle with you. Please let me know if anything is needed from my side. Thank you!";
+        String name=o.optString("name","there"), amount=money(o.optDouble("amount"));
+        boolean theyOwe=o.optString("kind","").startsWith("They");
+        String msg=theyOwe
+            ?"Hi "+name+", just a friendly reminder about the "+amount+" pending amount. Please let me know when you expect to settle it. Thank you!"
+            :"Hi "+name+", just a friendly reminder regarding the "+amount+" I need to settle with you. Please let me know if anything is needed from my side. Thank you!";
         try{
-            Intent i=new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://wa.me/"+phone.replace("+","")+"?text="+java.net.URLEncoder.encode(msg,"UTF-8")));
-            startActivity(i);
-        }catch(Exception e){Toast.makeText(this,"WhatsApp could not be opened.",Toast.LENGTH_SHORT).show();}
+            Intent i=new Intent(Intent.ACTION_SEND); i.setType("text/plain"); i.putExtra(Intent.EXTRA_TEXT,msg);
+            startActivity(Intent.createChooser(i,"Send reminder with"));
+        }catch(Exception e){Toast.makeText(this,"No messaging app is available.",Toast.LENGTH_SHORT).show();}
     }
 
     void showTools(){
         recordNavigation(SCREEN_TOOLS);
         currentScreen=SCREEN_TOOLS;
-        base("Tools","Currency conversion and gold-rate information.");
+        base("Tools","Currency conversion, live rates and gold.");
+
         addWrap(sectionTitle("Currency converter"));
         EditText amount=new EditText(this); fieldStyle(amount,"Amount",17); amount.setInputType(2|8192); addWrapMargin(amount,0,8);
         Spinner from=new Spinner(this), to=new Spinner(this);
+        spinnerStyle(from); spinnerStyle(to);
         String[] currencies={"PKR","USD","AED","SAR","GBP","EUR","CAD","AUD","INR","JPY"};
-        ArrayAdapter<String> adapter=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,currencies);
-        from.setAdapter(adapter); to.setAdapter(adapter); from.setSelection(0); to.setSelection(1);
-        LinearLayout rr=row(); rr.addView(from,new LinearLayout.LayoutParams(0,dp(52),1));
-        LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(0,dp(52),1); tp.setMargins(dp(8),0,0,0); rr.addView(to,tp); addWrapMargin(rr,0,8);
+        from.setAdapter(spinnerAdapter(currencies)); to.setAdapter(spinnerAdapter(currencies));
+        from.setSelection(0); to.setSelection(1);
+
+        Button swap=action("↔"); swap.setTextColor(WHITE); swap.setTextSize(20); swap.setBackground(bg(GREEN,22));
+        LinearLayout rr=row();
+        rr.addView(from,new LinearLayout.LayoutParams(0,dp(52),1));
+        LinearLayout.LayoutParams swp=new LinearLayout.LayoutParams(dp(58),dp(52)); swp.setMargins(dp(7),0,dp(7),0); rr.addView(swap,swp);
+        rr.addView(to,new LinearLayout.LayoutParams(0,dp(52),1)); addWrapMargin(rr,0,8);
+        swap.setOnClickListener(v->{int a=from.getSelectedItemPosition(),b=to.getSelectedItemPosition();from.setSelection(b);to.setSelection(a);});
+
         TextView result=tv("Enter an amount and tap Convert.",15,MUTED,false); addWrapMargin(result,4,8);
-        Button convert=action("Convert"); convert.setTextColor(WHITE); convert.setBackground(bg(GREEN,22)); addWrapMargin(convert,0,14);
-        convert.setOnClickListener(v->{ try{ double a=Double.parseDouble(amount.getText().toString().trim()); String f=from.getSelectedItem().toString(), t=to.getSelectedItem().toString(); if(f.equals(t)){result.setText(String.format(Locale.US,"%.2f %s",a,t));return;} result.setText("Loading live rate…"); new Thread(()->{ try{ String json=httpGet("https://open.er-api.com/v6/latest/"+f); JSONObject rootJ=new JSONObject(json); double rate=rootJ.getJSONObject("rates").getDouble(t); double value=a*rate; runOnUiThread(()->result.setText(String.format(Locale.US,"%.2f %s = %.2f %s",a,f,value,t))); }catch(Exception e){runOnUiThread(()->result.setText("Could not load the live rate. Check your internet connection."));} }).start(); }catch(Exception e){result.setText("Please enter a valid amount.");} });
-        addWrap(sectionTitle("Gold rates in Pakistan"));
-        TextView gold=tv("Loading current gold rates…",14,MUTED,false); addWrapMargin(gold,0,8);
-        TextView source=tv("Source: goldrateinpakistan.org",12,MUTED,false); addWrapMargin(source,0,12);
-        Button refresh=action("Refresh gold rates"); addWrapMargin(refresh,0,10); refresh.setOnClickListener(v->loadGoldRates(gold));
-        TextView note=tv("Rates are indicative and may change during the day. 30-day chart data will be added when the source provides historical values.",12,MUTED,false); addWrap(note);
-        loadGoldRates(gold); nav();
+        Button convert=action("Convert"); convert.setTextColor(WHITE); convert.setBackground(bg(GREEN,22)); addWrapMargin(convert,0,16);
+        convert.setOnClickListener(v->{
+            try{
+                double a=Double.parseDouble(amount.getText().toString().trim());
+                String f=from.getSelectedItem().toString(), t=to.getSelectedItem().toString();
+                if(f.equals(t)){result.setText(String.format(Locale.US,"%.2f %s",a,t));return;}
+                result.setText("Loading live rate…");
+                new Thread(()->{
+                    try{
+                        String json=httpGet("https://open.er-api.com/v6/latest/"+f);
+                        JSONObject rootJ=new JSONObject(json); double rate=rootJ.getJSONObject("rates").getDouble(t); double value=a*rate;
+                        runOnUiThread(()->result.setText(String.format(Locale.US,"%.2f %s = %.2f %s",a,f,value,t)));
+                    }catch(Exception e){runOnUiThread(()->result.setText("Could not load the live rate. Check your internet connection."));}
+                }).start();
+            }catch(Exception e){result.setText("Please enter a valid amount.");}
+        });
+
+        addWrap(sectionTitle("Currency rates"));
+        LinearLayout rateTable=box(WHITE,12);
+        addRateRow(rateTable,"Currency","1 PKR =","Rate",true);
+        TextView ratesStatus=tv("Loading live currency rates…",13,MUTED,false); rateTable.addView(ratesStatus);
+        addWrapMargin(rateTable,0,12); loadCurrencyRates(rateTable,ratesStatus);
+
+        addWrap(sectionTitle("Gold rate in Pakistan"));
+        LinearLayout goldTable=box(WHITE,12);
+        addRateRow(goldTable,"Gold","Purity","Per tola",true);
+        TextView goldStatus=tv("Loading 24K gold rate…",13,MUTED,false); goldTable.addView(goldStatus);
+        addWrapMargin(goldTable,0,8); loadGoldRates(goldStatus);
+        addWrapMargin(tv("24K gold only • per tola • Source: goldrateinpakistan.org",12,MUTED,false),0,8);
+
+        Button refresh=action("Refresh rates"); refresh.setTextColor(WHITE); refresh.setBackground(bg(GREEN,22));
+        addWrapMargin(refresh,0,10); refresh.setOnClickListener(v->{loadCurrencyRates(rateTable,ratesStatus);loadGoldRates(goldStatus);});
+        nav();
+    }
+
+    void addRateRow(LinearLayout parent,String a,String b,String c,boolean header){
+        LinearLayout r=row();
+        int color=header?GREEN:INK;
+        r.addView(tv(a,header?12:13,color,header),new LinearLayout.LayoutParams(0,-2,1));
+        r.addView(tv(b,header?12:13,color,header),new LinearLayout.LayoutParams(0,-2,1));
+        r.addView(tv(c,header?12:13,color,header),new LinearLayout.LayoutParams(0,-2,1));
+        parent.addView(r);
+        if(header)parent.addView(new Space(this),new LinearLayout.LayoutParams(1,dp(7)));
+    }
+
+    void loadCurrencyRates(LinearLayout table,TextView status){
+        while(table.getChildCount()>2)table.removeViewAt(2);
+        status.setVisibility(View.VISIBLE);
+        table.addView(status);
+        new Thread(()->{
+            try{
+                String json=httpGet("https://open.er-api.com/v6/latest/PKR");
+                JSONObject rates=new JSONObject(json).getJSONObject("rates");
+                String[] cs={"USD","AED","SAR","GBP","EUR","CAD","AUD","INR","JPY"};
+                runOnUiThread(()->{
+                    table.removeView(status);
+                    for(String c:cs){
+                        double one=rates.optDouble(c,Double.NaN);
+                        if(!Double.isNaN(one)) addRateRow(table,c,"1 PKR",String.format(Locale.US,"%.6f %s",one,c),false);
+                    }
+                    table.addView(tv("Base: PKR • live exchange rates",11,MUTED,false));
+                });
+            }catch(Exception e){runOnUiThread(()->status.setText("Currency rates unavailable. Tap Refresh to try again."));}
+        }).start();
     }
 
     void loadGoldRates(TextView target){
-        target.setText("Loading current gold rates…");
-        new Thread(()->{ try{
+        target.setText("Loading 24K gold rate…");
+        new Thread(()->{try{
             String json=httpGet("https://goldrateinpakistan.org/api/rates.json");
-            JSONObject j=new JSONObject(json);
-            JSONObject gold=j.optJSONObject("gold");
-            if(gold==null) throw new Exception("Gold data missing");
-            StringBuilder s=new StringBuilder();
-            s.append("24K: Rs ").append(formatGold(gold.optJSONObject("24k"))).append(" / tola").append("\n");
-            s.append("22K: Rs ").append(formatGold(gold.optJSONObject("22k"))).append(" / tola").append("\n");
-            s.append("21K: Rs ").append(formatGold(gold.optJSONObject("21k"))).append(" / tola").append("\n");
-            s.append("18K: Rs ").append(formatGold(gold.optJSONObject("18k"))).append(" / tola");
+            JSONObject j=new JSONObject(json), gold=j.optJSONObject("gold"), rate=gold==null?null:gold.optJSONObject("24k");
+            if(rate==null)throw new Exception("24K data missing");
+            double value=rate.optDouble("per_tola",Double.NaN); if(Double.isNaN(value))throw new Exception("24K rate missing");
+            String text="24K gold"; String amount="Rs "+String.format(Locale.US,"%,.0f",value);
             String updated=j.optString("updated_at","");
-            if(!updated.isEmpty()) s.append("\nUpdated: ").append(updated);
-            runOnUiThread(()->target.setText(s.toString()));
-        }catch(Exception e){runOnUiThread(()->target.setText("Gold-rate service is currently unavailable. Please tap Refresh and try again."));} }).start();
-    }
-
-    String formatGold(JSONObject rate){
-        if(rate==null) return "—";
-        double value=rate.optDouble("per_tola",Double.NaN);
-        if(Double.isNaN(value)) return "—";
-        return String.format(Locale.US,"%,.0f",value);
+            if(!updated.isEmpty())amount+=" • "+updated;
+            runOnUiThread(()->{
+                target.setText("");
+                View p=(View)target.getParent();
+                if(p instanceof LinearLayout)((LinearLayout)p).addView(tv(text,13,INK,true),0);
+                target.setText(amount);
+            });
+        }catch(Exception e){runOnUiThread(()->target.setText("24K gold rate unavailable. Tap Refresh to try again."));}});
     }
 
     String httpGet(String address) throws Exception{
@@ -564,17 +759,17 @@ public class MainActivity extends Activity {
         currentScreen=SCREEN_SETTINGS;
         base("Settings","Make Paisa Laya feel right for you.");
         addWrap(sectionTitle("Appearance"));
-        Spinner theme=new Spinner(this); theme.setAdapter(spinnerAdapter(new String[]{"System","Light","Dark"}));
+        Spinner theme=new Spinner(this); spinnerStyle(theme); theme.setAdapter(spinnerAdapter(new String[]{"System","Light","Dark"}));
         String savedTheme=prefs.getString("theme","System"); theme.setSelection(savedTheme.equals("Light")?1:savedTheme.equals("Dark")?2:0); addWrapMargin(theme,0,10);
         theme.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){} public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){String val=pos==1?"Light":pos==2?"Dark":"System"; if(!prefs.getString("theme","System").equals(val)){prefs.edit().putString("theme",val).apply();applyPreferencesTheme();renderCurrent();}}});
-        Spinner accent=new Spinner(this); accent.setAdapter(spinnerAdapter(new String[]{"Green","Blue","Purple","Gold"})); String ac=prefs.getString("accent","Green"); accent.setSelection(ac.equals("Blue")?1:ac.equals("Purple")?2:ac.equals("Gold")?3:0); addWrapMargin(accent,0,10);
+        Spinner accent=new Spinner(this); spinnerStyle(accent); accent.setAdapter(spinnerAdapter(new String[]{"Green","Blue","Purple","Gold"})); String ac=prefs.getString("accent","Green"); accent.setSelection(ac.equals("Blue")?1:ac.equals("Purple")?2:ac.equals("Gold")?3:0); addWrapMargin(accent,0,10);
         accent.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){} public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){String val=new String[]{"Green","Blue","Purple","Gold"}[pos]; if(!prefs.getString("accent","Green").equals(val)){prefs.edit().putString("accent",val).apply();applyPreferencesTheme();renderCurrent();}}});
         addWrap(sectionTitle("Default currency"));
-        Spinner currency=new Spinner(this); String[] cs={"PKR","USD","AED","SAR","GBP","EUR"}; currency.setAdapter(spinnerAdapter(cs)); String dc=prefs.getString("currency","PKR"); for(int i=0;i<cs.length;i++)if(cs[i].equals(dc))currency.setSelection(i); addWrapMargin(currency,0,12);
+        Spinner currency=new Spinner(this); spinnerStyle(currency); String[] cs={"PKR","USD","AED","SAR","GBP","EUR"}; currency.setAdapter(spinnerAdapter(cs)); String dc=prefs.getString("currency","PKR"); for(int i=0;i<cs.length;i++)if(cs[i].equals(dc))currency.setSelection(i); addWrapMargin(currency,0,12);
         currency.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){} public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){prefs.edit().putString("currency",cs[pos]).apply();}});
         addWrap(sectionTitle("Data & reminders"));
         Button reports=action("Reports & Backup"); addWrapMargin(reports,0,8); reports.setOnClickListener(v->showReports());
-        Button wa=action("WhatsApp reminders"); addWrapMargin(wa,0,8); wa.setOnClickListener(v->new AlertDialog.Builder(this,isDarkMode()?AlertDialog.THEME_DEVICE_DEFAULT_DARK:AlertDialog.THEME_DEVICE_DEFAULT_LIGHT).setTitle("WhatsApp reminders").setMessage("In People & Dues, save a WhatsApp number and tap WhatsApp to open a ready-made reminder. Paisa Laya never sends messages automatically.").setPositiveButton("OK",null).show());
+        Button wa=action("WhatsApp reminders"); addWrapMargin(wa,0,8); wa.setOnClickListener(v->new AlertDialog.Builder(this,isDarkMode()?AlertDialog.THEME_DEVICE_DEFAULT_DARK:AlertDialog.THEME_DEVICE_DEFAULT_LIGHT).setTitle("WhatsApp reminders").setMessage("In People & Dues, choose a person from your phone contacts and tap WhatsApp to prepare a ready-made reminder. Paisa Laya never sends messages automatically.").setPositiveButton("OK",null).show());
         Button about=action("About Paisa Laya"); addWrapMargin(about,0,8); about.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Paisa Laya").setMessage("Simple personal money tracking, dues, currency conversion and gold-rate tools. Your transaction data is stored locally on this device.").setPositiveButton("OK",null).show());
         addWrap(tv("Tip: create a JSON backup before changing phones.",12,MUTED,false)); nav();
     }
@@ -612,7 +807,7 @@ public class MainActivity extends Activity {
         csv.setOnClickListener(v->exportCsv());
         backup.setOnClickListener(v->backup());
         restore.setOnClickListener(v->restore());
-        clear.setOnClickListener(v->new AlertDialog.Builder(this)
+        clear.setOnClickListener(v->dialogBuilder()
             .setTitle("Clear transactions?")
             .setMessage("This cannot be undone.")
             .setNegativeButton("Cancel",null)
@@ -643,13 +838,48 @@ public class MainActivity extends Activity {
         in.addCategory(Intent.CATEGORY_OPENABLE); startActivityForResult(in,11);
     }
 
+    TextView findViewByText(View rootView,String text){
+        if(rootView instanceof TextView && text.equals(((TextView)rootView).getText().toString())) return (TextView)rootView;
+        if(rootView instanceof ViewGroup){
+            ViewGroup g=(ViewGroup)rootView;
+            for(int i=0;i<g.getChildCount();i++){
+                TextView found=findViewByText(g.getChildAt(i),text);
+                if(found!=null)return found;
+            }
+        }
+        return null;
+    }
+
     @Override protected void onActivityResult(int req,int res,Intent data){
         super.onActivityResult(req,res,data);
         if(res!=RESULT_OK||data==null)return;
         try{
+            if(req==21){
+                android.net.Uri uri=data.getData();
+                android.database.Cursor c=getContentResolver().query(uri,
+                    new String[]{ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,ContactsContract.CommonDataKinds.Phone.NUMBER},
+                    null,null,null);
+                if(c!=null && c.moveToFirst()){
+                    String n=c.getString(0), p=c.getString(1);
+                    View decor=getWindow().getDecorView();
+                    // The current People screen owns the selected contact TextView through its tag.
+                    TextView selected=null;
+                    // Re-find the label by its displayed placeholder/text.
+                    selected=findViewByText(decor,"No contact selected");
+                    if(selected==null)selected=findViewByText(decor,n);
+                    if(selected!=null){
+                        selected.setText(n+"  •  "+p);
+                        selected.setTextColor(INK);
+                        Object tag=selected.getTag();
+                        if(tag instanceof EditText)((EditText)tag).setText(p);
+                    }
+                }
+                if(c!=null)c.close();
+                return;
+            }
             if(req==10){
                 OutputStream out=getContentResolver().openOutputStream(data.getData());
-                JSONObject r=new JSONObject(); r.put("transactions",transactions()); r.put("dues",prefs.getString("dues",""));
+                JSONObject r=new JSONObject(); r.put("transactions",transactions()); r.put("dues_json",prefs.getString("dues_json","[]"));
                 out.write(r.toString().getBytes()); out.close();
                 Toast.makeText(this,"Backup saved",Toast.LENGTH_SHORT).show();
             }else if(req==11){
@@ -658,7 +888,7 @@ public class MainActivity extends Activity {
                 StringBuilder s=new StringBuilder(); String line;
                 while((line=br.readLine())!=null)s.append(line); br.close();
                 JSONObject r=new JSONObject(s.toString()); JSONArray restored=r.optJSONArray("transactions");
-                prefs.edit().putString(TX,restored==null?"[]":restored.toString()).putString("dues",r.optString("dues","")).apply();
+                prefs.edit().putString(TX,restored==null?"[]":restored.toString()).putString("dues_json",r.optString("dues_json","[]")).apply();
                 showHome();
             }
         }catch(Exception e){Toast.makeText(this,"Could not process the file.",Toast.LENGTH_SHORT).show();}
