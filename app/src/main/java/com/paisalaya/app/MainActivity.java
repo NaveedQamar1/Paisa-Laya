@@ -916,9 +916,9 @@ public class MainActivity extends Activity {
                 String[] codes={"USD","GBP","EUR","AED","SAR","AUD","CAD","CNY","JPY"};
                 String[] names={"US Dollar","UK Pound Sterling","Euro","U.A.E Dirham","Saudi Riyal","Australian Dollar","Canadian Dollar","China Yuan","Japanese Yen"};
                 ArrayList<String[]> rows=new ArrayList<>();
-                String updated="";
+                final String[] updatedBox={""};
                 java.util.regex.Matcher um=java.util.regex.Pattern.compile("Updated at\\s*:\\s*([^C]+?)\\s+Currency\\s+Buying\\s+Selling",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
-                if(um.find()) updated=um.group(1).trim();
+                if(um.find()) updatedBox[0]=um.group(1).trim();
                 for(int i=0;i<names.length;i++){
                     java.util.regex.Matcher m=java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(names[i])+"\\s+([0-9.,]+)\\s+([0-9.,]+)",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
                     if(m.find()) rows.add(new String[]{codes[i],m.group(1),m.group(2)});
@@ -934,7 +934,7 @@ public class MainActivity extends Activity {
                         status.setText("FOREX.com.pk rates unavailable. Tap Refresh to try again.");
                         table.addView(status);
                     }else{
-                        String u=updated;
+                        String u=updatedBox[0];
                         if(u.isEmpty()) u="Latest available";
                         table.addView(tv("Updated: "+u+" • 1 foreign currency = PKR",11,MUTED,false));
                     }
