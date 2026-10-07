@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
         if(selectedScanner==null)selectedScanner=url;
     }
     String selectedScanner;
-    void manualAdd(){String ip=ipEdit.getText().toString().trim();if(ip.isEmpty()){toast("Enter the scanner IP address.");return;}selectedScanner=(ip.startsWith("http")?ip:"http://"+ip+":80/eSCL/");scannerStatus.setText("Manual scanner selected: "+selectedScanner);}
+    void manualAdd(){String ip=ipEdit.getText().toString().trim();if(ip.isEmpty()){toast("Enter the scanner IP address.");return;}selectedScanner=(ip.startsWith("http")?ip:"https://"+ip+":443/eSCL/");scannerStatus.setText("Manual scanner selected: "+selectedScanner);}
     void pick(boolean front){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("image/*");startActivityForResult(i,front?101:102);}
     @Override protected void onActivityResult(int r,int c,Intent d){super.onActivityResult(r,c,d);if(c!=RESULT_OK||d==null||d.getData()==null)return;Uri u=d.getData();if(r==101){frontUri=u;frontPreview.setImageURI(u);status.setText("Front loaded. Now scan/import the back.");}else if(r==102){backUri=u;backPreview.setImageURI(u);status.setText("Front and back loaded.");}else if(r==105&&pendingCopy!=null){try(OutputStream o=getContentResolver().openOutputStream(d.getData());InputStream in=new FileInputStream(pendingCopy)){byte[] b=new byte[8192];int n;while((n=in.read(b))>0)o.write(b,0,n);status.setText("PDF saved.");}catch(Exception e){toast(e.getMessage());}}}
     void scanSide(boolean front){
