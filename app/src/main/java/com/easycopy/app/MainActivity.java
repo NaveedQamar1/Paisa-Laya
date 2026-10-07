@@ -34,7 +34,9 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     private final View[][] sideCells=new View[2][4];
     private Spinner dpiSpinner,colorSpinner,sourceSpinner;
     private TextView status,scannerStatus;
-    private LinearLayout devices;
+    private Spinner scannerSpinner;
+    private final ArrayList<String> scannerUrls=new ArrayList<>();
+    private final ArrayList<String> scannerNames=new ArrayList<>();
     private ExecutorService pool=Executors.newFixedThreadPool(2);
     private File pendingCopy;
 
@@ -64,7 +66,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
 
         LinearLayout net=card(); TextView nt=tv("Network scanner",20);nt.setTypeface(null,Typeface.BOLD);net.addView(nt);
         scannerStatus=tv("Searching for scanners on this Wi‑Fi network…",13);scannerStatus.setTextColor(Color.rgb(102,112,133));net.addView(scannerStatus);
-        devices=new LinearLayout(this);devices.setOrientation(LinearLayout.VERTICAL);net.addView(devices);
+        scannerSpinner=spinner(new String[]{"Searching for scanners…"});net.addView(scannerSpinner,new LinearLayout.LayoutParams(-1,dp(58)));scannerSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){if(pos>=0&&pos<scannerUrls.size()){selectedScanner=scannerUrls.get(pos);scannerStatus.setText("Selected: "+scannerNames.get(pos));}}public void onNothingSelected(android.widget.AdapterView<?> p){}});
         Button rescan=actionBtn("↻  Find Scanners",Color.rgb(238,242,255),Color.rgb(55,48,163));net.addView(rescan);
         root.addView(net,new LinearLayout.LayoutParams(-1,-2));
 
@@ -82,6 +84,8 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         LinearLayout copies=new LinearLayout(this);copies.setGravity(Gravity.CENTER_VERTICAL);copies.addView(tv("Copies of each complete set",15),new LinearLayout.LayoutParams(0,dp(50),1));copiesEdit=new EditText(this);copiesEdit.setText("1");copiesEdit.setInputType(2);copiesEdit.setSelectAllOnFocus(true);copies.addView(copiesEdit,new LinearLayout.LayoutParams(dp(90),dp(52)));id.addView(copies);
         CheckBox gray=new CheckBox(this);gray.setText("Economical grayscale output");gray.setId(9001);id.addView(gray);
         root.addView(id,new LinearLayout.LayoutParams(-1,-2));
+
+        LinearLayout imagePrinter=card();TextView ipt=tv("Image printer",20);ipt.setTypeface(null,Typeface.BOLD);imagePrinter.addView(ipt);TextView iph=tv("Print PNG, JPG or JPEG files with crop, zoom, pan and rotation controls.",13);iph.setTextColor(Color.rgb(102,112,133));imagePrinter.addView(iph);Button chooseImage=actionBtn("Choose image to print",Color.rgb(238,242,255),Color.rgb(55,48,163));imagePrinter.addView(chooseImage);chooseImage.setOnClickListener(v->pickForPrint());root.addView(imagePrinter,new LinearLayout.LayoutParams(-1,-2));
 
         LinearLayout actions=card();TextView at=tv("Output",20);at.setTypeface(null,Typeface.BOLD);actions.addView(at);
         Button pdf=actionBtn("▣  Preview PDF",Color.rgb(55,48,163),Color.WHITE),save=actionBtn("↓  Save PDF",Color.rgb(18,183,106),Color.WHITE),print=actionBtn("⎙  Print A4 Duplex",Color.rgb(245,158,11),Color.WHITE),share=actionBtn("↗  Share PDF",Color.rgb(6,182,212),Color.WHITE);
@@ -104,26 +108,30 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         scan.setOnClickListener(v->scanSide(front));imp.setOnClickListener(v->pick(front));return l;
     }
     void discover(){
-        devices.removeAllViews();scannerStatus.setText("Searching…");
+        scannerUrls.clear();scannerNames.clear();scannerSpinner.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Searching for scanners…"}));
+        scannerStatus.setText("Searching…");
         NetworkScanner ns=new NetworkScanner(this);ns.discover(new NetworkScanner.Listener(){
             public void onDevice(String name,String url){runOnUiThread(()->addDevice(name,url));}
-            public void onDone(){runOnUiThread(()->{if(devices.getChildCount()==0)scannerStatus.setText("No compatible eSCL scanner found on this network.");});}
+            public void onDone(){runOnUiThread(()->{if(scannerUrls.isEmpty())scannerStatus.setText("No compatible eSCL scanner found on this network.");else{ArrayAdapter<String>a=new ArrayAdapter<String>(MainActivity.this,android.R.layout.simple_spinner_dropdown_item,scannerNames);a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);scannerSpinner.setAdapter(a);scannerSpinner.setSelection(0);scannerStatus.setText("Scanner available");}});}
             public void onError(String m){runOnUiThread(()->scannerStatus.setText(m));}
         });
     }
     void addDevice(String name,String url){
-        scannerStatus.setText("Scanner available");Button b=actionBtn("●  "+name+"\n"+url,Color.rgb(236,253,245),Color.rgb(6,95,70));b.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);b.setOnClickListener(v->{selectedScanner=url;scannerStatus.setText("Connected: "+name);});
-        devices.addView(b);
-        if(selectedScanner==null)selectedScanner=url;
+        for(int i=0;i<scannerUrls.size();i++)if(scannerUrls.get(i).equals(url))return;
+        scannerUrls.add(url);scannerNames.add(name);
+        ArrayAdapter<String>a=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,scannerNames);a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);scannerSpinner.setAdapter(a);
     }
     String selectedScanner;
     void pick(boolean front){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("image/*");startActivityForResult(i,front?101:102);}
+    void pickForPrint(){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("image/*");startActivityForResult(i,106);}
+    void processImageForPrint(Uri u){status.setText("Opening image editor…");pool.execute(()->{try{Bitmap b=load(u);if(b==null)throw new Exception("Could not open image.");runOnUiThread(()->showImageEditor(b));}catch(Exception e){runOnUiThread(()->toast("Could not open image: "+e.getMessage()));}});}
     @Override protected void onActivityResult(int r,int c,Intent d){
         super.onActivityResult(r,c,d);
         if(c!=RESULT_OK||d==null||d.getData()==null)return;
         Uri u=d.getData();
         if(r==101)processImported(u,true);
         else if(r==102)processImported(u,false);
+        else if(r==106)processImageForPrint(u);
         else if(r==105&&pendingCopy!=null){
             try(OutputStream o=getContentResolver().openOutputStream(d.getData());InputStream in=new FileInputStream(pendingCopy)){
                 byte[] b=new byte[8192];int n;while((n=in.read(b))>0)o.write(b,0,n);
@@ -577,7 +585,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     File makePdf()throws Exception{
         int n=cardCount(),reps=copies();for(int i=0;i<n;i++)if(frontUris[i]==null||backUris[i]==null)throw new Exception("Please scan/import both sides for card "+(i+1)+".");
         PdfDocument d=new PdfDocument();int total=n*reps;
-        for(int page=0;page<(total+3)/4;page++){PdfDocument.Page fp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,page*2+1).create());drawSet(fp.getCanvas(),true,page*4,n,reps);d.finishPage(fp);PdfDocument.Page bp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,page*2+2).create());drawSet(bp.getCanvas(),false,page*4,n,reps);d.finishPage(bp);}
+        for(int page=0;page<(total+7)/8;page++){PdfDocument.Page fp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,page*2+1).create());drawSet(fp.getCanvas(),true,page*4,n,reps);d.finishPage(fp);PdfDocument.Page bp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,page*2+2).create());drawSet(bp.getCanvas(),false,page*4,n,reps);d.finishPage(bp);}
         File out=new File(getCacheDir(),"EasyCopy_"+new SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(new Date())+".pdf");try(FileOutputStream o=new FileOutputStream(out)){d.writeTo(o);}d.close();return out;
     }
     void drawSet(Canvas c,boolean front,int start,int n,int reps){
@@ -585,11 +593,11 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         float cardW=595f*CARD_W_MM/210f;
         float cardH=842f*CARD_H_MM/297f;
         float gapX=24f;
-        float gapY=24f;
+        float gapY=10f;
         float marginX=(595f-(2f*cardW+gapX))/2f;
-        float marginY=(842f-(2f*cardH+gapY))/2f;
+        float marginY=(842f-(4f*cardH+3f*gapY))/2f;
         Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG|Paint.DITHER_FLAG);
-        for(int k=0;k<4;k++){
+        for(int k=0;k<8;k++){
             int global=start+k;
             if(global>=n*reps)break;
             int ci=global%n;
@@ -626,6 +634,6 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         }catch(Exception e){toast("PDF saved, but no PDF viewer is installed.");}
     }
     void sharePdf(){try{lastPdf=makePdf();Intent i=new Intent(Intent.ACTION_SEND);i.setType("application/pdf");i.putExtra(Intent.EXTRA_STREAM,androidx.core.content.FileProvider.getUriForFile(this,"com.easycopy.app.fileprovider",lastPdf));startActivity(Intent.createChooser(i,"Share EasyCopy PDF"));}catch(Exception e){toast(e.getMessage());}}
-    void printPdf(){try{lastPdf=makePdf();PrintManager pm=(PrintManager)getSystemService(PRINT_SERVICE);pm.print("EasyCopy",new PrintDocumentAdapter(){public void onLayout(PrintAttributes a,PrintAttributes b,CancellationSignal c,LayoutResultCallback x,Bundle z){x.onLayoutFinished(new PrintDocumentInfo.Builder("EasyCopy.pdf").setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).setPageCount(((cardCount()*copies()+3)/4)*2).build(),true);}public void onWrite(PageRange[] p,ParcelFileDescriptor d,CancellationSignal c,WriteResultCallback x){try(InputStream in=new FileInputStream(lastPdf);OutputStream o=new FileOutputStream(d.getFileDescriptor())){byte[] b=new byte[8192];int n;while((n=in.read(b))>0)o.write(b,0,n);o.flush();x.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});}catch(Exception e){x.onWriteFailed(e.getMessage());}}},new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build());}catch(Exception e){toast(e.getMessage());}}
+    void printPdf(){try{lastPdf=makePdf();PrintManager pm=(PrintManager)getSystemService(PRINT_SERVICE);pm.print("EasyCopy",new PrintDocumentAdapter(){public void onLayout(PrintAttributes a,PrintAttributes b,CancellationSignal c,LayoutResultCallback x,Bundle z){x.onLayoutFinished(new PrintDocumentInfo.Builder("EasyCopy.pdf").setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT) .setPageCount(((cardCount()*copies()+7)/8)*2).build(),true);}public void onWrite(PageRange[] p,ParcelFileDescriptor d,CancellationSignal c,WriteResultCallback x){try(InputStream in=new FileInputStream(lastPdf);OutputStream o=new FileOutputStream(d.getFileDescriptor())){byte[] b=new byte[8192];int n;while((n=in.read(b))>0)o.write(b,0,n);o.flush();x.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});}catch(Exception e){x.onWriteFailed(e.getMessage());}}},new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build());}catch(Exception e){toast(e.getMessage());}}
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 }
