@@ -166,8 +166,28 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         File out=new File(getCacheDir(),"EasyCopy_"+new SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(new Date())+".pdf");try(FileOutputStream o=new FileOutputStream(out)){d.writeTo(o);}d.close();return out;
     }
     void drawSet(Canvas c,boolean front,int start,int n,int reps){
-        c.drawColor(Color.WHITE);float cardW=595f*CARD_W_MM/210f,cardH=842f*CARD_H_MM/297f,gapX=24f,gapY=24f,marginX=(595f-(2*cardW+gapX))/2f,marginY=(842f-(2*cardH+gapY))/2f);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG|Paint.DITHER_FLAG);
-        for(int k=0;k<4;k++){int global=start+k;if(global>=n*reps)break;int ci=global%n;Uri u=front?frontUris[ci]:backUris[ci];try{Bitmap im=load(u);float nx=marginX+(k%2)*(cardW+gapX),x=front?nx:595f-nx-cardW,y=marginY+(k/2)*(cardH+gapY);c.drawBitmap(im,null,new RectF(x,y,x+cardW,y+cardH),p);im.recycle();}catch(Exception ignored){}}
+        c.drawColor(Color.WHITE);
+        float cardW=595f*CARD_W_MM/210f;
+        float cardH=842f*CARD_H_MM/297f;
+        float gapX=24f;
+        float gapY=24f;
+        float marginX=(595f-(2f*cardW+gapX))/2f;
+        float marginY=(842f-(2f*cardH+gapY))/2f;
+        Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG|Paint.DITHER_FLAG);
+        for(int k=0;k<4;k++){
+            int global=start+k;
+            if(global>=n*reps)break;
+            int ci=global%n;
+            Uri u=front?frontUris[ci]:backUris[ci];
+            try{
+                Bitmap im=load(u);
+                float nx=marginX+(k%2)*(cardW+gapX);
+                float x=front?nx:595f-nx-cardW;
+                float y=marginY+(k/2)*(cardH+gapY);
+                c.drawBitmap(im,null,new RectF(x,y,x+cardW,y+cardH),p);
+                im.recycle();
+            }catch(Exception ignored){}
+        }
     }
 
     File lastPdf;
