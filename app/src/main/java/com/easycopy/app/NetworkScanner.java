@@ -128,16 +128,16 @@ public class NetworkScanner {
             else if(containsIgnoreCase(caps,"Feeder"))source="Feeder";
         }
 
-        // eSCL ScanRegions use ThreeHundredthsOfInches, not raw pixels.
-        // A4 is 8.27 x 11.69 inches = 827 x 1169 hundredths.
-        String xml="<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                +"<scan:ScanSettings xmlns:scan=\"http://schemas.hp.com/imaging/escl/2011/05/03\" xmlns:pwg=\"http://www.pwg.org/schemas/2010/12/sm\" xmlns:escl=\"http://schemas.hp.com/imaging/escl/2011/05/03\">"
+        // Scan the entire supported platen/feeder area instead of a fixed A4 corner.
+        int maxW=extractInt(caps,"MaxWidth",2550), maxH=extractInt(caps,"MaxHeight",4200);
+        String xml="<?xml version="1.0" encoding="UTF-8"?>"
+                +"<scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm" xmlns:escl="http://schemas.hp.com/imaging/escl/2011/05/03">"
                 +"<pwg:Version>2.0</pwg:Version>"
                 +"<scan:Intent>Document</scan:Intent>"
                 +"<pwg:ScanRegions><pwg:ScanRegion>"
                 +"<pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits>"
                 +"<pwg:XOffset>0</pwg:XOffset><pwg:YOffset>0</pwg:YOffset>"
-                +"<pwg:Width>827</pwg:Width><pwg:Height>1169</pwg:Height>"
+                +"<pwg:Width>"+maxW+"</pwg:Width><pwg:Height>"+maxH+"</pwg:Height>"
                 +"</pwg:ScanRegion></pwg:ScanRegions>"
                 +"<pwg:InputSource>"+source+"</pwg:InputSource>"
                 +"<pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>"
@@ -169,6 +169,10 @@ public class NetworkScanner {
             if(b!=null&&b.length>1000)return b;
         }
         throw new IOException("Timed out waiting for scanner.");
+    }
+
+    private static int extractInt(String xml,String tag,int fallback){
+        try{java.util.regex.Matcher m=java.util.regex.Pattern.compile("<(?:\\w+:)?"+tag+">\\s*(\\d+)\\s*</(?:\\w+:)?"+tag+">",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(xml);return m.find()?Integer.parseInt(m.group(1)):fallback;}catch(Exception e){return fallback;}
     }
 
     private static String resolve(String base,String location)throws Exception{
