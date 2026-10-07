@@ -1,0 +1,53 @@
+name: Build EasyCopy APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["easycopy-apk"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: easycopy-apk
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+
+      - name: Install Android platform
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10"
+
+      - name: Build debug APK
+        run: gradle clean assembleDebug --no-build-cache --stacktrace
+
+      - name: Verify APK
+        run: test -f app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload EasyCopy APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: EasyCopy-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
