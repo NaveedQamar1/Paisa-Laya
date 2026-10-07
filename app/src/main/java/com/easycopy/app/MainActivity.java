@@ -32,14 +32,15 @@ public class MainActivity extends Activity {
 
     int dp(float x){return (int)(x*getResources().getDisplayMetrics().density+.5f);}
     TextView tv(String s,float z){TextView t=new TextView(this);t.setText(s);t.setTextSize(z);t.setTextColor(Color.rgb(24,32,51));t.setPadding(0,dp(5),0,dp(5));return t;}
-    Button btn(String s){Button b=new Button(this);b.setText(s);b.setAllCaps(false);return b;}
-    LinearLayout card(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);l.setPadding(dp(16),dp(12),dp(16),dp(12));GradientDrawable g=new GradientDrawable();g.setColor(Color.WHITE);g.setCornerRadius(dp(18));l.setBackground(g);return l;}
+    Button btn(String s){return actionBtn(s,Color.WHITE,Color.rgb(55,48,163));}
+    Button actionBtn(String s,int bg,int fg){Button b=new Button(this);b.setText(s);b.setTextSize(14);b.setAllCaps(false);b.setTextColor(fg);b.setTypeface(null,Typeface.BOLD);b.setPadding(dp(8),0,dp(8),0);GradientDrawable g=new GradientDrawable();g.setColor(bg);g.setCornerRadius(dp(14));g.setStroke(dp(1),Color.argb(35,0,0,0));b.setBackground(g);b.setStateListAnimator(null);return b;}
+    LinearLayout card(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);l.setPadding(dp(16),dp(12),dp(16),dp(12));GradientDrawable g=new GradientDrawable();g.setColor(Color.WHITE);g.setCornerRadius(dp(18));g.setStroke(dp(1),Color.rgb(229,231,240));l.setBackground(g);return l;}
     @Override public void onCreate(Bundle b){super.onCreate(b);getWindow().setStatusBarColor(Color.rgb(247,248,252));build();}
 
     void build(){
         ScrollView sc=new ScrollView(this);sc.setBackgroundColor(Color.rgb(247,248,252));
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(16),dp(10),dp(16),dp(24));
-        TextView title=tv("EasyCopy",32);title.setTypeface(null,Typeface.BOLD);title.setTextColor(Color.rgb(55,48,163));root.addView(title);
+        LinearLayout hero=new LinearLayout(this);hero.setOrientation(LinearLayout.VERTICAL);hero.setPadding(dp(18),dp(16),dp(18),dp(16));GradientDrawable hg=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{Color.rgb(55,48,163),Color.rgb(6,182,212)});hg.setCornerRadius(dp(22));hero.setBackground(hg);TextView title=tv("EasyCopy",32);title.setTypeface(null,Typeface.BOLD);title.setTextColor(Color.WHITE);hero.addView(title);TextView heroSub=tv("Scan • Copy • Print • Share",14);heroSub.setTextColor(Color.WHITE);heroSub.setAlpha(.92f);hero.addView(heroSub);root.addView(hero,new LinearLayout.LayoutParams(-1,dp(108)));
         TextView sub=tv("Smart network scanner • CNIC copier • PDF",14);sub.setTextColor(Color.rgb(102,112,133));root.addView(sub);
 
         LinearLayout net=card(); TextView nt=tv("Network scanner",20);nt.setTypeface(null,Typeface.BOLD);net.addView(nt);
@@ -47,8 +48,8 @@ public class MainActivity extends Activity {
         devices=new LinearLayout(this);devices.setOrientation(LinearLayout.VERTICAL);net.addView(devices);
         LinearLayout iprow=new LinearLayout(this);iprow.setGravity(Gravity.CENTER_VERTICAL);
         ipEdit=new EditText(this);ipEdit.setHint("Scanner IP address");ipEdit.setSingleLine(true);ipEdit.setInputType(33);iprow.addView(ipEdit,new LinearLayout.LayoutParams(0,dp(52),1));
-        Button add=btn("Add");iprow.addView(add,new LinearLayout.LayoutParams(dp(80),dp(52)));net.addView(iprow);
-        Button rescan=btn("↻  Find scanners again");net.addView(rescan);
+        Button add=actionBtn("+  Add Scanner",Color.rgb(6,182,212),Color.WHITE);iprow.addView(add,new LinearLayout.LayoutParams(dp(80),dp(52)));net.addView(iprow);
+        Button rescan=actionBtn("↻  Find Scanners",Color.rgb(238,242,255),Color.rgb(55,48,163));net.addView(rescan);
         root.addView(net,new LinearLayout.LayoutParams(-1,-2));
 
         LinearLayout set=card(); TextView st=tv("Scan settings",20);st.setTypeface(null,Typeface.BOLD);set.addView(st);
@@ -65,7 +66,7 @@ public class MainActivity extends Activity {
         root.addView(id,new LinearLayout.LayoutParams(-1,-2));
 
         LinearLayout actions=card();TextView at=tv("Output",20);at.setTypeface(null,Typeface.BOLD);actions.addView(at);
-        Button pdf=btn("Create PDF preview"),save=btn("Save PDF"),print=btn("Print • A4 Duplex"),share=btn("Share PDF");
+        Button pdf=actionBtn("▣  Preview PDF",Color.rgb(55,48,163),Color.WHITE),save=actionBtn("↓  Save PDF",Color.rgb(18,183,106),Color.WHITE),print=actionBtn("⎙  Print A4 Duplex",Color.rgb(245,158,11),Color.WHITE),share=actionBtn("↗  Share PDF",Color.rgb(6,182,212),Color.WHITE);
         actions.addView(pdf);actions.addView(save);actions.addView(print);actions.addView(share);root.addView(actions,new LinearLayout.LayoutParams(-1,-2));
         status=tv("Ready. Connect a network scanner or import images.",13);status.setTextColor(Color.rgb(102,112,133));root.addView(status);
         sc.addView(root);setContentView(sc);
@@ -74,11 +75,11 @@ public class MainActivity extends Activity {
         add.setOnClickListener(v->manualAdd());rescan.setOnClickListener(v->discover());
         discover();
     }
-    Spinner spinner(String[] a){Spinner s=new Spinner(this);ArrayAdapter<String>x=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,a);s.setAdapter(x);return s;}
+    Spinner spinner(String[] a){Spinner s=new Spinner(this);ArrayAdapter<String>x=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,a);x.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);s.setAdapter(x);return s;}
     LinearLayout side(String name,boolean front){
         LinearLayout l=card();l.setPadding(dp(8),dp(6),dp(8),dp(6));TextView t=tv(name,15);t.setTypeface(null,Typeface.BOLD);l.addView(t);
         ImageView p=new ImageView(this);p.setBackgroundColor(Color.rgb(239,241,246));p.setScaleType(ImageView.ScaleType.CENTER_INSIDE);if(front)frontPreview=p;else backPreview=p;l.addView(p,new LinearLayout.LayoutParams(-1,dp(70)));
-        Button scan=btn("Scan"),imp=btn("Import");LinearLayout r=new LinearLayout(this);r.addView(scan,new LinearLayout.LayoutParams(0,dp(48),1));r.addView(imp,new LinearLayout.LayoutParams(0,dp(48),1));l.addView(r);
+        Button scan=actionBtn("Scan",Color.rgb(55,48,163),Color.WHITE),imp=actionBtn("Import",Color.rgb(238,242,255),Color.rgb(55,48,163));LinearLayout r=new LinearLayout(this);r.addView(scan,new LinearLayout.LayoutParams(0,dp(48),1));r.addView(imp,new LinearLayout.LayoutParams(0,dp(48),1));l.addView(r);
         scan.setOnClickListener(v->scanSide(front));imp.setOnClickListener(v->pick(front));return l;
     }
     void discover(){
@@ -90,7 +91,7 @@ public class MainActivity extends Activity {
         });
     }
     void addDevice(String name,String url){
-        scannerStatus.setText("Scanner available");Button b=btn("●  "+name+"   "+url);b.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);b.setOnClickListener(v->{selectedScanner=url;scannerStatus.setText("Connected: "+name);});
+        scannerStatus.setText("Scanner available");Button b=actionBtn("●  "+name+"\n"+url,Color.rgb(236,253,245),Color.rgb(6,95,70));b.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);b.setOnClickListener(v->{selectedScanner=url;scannerStatus.setText("Connected: "+name);});
         devices.addView(b);
         if(selectedScanner==null)selectedScanner=url;
     }
