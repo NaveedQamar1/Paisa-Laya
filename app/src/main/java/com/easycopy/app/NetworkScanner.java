@@ -130,9 +130,9 @@ public class NetworkScanner {
 
         // eSCL ScanRegions use ThreeHundredthsOfInches, not raw pixels.
         // A4 is 8.27 x 11.69 inches = 827 x 1169 hundredths.
-        String xml="<?xml version="1.0" encoding="UTF-8"?>"
-                +"<scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" "
-                +"xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm">"
+        String xml="<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                +"<scan:ScanSettings xmlns:scan=\"http://schemas.hp.com/imaging/escl/2011/05/03\" xmlns:pwg=\"http://www.pwg.org/schemas/2010/12/sm\" xmlns:escl=\"http://schemas.hp.com/imaging/escl/2011/05/03\" "
+                +"xmlns:pwg=\"http://www.pwg.org/schemas/2010/12/sm\">"
                 +"<pwg:Version>2.0</pwg:Version>"
                 +"<scan:Intent>Document</scan:Intent>"
                 +"<pwg:ScanRegions><pwg:ScanRegion>"
