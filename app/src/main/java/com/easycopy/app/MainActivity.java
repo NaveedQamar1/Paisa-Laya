@@ -215,7 +215,29 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         return out;
     }
 
-    // Front page uses normal coordinates. Back page is mirrored horizontally so that\n    // an A4 sheet printed duplex on the long edge places each back directly\n    // behind its corresponding front when the physical sheet is flipped.\n    void draw(Canvas c,Bitmap im,int total,int start,boolean backSide){\n        c.drawColor(Color.WHITE);\n        Paint border=new Paint(Paint.ANTI_ALIAS_FLAG);border.setStyle(Paint.Style.STROKE);border.setStrokeWidth(0.7f);border.setColor(Color.LTGRAY);\n        final float cardW=595f*CARD_W_MM/210f;\n        final float cardH=842f*CARD_H_MM/297f;\n        final float gapX=20f,gapY=18f;\n        final float marginX=(595f-(2*cardW+gapX))/2f;\n        final float marginY=(842f-(4*cardH+3*gapY))/2f;\n        Paint imagePaint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG|Paint.DITHER_FLAG);\n        for(int k=0;k<8;k++){\n            int n=start+k;if(n>=total)break;\n            float normalX=marginX+(k%2)*(cardW+gapX);\n            float x=backSide?595f-normalX-cardW:normalX;\n            float y=marginY+(k/2)*(cardH+gapY);\n            c.drawRect(x,y,x+cardW,y+cardH,border);\n            c.drawBitmap(im,null,new RectF(x,y,x+cardW,y+cardH),imagePaint);\n        }\n    }\n
+    // Front page uses normal coordinates. Back page is mirrored horizontally for long-edge duplex.
+    void draw(Canvas c,Bitmap im,int total,int start,boolean backSide){
+        c.drawColor(Color.WHITE);
+        Paint border=new Paint(Paint.ANTI_ALIAS_FLAG);
+        border.setStyle(Paint.Style.STROKE);
+        border.setStrokeWidth(0.7f);
+        border.setColor(Color.LTGRAY);
+        final float cardW=595f*CARD_W_MM/210f;
+        final float cardH=842f*CARD_H_MM/297f;
+        final float gapX=20f,gapY=18f;
+        final float marginX=(595f-(2*cardW+gapX))/2f;
+        final float marginY=(842f-(4*cardH+3*gapY))/2f;
+        Paint imagePaint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG|Paint.DITHER_FLAG);
+        for(int k=0;k<8;k++){
+            int n=start+k;if(n>=total)break;
+            float normalX=marginX+(k%2)*(cardW+gapX);
+            float x=backSide?595f-normalX-cardW:normalX;
+            float y=marginY+(k/2)*(cardH+gapY);
+            c.drawRect(x,y,x+cardW,y+cardH,border);
+            c.drawBitmap(im,null,new RectF(x,y,x+cardW,y+cardH),imagePaint);
+        }
+    }
+
     File lastPdf;
     void safePdf(){try{lastPdf=makePdf();status.setText("PDF preview ready: "+lastPdf.getName());}catch(Exception e){toast(e.getMessage());}}
     void savePdf(){try{lastPdf=makePdf();pendingCopy=lastPdf;Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("application/pdf");i.putExtra(Intent.EXTRA_TITLE,lastPdf.getName());startActivityForResult(i,105);}catch(Exception e){toast(e.getMessage());}}
