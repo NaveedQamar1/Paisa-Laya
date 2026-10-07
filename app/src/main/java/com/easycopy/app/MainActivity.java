@@ -617,6 +617,64 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         }
     }
 
+
+    void showImageEditor(Bitmap original){
+        final Dialog dialog=new Dialog(this);
+        LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(12),dp(8),dp(12),dp(12));root.setBackgroundColor(Color.WHITE);
+        TextView help=tv("Move image • pinch to zoom • rotate • fit inside the crop frame",13);help.setTextColor(Color.rgb(90,100,120));root.addView(help);
+        ImageEditorView editor=new ImageEditorView(this,original);root.addView(editor,new LinearLayout.LayoutParams(-1,0,1));
+        LinearLayout tools=new LinearLayout(this);tools.setGravity(Gravity.CENTER);
+        Button left=actionBtn("↶",Color.rgb(238,242,255),Color.rgb(55,48,163)),right=actionBtn("↷",Color.rgb(238,242,255),Color.rgb(55,48,163)),fit=actionBtn("Fit",Color.rgb(238,242,255),Color.rgb(55,48,163)),reset=actionBtn("Reset",Color.rgb(238,242,255),Color.rgb(55,48,163));
+        tools.addView(left,new LinearLayout.LayoutParams(0,dp(48),1));tools.addView(right,new LinearLayout.LayoutParams(0,dp(48),1));tools.addView(fit,new LinearLayout.LayoutParams(0,dp(48),1));tools.addView(reset,new LinearLayout.LayoutParams(0,dp(48),1));root.addView(tools);
+        Button print=actionBtn("Print cropped image",Color.rgb(18,183,106),Color.WHITE);root.addView(print,new LinearLayout.LayoutParams(-1,dp(52)));
+        left.setOnClickListener(v->editor.rotate(-90));right.setOnClickListener(v->editor.rotate(90));fit.setOnClickListener(v->editor.fit());reset.setOnClickListener(v->editor.reset());
+        print.setOnClickListener(v->{Bitmap out=editor.exportCrop();dialog.dismiss();printBitmap(out);});
+        dialog.setContentView(root);dialog.show();Window w=dialog.getWindow();if(w!=null)w.setLayout(-1,-1);
+    }
+
+    void printBitmap(Bitmap bitmap){
+        if(bitmap==null){toast("Could not prepare the image.");return;}
+        File f=new File(getCacheDir(),"EasyCopy_image_"+System.currentTimeMillis()+".jpg");
+        try(FileOutputStream o=new FileOutputStream(f)){bitmap.compress(Bitmap.CompressFormat.JPEG,98,o);}catch(Exception e){toast("Could not prepare image: "+e.getMessage());return;}
+        PrintManager pm=(PrintManager)getSystemService(PRINT_SERVICE);
+        pm.print("EasyCopy Image",new PrintDocumentAdapter(){
+            public void onLayout(PrintAttributes a,PrintAttributes b,CancellationSignal c,LayoutResultCallback x,Bundle z){x.onLayoutFinished(new PrintDocumentInfo.Builder("EasyCopy_Image.jpg").setContentType(PrintDocumentInfo.CONTENT_TYPE_PHOTO).setPageCount(1).build(),true);}
+            public void onWrite(PageRange[] p,ParcelFileDescriptor d,CancellationSignal c,WriteResultCallback x){try(InputStream in=new FileInputStream(f);OutputStream o=new FileOutputStream(d.getFileDescriptor())){byte[] buf=new byte[8192];int n;while((n=in.read(buf))>0)o.write(buf,0,n);o.flush();x.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});}catch(Exception e){x.onWriteFailed(e.getMessage());}}
+        },new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build());
+    }
+
+    class ImageEditorView extends View{
+        Bitmap image;Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);float zoom=1f,rotation=0f,tx=0f,ty=0f,lastX,lastY;boolean dragging;ScaleGestureDetector scaleDetector;
+        ImageEditorView(Context c,Bitmap b){super(c);image=b;setBackgroundColor(Color.rgb(35,38,45));scaleDetector=new ScaleGestureDetector(c,new ScaleGestureDetector.SimpleOnScaleGestureListener(){public boolean onScale(ScaleGestureDetector d){zoom=Math.max(.25f,Math.min(6f,zoom*d.getScaleFactor()));invalidate();return true;}});}
+        protected void onDraw(Canvas c){
+            super.onDraw(c);if(image==null)return;
+            float fit=Math.min(getWidth()*.90f/image.getWidth(),getHeight()*.72f/image.getHeight());
+            Matrix m=new Matrix();m.postScale(fit*zoom,fit*zoom,image.getWidth()/2f,image.getHeight()/2f);m.postRotate(rotation,image.getWidth()/2f,image.getHeight()/2f);m.postTranslate(getWidth()/2f-image.getWidth()/2f+tx,getHeight()/2f-image.getHeight()/2f+ty);
+            c.drawBitmap(image,m,paint);
+            RectF f=frameRect();Paint shade=new Paint();shade.setColor(Color.argb(150,0,0,0));c.drawRect(0,0,getWidth(),f.top,shade);c.drawRect(0,f.bottom,getWidth(),getHeight(),shade);c.drawRect(0,f.top,f.left,f.bottom,shade);c.drawRect(f.right,f.top,getWidth(),f.bottom,shade);
+            Paint border=new Paint(Paint.ANTI_ALIAS_FLAG);border.setStyle(Paint.Style.STROKE);border.setStrokeWidth(dp(2));border.setColor(Color.WHITE);c.drawRect(f,border);
+        }
+        RectF frameRect(){float fw=getWidth()*.90f,fh=Math.min(getHeight()*.72f,fw/(CARD_RATIO));float l=(getWidth()-fw)/2f,t=(getHeight()-fh)/2f;return new RectF(l,t,l+fw,t+fh);}
+        public boolean onTouchEvent(MotionEvent e){
+            scaleDetector.onTouchEvent(e);
+            if(e.getPointerCount()==1){
+                if(e.getAction()==MotionEvent.ACTION_DOWN){lastX=e.getX();lastY=e.getY();dragging=true;}
+                else if(e.getAction()==MotionEvent.ACTION_MOVE&&dragging){tx+=e.getX()-lastX;ty+=e.getY()-lastY;lastX=e.getX();lastY=e.getY();invalidate();}
+                else if(e.getAction()==MotionEvent.ACTION_UP)dragging=false;
+            }
+            return true;
+        }
+        void rotate(float d){rotation=(rotation+d)%360f;invalidate();}
+        void fit(){zoom=1f;tx=0f;ty=0f;rotation=0f;invalidate();}
+        void reset(){fit();}
+        Bitmap exportCrop(){
+            RectF f=frameRect();int ow=Math.max(1,(int)f.width()),oh=Math.max(1,(int)f.height());Bitmap out=Bitmap.createBitmap(ow,oh,Bitmap.Config.ARGB_8888);Canvas c=new Canvas(out);c.drawColor(Color.WHITE);
+            float fit=Math.min(getWidth()*.90f/image.getWidth(),getHeight()*.72f/image.getHeight());
+            Matrix m=new Matrix();m.postScale(fit*zoom,fit*zoom,image.getWidth()/2f,image.getHeight()/2f);m.postRotate(rotation,image.getWidth()/2f,image.getHeight()/2f);m.postTranslate(getWidth()/2f-image.getWidth()/2f+tx-f.left,getHeight()/2f-image.getHeight()/2f+ty-f.top);
+            c.drawBitmap(image,m,paint);return out;
+        }
+    }
+
     File lastPdf;
     void safePdf(){try{lastPdf=makePdf();openPdf(lastPdf);}catch(Exception e){toast(e.getMessage());}}
     void savePdf(){try{lastPdf=makePdf();pendingCopy=lastPdf;Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/pdf");i.putExtra(Intent.EXTRA_TITLE,lastPdf.getName());startActivityForResult(i,105);}catch(Exception e){toast(e.getMessage());}}
