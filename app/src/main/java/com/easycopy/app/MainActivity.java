@@ -19,7 +19,10 @@ import java.util.concurrent.*;
 public class MainActivity extends Activity { // EasyCopy colorful UI build
     private ImageView frontPreview, backPreview;
     private Uri frontUri, backUri;
-    private EditText copiesEdit, ipEdit;
+    private EditText copiesEdit;
+    private Spinner cardCountSpinner;
+    private final Uri[] frontUris=new Uri[4], backUris=new Uri[4];
+    private final ImageView[] frontPreviews=new ImageView[4], backPreviews=new ImageView[4];
     private Spinner dpiSpinner,colorSpinner,sourceSpinner;
     private TextView status,scannerStatus;
     private LinearLayout devices;
@@ -46,9 +49,6 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         LinearLayout net=card(); TextView nt=tv("Network scanner",20);nt.setTypeface(null,Typeface.BOLD);net.addView(nt);
         scannerStatus=tv("Searching for scanners on this Wi‑Fi network…",13);scannerStatus.setTextColor(Color.rgb(102,112,133));net.addView(scannerStatus);
         devices=new LinearLayout(this);devices.setOrientation(LinearLayout.VERTICAL);net.addView(devices);
-        LinearLayout iprow=new LinearLayout(this);iprow.setGravity(Gravity.CENTER_VERTICAL);
-        ipEdit=new EditText(this);ipEdit.setHint("Scanner IP address");ipEdit.setSingleLine(true);ipEdit.setInputType(33);iprow.addView(ipEdit,new LinearLayout.LayoutParams(0,dp(52),1));
-        Button add=actionBtn("+  Add Scanner",Color.rgb(6,182,212),Color.WHITE);iprow.addView(add,new LinearLayout.LayoutParams(dp(80),dp(52)));net.addView(iprow);
         Button rescan=actionBtn("↻  Find Scanners",Color.rgb(238,242,255),Color.rgb(55,48,163));net.addView(rescan);
         root.addView(net,new LinearLayout.LayoutParams(-1,-2));
 
@@ -57,11 +57,12 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         sourceSpinner=spinner(new String[]{"Platen / Glass","Feeder","Duplex ADF"});set.addView(sourceSpinner,new LinearLayout.LayoutParams(-1,dp(55)));
         root.addView(set,new LinearLayout.LayoutParams(-1,-2));
 
-        LinearLayout id=card();TextView it=tv("CNIC copy",20);it.setTypeface(null,Typeface.BOLD);id.addView(it);
-        TextView hint=tv("Place the card anywhere on the scanner glass. EasyCopy auto-crops, corrects orientation and prints it at real ID-card size.",13);hint.setTextColor(Color.rgb(102,112,133));id.addView(hint);
-        LinearLayout sides=new LinearLayout(this);sides.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout f=side("FRONT",true), b=side("BACK",false);sides.addView(f,new LinearLayout.LayoutParams(0,dp(180),1));sides.addView(b,new LinearLayout.LayoutParams(0,dp(180),1));id.addView(sides);
-        LinearLayout copies=new LinearLayout(this);copies.setGravity(Gravity.CENTER_VERTICAL);copies.addView(tv("Complete copies (front + back)",15),new LinearLayout.LayoutParams(0,dp(50),1));copiesEdit=new EditText(this);copiesEdit.setText("1");copiesEdit.setInputType(2);copiesEdit.setSelectAllOnFocus(true);copies.addView(copiesEdit,new LinearLayout.LayoutParams(dp(90),dp(52)));id.addView(copies);
+        LinearLayout id=card();TextView it=tv("ID card copier",20);it.setTypeface(null,Typeface.BOLD);id.addView(it);
+        TextView hint=tv("Place 1 to 4 cards anywhere on the scanner glass. EasyCopy scans the full area, finds the cards, straightens them and keeps each front paired with its own back.",13);hint.setTextColor(Color.rgb(102,112,133));id.addView(hint);
+        LinearLayout countRow=new LinearLayout(this);countRow.setGravity(Gravity.CENTER_VERTICAL);countRow.addView(tv("Different ID cards",15),new LinearLayout.LayoutParams(0,dp(52),1));
+        cardCountSpinner=spinner(new String[]{"1 card","2 cards","3 cards","4 cards"});countRow.addView(cardCountSpinner,new LinearLayout.LayoutParams(dp(130),dp(52)));id.addView(countRow);
+        id.addView(side("FRONT SIDE",true));id.addView(side("BACK SIDE",false));
+        LinearLayout copies=new LinearLayout(this);copies.setGravity(Gravity.CENTER_VERTICAL);copies.addView(tv("Copies of each complete set",15),new LinearLayout.LayoutParams(0,dp(50),1));copiesEdit=new EditText(this);copiesEdit.setText("1");copiesEdit.setInputType(2);copiesEdit.setSelectAllOnFocus(true);copies.addView(copiesEdit,new LinearLayout.LayoutParams(dp(90),dp(52)));id.addView(copies);
         CheckBox gray=new CheckBox(this);gray.setText("Economical grayscale output");gray.setId(9001);id.addView(gray);
         root.addView(id,new LinearLayout.LayoutParams(-1,-2));
 
@@ -72,14 +73,16 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         sc.addView(root);setContentView(sc);
 
         pdf.setOnClickListener(v->safePdf());save.setOnClickListener(v->savePdf());print.setOnClickListener(v->printPdf());share.setOnClickListener(v->sharePdf());
-        add.setOnClickListener(v->manualAdd());rescan.setOnClickListener(v->discover());
+        rescan.setOnClickListener(v->discover());
         discover();
     }
     Spinner spinner(String[] a){Spinner s=new Spinner(this);ArrayAdapter<String>x=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,a);x.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);s.setAdapter(x);return s;}
     LinearLayout side(String name,boolean front){
         LinearLayout l=card();l.setPadding(dp(8),dp(6),dp(8),dp(6));TextView t=tv(name,15);t.setTypeface(null,Typeface.BOLD);l.addView(t);
-        ImageView p=new ImageView(this);p.setBackgroundColor(Color.rgb(239,241,246));p.setScaleType(ImageView.ScaleType.CENTER_INSIDE);if(front)frontPreview=p;else backPreview=p;l.addView(p,new LinearLayout.LayoutParams(-1,dp(70)));
-        Button scan=actionBtn("Scan",Color.rgb(55,48,163),Color.WHITE),imp=actionBtn("Import",Color.rgb(238,242,255),Color.rgb(55,48,163));LinearLayout r=new LinearLayout(this);r.addView(scan,new LinearLayout.LayoutParams(0,dp(48),1));r.addView(imp,new LinearLayout.LayoutParams(0,dp(48),1));l.addView(r);
+        GridLayout grid=new GridLayout(this);grid.setColumnCount(2);grid.setRowCount(2);
+        for(int i=0;i<4;i++){ImageView p=new ImageView(this);p.setBackgroundColor(Color.rgb(239,241,246));p.setScaleType(ImageView.ScaleType.CENTER_INSIDE);if(front)frontPreviews[i]=p;else backPreviews[i]=p;LinearLayout cell=new LinearLayout(this);cell.setOrientation(LinearLayout.VERTICAL);cell.addView(tv(""+(i+1),12));cell.addView(p,new LinearLayout.LayoutParams(-1,dp(75)));GridLayout.LayoutParams gp=new GridLayout.LayoutParams();gp.width=0;gp.height=dp(100);gp.columnSpec=GridLayout.spec(i%2,1,1);gp.rowSpec=GridLayout.spec(i/2,1,1);grid.addView(cell,gp);}
+        l.addView(grid);
+        Button scan=actionBtn(front?"Scan all fronts":"Scan all backs",Color.rgb(55,48,163),Color.WHITE),imp=actionBtn(front?"Import fronts":"Import backs",Color.rgb(238,242,255),Color.rgb(55,48,163));LinearLayout r=new LinearLayout(this);r.addView(scan,new LinearLayout.LayoutParams(0,dp(48),1));r.addView(imp,new LinearLayout.LayoutParams(0,dp(48),1));l.addView(r);
         scan.setOnClickListener(v->scanSide(front));imp.setOnClickListener(v->pick(front));return l;
     }
     void discover(){
@@ -111,131 +114,60 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         }
     }
     void processImported(Uri u,boolean front){
-        status.setText("Preparing "+(front?"front":"back")+"…");
-        pool.execute(()->{
-            try{
-                Bitmap raw=load(u),card=prepareCard(raw);
-                File f=new File(getCacheDir(),"imported_card_"+System.currentTimeMillis()+".jpg");
-                try(FileOutputStream o=new FileOutputStream(f)){card.compress(Bitmap.CompressFormat.JPEG,98,o);}
-                Uri cu=Uri.fromFile(f);
-                if(raw!=card)raw.recycle();
-                runOnUiThread(()->{
-                    if(front){frontUri=cu;frontPreview.setImageURI(cu);status.setText("Front ready.");}
-                    else{backUri=cu;backPreview.setImageURI(cu);status.setText("Back ready.");}
-                });
-            }catch(Exception e){runOnUiThread(()->toast("Could not prepare image: "+e.getMessage()));}
-        });
+        status.setText("Finding ID cards…");
+        pool.execute(()->{try{Bitmap raw=load(u);ArrayList<Bitmap> cards=prepareCards(raw,cardCount());for(int i=0;i<cards.size();i++)saveCard(cards.get(i),front,i);if(raw!=null)raw.recycle();runOnUiThread(()->status.setText((front?"Fronts":"Backs")+" ready."));}catch(Exception e){runOnUiThread(()->toast("Could not prepare image: "+e.getMessage()));}});
     }
-
     void scanSide(boolean front){
-        if(selectedScanner==null){toast("Connect to a network scanner first.");return;}
-        status.setText("Scanning "+(front?"front":"back")+"… Place the card anywhere on the glass.");
+        if(selectedScanner==null){toast("Select a scanner first.");return;}
+        status.setText("Scanning the full scanner area…");
         int dpi=new int[]{150,200,300,600}[dpiSpinner.getSelectedItemPosition()];
         String color=new String[]{"RGB24","Grayscale8","BlackAndWhite1"}[colorSpinner.getSelectedItemPosition()];
         boolean duplex=sourceSpinner.getSelectedItemPosition()==2;
-        pool.execute(()->{
-            try{
-                byte[] data=NetworkScanner.scan(selectedScanner,dpi,color,duplex);
-                Bitmap raw=BitmapFactory.decodeByteArray(data,0,data.length);
-                Bitmap card=prepareCard(raw);
-                File f=new File(getCacheDir(),"scanned_card_"+System.currentTimeMillis()+".jpg");
-                try(FileOutputStream o=new FileOutputStream(f)){card.compress(Bitmap.CompressFormat.JPEG,98,o);}
-                Uri u=Uri.fromFile(f);
-                if(raw!=card)raw.recycle();
-                runOnUiThread(()->{
-                    if(front){frontUri=u;frontPreview.setImageURI(u);}else{backUri=u;backPreview.setImageURI(u);}
-                    status.setText((front?"Front":"Back")+" ready — auto-cropped, oriented and sized for ID-card printing.");
-                });
-            }catch(Exception e){runOnUiThread(()->toast("Scan failed: "+e.getMessage()));}
-        });
+        pool.execute(()->{try{byte[] data=NetworkScanner.scan(selectedScanner,dpi,color,duplex);Bitmap raw=BitmapFactory.decodeByteArray(data,0,data.length);ArrayList<Bitmap> cards=prepareCards(raw,cardCount());for(int i=0;i<cards.size();i++)saveCard(cards.get(i),front,i);if(raw!=null)raw.recycle();runOnUiThread(()->status.setText((front?"Fronts":"Backs")+" ready — "+cards.size()+" detected."));}catch(Exception e){runOnUiThread(()->toast("Scan failed: "+e.getMessage()));}});
+    }
+    int cardCount(){return cardCountSpinner==null?1:Math.max(1,Math.min(4,cardCountSpinner.getSelectedItemPosition()+1));}
+    void saveCard(Bitmap card,boolean front,int index)throws Exception{
+        File f=new File(getCacheDir(),(front?"front_":"back_")+(index+1)+"_"+System.currentTimeMillis()+".jpg");try(FileOutputStream o=new FileOutputStream(f)){card.compress(Bitmap.CompressFormat.JPEG,98,o);}Uri u=Uri.fromFile(f);
+        runOnUiThread(()->{if(front){frontUris[index]=u;frontPreviews[index].setImageURI(u);}else{backUris[index]=u;backPreviews[index].setImageURI(u);}});
     }
 
     Bitmap load(Uri u)throws Exception{return MediaStore.Images.Media.getBitmap(getContentResolver(),u);}
 
-    Bitmap prepareCard(Bitmap source){
+    ArrayList<Bitmap> prepareCards(Bitmap source,int wanted){
         if(source==null)throw new IllegalArgumentException("The scanner returned no image.");
-        int max=1400;
-        float scale=Math.min(1f,max/(float)Math.max(source.getWidth(),source.getHeight()));
+        int max=1800;float scale=Math.min(1f,max/(float)Math.max(source.getWidth(),source.getHeight()));
         Bitmap work=scale<1f?Bitmap.createScaledBitmap(source,Math.max(1,(int)(source.getWidth()*scale)),Math.max(1,(int)(source.getHeight()*scale)),true):source;
-        int w=work.getWidth(),h=work.getHeight();
-
-        // Estimate the scanner-bed background from the four corners only.
-        int[][] pts={{0,0},{w-1,0},{0,h-1},{w-1,h-1}};
-        long rs=0,gs=0,bs=0;
-        for(int[] pt:pts){int col=work.getPixel(pt[0],pt[1]);rs+=Color.red(col);gs+=Color.green(col);bs+=Color.blue(col);}
-        int br=(int)(rs/4),bg=(int)(gs/4),bb=(int)(bs/4);
-
-        int left=w,top=h,right=-1,bottom=-1;
-        for(int y=0;y<h;y++){
-            for(int x=0;x<w;x++){
-                int col=work.getPixel(x,y);
-                int diff=Math.abs(Color.red(col)-br)+Math.abs(Color.green(col)-bg)+Math.abs(Color.blue(col)-bb);
-                if(diff>55){
-                    if(x<left)left=x;if(x>right)right=x;if(y<top)top=y;if(y>bottom)bottom=y;
-                }
+        int w=work.getWidth(),h=work.getHeight(),n=w*h;int[] px=new int[n];work.getPixels(px,0,w,0,0,w,h);
+        int br=0,bg=0,bb=0,cnt=0,step=Math.max(1,Math.min(w,h)/100);
+        for(int y=0;y<h;y+=step)for(int x=0;x<w;x+=step)if(x<step*4||y<step*4||x>w-step*5||y>h-step*5){int c=px[y*w+x];br+=Color.red(c);bg+=Color.green(c);bb+=Color.blue(c);cnt++;}
+        br/=Math.max(1,cnt);bg/=Math.max(1,cnt);bb/=Math.max(1,cnt);
+        boolean[] fg=new boolean[n];for(int i=0;i<n;i++){int c=px[i];fg[i]=Math.abs(Color.red(c)-br)+Math.abs(Color.green(c)-bg)+Math.abs(Color.blue(c)-bb)>42;}
+        boolean[] seen=new boolean[n];ArrayDeque<Integer> q=new ArrayDeque<>();ArrayList<Rect> boxes=new ArrayList<>();int minArea=Math.max(2500,n/1500);
+        for(int y=0;y<h;y++)for(int x=0;x<w;x++){int idx=y*w+x;if(!fg[idx]||seen[idx])continue;q.clear();q.add(idx);seen[idx]=true;int l=x,r=x,t=y,b=y,area=0;
+            while(!q.isEmpty()){int z=q.removeFirst(),zx=z%w,zy=z/w;area++;l=Math.min(l,zx);r=Math.max(r,zx);t=Math.min(t,zy);b=Math.max(b,zy);
+                if(zx>0&&!seen[z-1]&&fg[z-1]){seen[z-1]=true;q.add(z-1);}if(zx<w-1&&!seen[z+1]&&fg[z+1]){seen[z+1]=true;q.add(z+1);}
+                if(zy>0&&!seen[z-w]&&fg[z-w]){seen[z-w]=true;q.add(z-w);}if(zy<h-1&&!seen[z+w]&&fg[z+w]){seen[z+w]=true;q.add(z+w);}
             }
+            int bw=r-l+1,bh=b-t+1;float ratio=bw/(float)bh;if(area>=minArea&&bw>80&&bh>50&&bw<.95f*w&&bh<.95f*h&&ratio>1.15f&&ratio<2.2f)boxes.add(new Rect(l,t,r+1,b+1));
         }
-        if(right<0 || right-left<80 || bottom-top<50)throw new IllegalArgumentException("Could not detect the ID card. Make sure the whole card is on the scanner glass.");
-
-        float bw=right-left+1,bh=bottom-top+1;
-        float cx=(left+right)/2f,cy=(top+bottom)/2f;
-        // Add enough margin to recover white card edges, then enforce exact card ratio.
-        float ew=bw*1.10f,eh=bh*1.10f;
-        if(ew/eh>CARD_RATIO)eh=ew/CARD_RATIO;else ew=eh*CARD_RATIO;
-        if(ew>w){ew=w;eh=ew/CARD_RATIO;}
-        if(eh>h){eh=h;ew=eh*CARD_RATIO;}
-        float l=Math.max(0,Math.min(cx-ew/2f,w-ew));
-        float t=Math.max(0,Math.min(cy-eh/2f,h-eh));
-        Bitmap cropped=Bitmap.createBitmap(work,(int)l,(int)t,Math.max(1,(int)ew),Math.max(1,(int)eh));
-        if(work!=source)work.recycle();
-
-        if(cropped.getWidth()<cropped.getHeight()){
-            Matrix m=new Matrix();m.postRotate(90);
-            Bitmap r=Bitmap.createBitmap(cropped,0,0,cropped.getWidth(),cropped.getHeight(),m,true);
-            cropped.recycle();cropped=r;
-        }
-        return cropped;
+        boxes.sort((a,b)->a.top==b.top?Integer.compare(a.left,b.left):Integer.compare(a.top,b.top));
+        ArrayList<Bitmap> out=new ArrayList<>();
+        for(Rect box:boxes){if(out.size()>=wanted)break;float ew=box.width()*1.10f,eh=ew/CARD_RATIO;if(eh>box.height()*1.35f){eh=box.height()*1.10f;ew=eh*CARD_RATIO;}int l=Math.max(0,Math.min(w-(int)ew,(int)(box.centerX()-ew/2)));int t=Math.max(0,Math.min(h-(int)eh,(int)(box.centerY()-eh/2)));Bitmap c=Bitmap.createBitmap(work,l,t,Math.max(1,Math.min(w-l,(int)ew)),Math.max(1,Math.min(h-t,(int)eh)));if(c.getWidth()<c.getHeight()){Matrix m=new Matrix();m.postRotate(90);Bitmap r=Bitmap.createBitmap(c,0,0,c.getWidth(),c.getHeight(),m,true);c.recycle();c=r;}out.add(c);}
+        if(out.isEmpty())throw new IllegalArgumentException("No ID card detected. Place the entire card on the glass with some scanner-bed area around it.");
+        if(work!=source)work.recycle();return out;
     }
 
     int copies(){try{return Math.max(1,Math.min(9999,Integer.parseInt(copiesEdit.getText().toString().trim())));}catch(Exception e){return 1;}}
 
     File makePdf()throws Exception{
-        if(frontUri==null||backUri==null)throw new Exception("Please load both FRONT and BACK first.");
-        Bitmap f=load(frontUri),b=load(backUri);
-        PdfDocument d=new PdfDocument();int total=copies();
-        for(int s=0;s<(total+7)/8;s++){
-            PdfDocument.Page fp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,s*2+1).create());
-            draw(fp.getCanvas(),f,total,s*8,false);d.finishPage(fp);
-            PdfDocument.Page bp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,s*2+2).create());
-            draw(bp.getCanvas(),b,total,s*8,true);d.finishPage(bp);
-        }
-        File out=new File(getCacheDir(),"EasyCopy_"+new SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(new Date())+".pdf");
-        try(FileOutputStream o=new FileOutputStream(out)){d.writeTo(o);}d.close();
-        f.recycle();b.recycle();
-        return out;
+        int n=cardCount(),reps=copies();for(int i=0;i<n;i++)if(frontUris[i]==null||backUris[i]==null)throw new Exception("Please scan/import both sides for card "+(i+1)+".");
+        PdfDocument d=new PdfDocument();int total=n*reps;
+        for(int page=0;page<(total+3)/4;page++){PdfDocument.Page fp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,page*2+1).create());drawSet(fp.getCanvas(),true,page*4,n,reps);d.finishPage(fp);PdfDocument.Page bp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,page*2+2).create());drawSet(bp.getCanvas(),false,page*4,n,reps);d.finishPage(bp);}
+        File out=new File(getCacheDir(),"EasyCopy_"+new SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(new Date())+".pdf");try(FileOutputStream o=new FileOutputStream(out)){d.writeTo(o);}d.close();return out;
     }
-
-    // Front page uses normal coordinates. Back page is mirrored horizontally for long-edge duplex.
-    void draw(Canvas c,Bitmap im,int total,int start,boolean backSide){
-        c.drawColor(Color.WHITE);
-        Paint border=new Paint(Paint.ANTI_ALIAS_FLAG);
-        border.setStyle(Paint.Style.STROKE);
-        border.setStrokeWidth(0.7f);
-        border.setColor(Color.LTGRAY);
-        final float cardW=595f*CARD_W_MM/210f;
-        final float cardH=842f*CARD_H_MM/297f;
-        final float gapX=20f,gapY=18f;
-        final float marginX=(595f-(2*cardW+gapX))/2f;
-        final float marginY=(842f-(4*cardH+3*gapY))/2f;
-        Paint imagePaint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG|Paint.DITHER_FLAG);
-        for(int k=0;k<8;k++){
-            int n=start+k;if(n>=total)break;
-            float normalX=marginX+(k%2)*(cardW+gapX);
-            float x=backSide?595f-normalX-cardW:normalX;
-            float y=marginY+(k/2)*(cardH+gapY);
-            c.drawRect(x,y,x+cardW,y+cardH,border);
-            c.drawBitmap(im,null,new RectF(x,y,x+cardW,y+cardH),imagePaint);
-        }
+    void drawSet(Canvas c,boolean front,int start,int n,int reps){
+        c.drawColor(Color.WHITE);float cardW=595f*CARD_W_MM/210f,cardH=842f*CARD_H_MM/297f,gapX=24f,gapY=24f,marginX=(595f-(2*cardW+gapX))/2f,marginY=(842f-(2*cardH+gapY))/2f);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG|Paint.DITHER_FLAG);
+        for(int k=0;k<4;k++){int global=start+k;if(global>=n*reps)break;int ci=global%n;Uri u=front?frontUris[ci]:backUris[ci];try{Bitmap im=load(u);float nx=marginX+(k%2)*(cardW+gapX),x=front?nx:595f-nx-cardW,y=marginY+(k/2)*(cardH+gapY);c.drawBitmap(im,null,new RectF(x,y,x+cardW,y+cardH),p);im.recycle();}catch(Exception ignored){}}
     }
 
     File lastPdf;
