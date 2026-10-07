@@ -271,7 +271,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     }
 
     Bitmap normalizeDetectedCard(Bitmap work,Rect box,int[] px,int w,int h,int br,int bg,int bb){
-        int pad=(int)(Math.max(box.width(),box.height())*.08f);
+        int pad=(int)(Math.max(box.width(),box.height())*.05f);
         int l=Math.max(0,box.left-pad),t=Math.max(0,box.top-pad);
         int r=Math.min(w,box.right+pad),b=Math.min(h,box.bottom+pad);
         int bw=r-l,bh=b-t;
@@ -280,6 +280,9 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         boolean[] local=buildLocalMask(work,l,t,r,b,br,bg,bb);
         local=morphClose(local,bw,bh,2);
 
+        // Estimate the card's dominant axis from the foreground pixels.
+        // Unlike the previous implementation, the rotation is rendered onto the
+        // real scanner-background color, so rotated corners can never become black.
         double sx=0,sy=0,sum=0;
         for(int y=0;y<bh;y++)for(int x=0;x<bw;x++)if(local[y*bw+x]){
             sx+=x;sy+=y;sum++;
@@ -291,19 +294,24 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         }
         double angle=.5*Math.atan2(2*cov,vx-vy);
         double deg=Math.toDegrees(angle);
-        while(deg>90)deg-=180;while(deg<=-90)deg+=180;
+        while(deg>90)deg-=180;
+        while(deg<=-90)deg+=180;
 
-        Matrix rm=new Matrix();rm.postRotate((float)-deg);
-        Bitmap crop=Bitmap.createBitmap(work,l,t,bw,bh,rm,true);
+        Bitmap crop=rotateCropOnBackground(work,l,t,bw,bh,(float)-deg,Color.rgb(br,bg,bb));
+        if(crop==null)return null;
 
-        // Re-estimate the background from the rotated crop's own corners.
+        // Re-estimate the background after rotation. This is important because the
+        // crop now contains only the selected card region and its real background.
         int[] cbg=estimateCropBackground(crop);
         Rect content=findForegroundBounds(crop,cbg[0],cbg[1],cbg[2]);
         if(content==null){
             crop.recycle();return null;
         }
 
-        int margin=Math.max(2,(int)(Math.min(content.width(),content.height())*.025f));
+        // Tight crop with only a tiny safety margin. Do not retain the old large
+        // padding because that was responsible for scanner/background leaking into
+        // the saved card.
+        int margin=Math.max(1,(int)(Math.min(content.width(),content.height())*.012f));
         int cl=Math.max(0,content.left-margin),ct=Math.max(0,content.top-margin);
         int cr=Math.min(crop.getWidth(),content.right+margin),cb=Math.min(crop.getHeight(),content.bottom+margin);
         if(cr-cl<80||cb-ct<50){crop.recycle();return null;}
@@ -311,24 +319,25 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         Bitmap exact=Bitmap.createBitmap(crop,cl,ct,cr-cl,cb-ct);
         crop.recycle();
 
+        // ID cards are always saved in landscape orientation.
         if(exact.getWidth()<exact.getHeight()){
             Matrix m=new Matrix();m.postRotate(90);
             Bitmap r2=Bitmap.createBitmap(exact,0,0,exact.getWidth(),exact.getHeight(),m,true);
             exact.recycle();exact=r2;
         }
 
-        // Fit to the actual ID-card ratio by cropping excess only. Never add scanner-bed
-        // pixels or enlarge the detected background.
+        // Normalize to the ISO/IEC 7810 ID-1 aspect ratio by removing only excess
+        // background. Never stretch the card and never add scanner pixels.
         float ar=exact.getWidth()/(float)Math.max(1,exact.getHeight());
         if(ar>1.05f){
-            int targetH=Math.max(1,Math.min(exact.getHeight(),Math.round(exact.getWidth()/CARD_RATIO)));
+            int targetH=Math.max(1,Math.round(exact.getWidth()/CARD_RATIO));
             if(targetH<exact.getHeight()){
                 int y=(exact.getHeight()-targetH)/2;
                 Bitmap r3=Bitmap.createBitmap(exact,0,y,exact.getWidth(),targetH);
                 exact.recycle();exact=r3;
             }
         }else{
-            int targetW=Math.max(1,Math.min(exact.getWidth(),Math.round(exact.getHeight()*CARD_RATIO)));
+            int targetW=Math.max(1,Math.round(exact.getHeight()*CARD_RATIO));
             if(targetW<exact.getWidth()){
                 int x=(exact.getWidth()-targetW)/2;
                 Bitmap r3=Bitmap.createBitmap(exact,x,0,targetW,exact.getHeight());
@@ -337,6 +346,24 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         }
         return exact;
     }
+
+    Bitmap rotateCropOnBackground(Bitmap source,int l,int t,int bw,int bh,float degrees,int background){
+        if(bw<=0||bh<=0)return null;
+        double rad=Math.toRadians(degrees);
+        int outW=Math.max(1,(int)Math.ceil(Math.abs(bw*Math.cos(rad))+Math.abs(bh*Math.sin(rad))));
+        int outH=Math.max(1,(int)Math.ceil(Math.abs(bw*Math.sin(rad))+Math.abs(bh*Math.cos(rad))));
+        Bitmap out=Bitmap.createBitmap(outW,outH,Bitmap.Config.ARGB_8888);
+        Canvas c=new Canvas(out);
+        c.drawColor(background);
+        Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG|Paint.DITHER_FLAG);
+        c.save();
+        c.translate(outW/2f,outH/2f);
+        c.rotate(degrees);
+        c.drawBitmap(source,l,t,p);
+        c.restore();
+        return out;
+    }
+
 
     boolean[] buildLocalMask(Bitmap b,int l,int t,int r,int bot,int br,int bg,int bb){
         int w=r-l,h=bot-t;boolean[] m=new boolean[w*h];
@@ -408,7 +435,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
             try{
                 Bitmap im=load(u);
                 float nx=marginX+(k%2)*(cardW+gapX);
-                float x=front?nx:595f-nx-cardW;
+                float x=nx;
                 float y=marginY+(k/2)*(cardH+gapY);
                 c.drawBitmap(im,null,new RectF(x,y,x+cardW,y+cardH),p);
                 im.recycle();
