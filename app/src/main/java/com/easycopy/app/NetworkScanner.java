@@ -5,8 +5,6 @@ import android.net.nsd.*;
 import java.io.*;
 import java.net.*;
 import java.util.*;
-import javax.xml.parsers.DocumentBuilderFactory;
-import org.w3c.dom.*;
 
 public class NetworkScanner {
     public interface Listener { void onDevice(String name,String url); void onDone(); void onError(String msg); }
@@ -40,17 +38,18 @@ public class NetworkScanner {
             }
         });}catch(Exception e){l.onError(e.getMessage()==null?"Discovery unavailable":e.getMessage());}
     }
-    public void close(){try{nsd.stopServiceDiscovery(new NsdManager.DiscoveryListener(){public void onStartDiscoveryFailed(String s,int e){} public void onStopDiscoveryFailed(String s,int e){} public void onDiscoveryStarted(String s){} public void onDiscoveryStopped(String s){} public void onServiceFound(NsdServiceInfo s){} public void onServiceLost(NsdServiceInfo s){}});}catch(Exception ignored){}}
+    public void close(){}
 
     public static byte[] scan(String baseUrl, int dpi, String color, boolean duplex) throws Exception {
         if(!baseUrl.endsWith("/"))baseUrl+="/";
         String caps=get(baseUrl+"ScannerCapabilities");
         String source=duplex?"ADFDuplex":"Platen";
         if(!caps.contains(source)) source=caps.contains("Feeder")?"Feeder":"Platen";
-        String xml="<?xml version="1.0" encoding="UTF-8"?><scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03"><scan:Intent>Document</scan:Intent><scan:InputSource>"+source+"</scan:InputSource><scan:DocumentFormat>image/jpeg</scan:DocumentFormat><scan:XResolution>"+dpi+"</scan:XResolution><scan:YResolution>"+dpi+"</scan:YResolution><scan:ColorMode>"+color+"</scan:ColorMode><scan:Width>2480</scan:Width><scan:Height>3508</scan:Height></scan:ScanSettings>";
+        String xml="<?xml version=\"1.0\" encoding=\"UTF-8\"?><scan:ScanSettings xmlns:scan=\"http://schemas.hp.com/imaging/escl/2011/05/03\"><scan:Intent>Document</scan:Intent><scan:InputSource>"+source+"</scan:InputSource><scan:DocumentFormat>image/jpeg</scan:DocumentFormat><scan:XResolution>"+dpi+"</scan:XResolution><scan:YResolution>"+dpi+"</scan:YResolution><scan:ColorMode>"+color+"</scan:ColorMode><scan:Width>2480</scan:Width><scan:Height>3508</scan:Height></scan:ScanSettings>";
         URL u=new URL(baseUrl+"ScanJobs"); HttpURLConnection c=(HttpURLConnection)u.openConnection(); c.setConnectTimeout(10000);c.setReadTimeout(30000);c.setRequestMethod("POST");c.setDoOutput(true);c.setRequestProperty("Content-Type","text/xml");c.getOutputStream().write(xml.getBytes("UTF-8"));
         int code=c.getResponseCode(); String loc=c.getHeaderField("Location"); if(code<200||code>=300)throw new IOException("Scanner rejected scan ("+code+")");
         if(loc==null)throw new IOException("Scanner did not return a scan job.");
+        if(loc.startsWith("/")){URL root=new URL(baseUrl);loc=root.getProtocol()+"://"+root.getAuthority()+loc;}
         for(int i=0;i<60;i++){try{Thread.sleep(700);}catch(InterruptedException ignored){} byte[] b=getBytes(loc.endsWith("/")?loc+"NextDocument":loc+"/NextDocument");if(b!=null&&b.length>1000)return b;}
         throw new IOException("Timed out waiting for scanner.");
     }
