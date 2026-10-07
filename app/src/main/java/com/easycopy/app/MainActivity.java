@@ -16,7 +16,7 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
 
-public class MainActivity extends Activity {
+public class MainActivity extends Activity { // EasyCopy colorful UI build
     private ImageView frontPreview, backPreview;
     private Uri frontUri, backUri;
     private EditText copiesEdit, ipEdit;
