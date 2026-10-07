@@ -51,7 +51,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     LinearLayout card(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);l.setPadding(dp(16),dp(12),dp(16),dp(12));GradientDrawable g=new GradientDrawable();g.setColor(Color.WHITE);g.setCornerRadius(dp(18));g.setStroke(dp(1),Color.rgb(229,231,240));l.setBackground(g);return l;}
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
-        getWindow().setStatusBarColor(Color.rgb(247,248,252));
+        getWindow().setStatusBarColor(Color.rgb(247,248,252));getWindow().setNavigationBarColor(Color.rgb(247,248,252));getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.rgb(247,248,252)));
         if(!OpenCVLoader.initLocal()){
             Toast.makeText(this,"OpenCV could not be loaded; using basic card detection.",Toast.LENGTH_LONG).show();
         }
@@ -582,11 +582,57 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
 
     int copies(){try{return Math.max(1,Math.min(9999,Integer.parseInt(copiesEdit.getText().toString().trim())));}catch(Exception e){return 1;}}
 
-    File makePdf()throws Exception{
-        int n=cardCount(),reps=copies();for(int i=0;i<n;i++)if(frontUris[i]==null||backUris[i]==null)throw new Exception("Please scan/import both sides for card "+(i+1)+".");
-        PdfDocument d=new PdfDocument();int total=n*reps;
-        for(int page=0;page<(total+7)/8;page++){PdfDocument.Page fp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,page*2+1).create());drawSet(fp.getCanvas(),true,page*8,n,reps);d.finishPage(fp);PdfDocument.Page bp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,page*2+2).create());drawSet(bp.getCanvas(),false,page*4,n,reps);d.finishPage(bp);}
-        File out=new File(getCacheDir(),"EasyCopy_"+new SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(new Date())+".pdf");try(FileOutputStream o=new FileOutputStream(out)){d.writeTo(o);}d.close();return out;
+    File makePdf()throws Exception{return makePdf(null);}
+    interface PdfProgress{void update(int percent);}
+    File makePdf(PdfProgress progress)throws Exception{
+        int n=cardCount(),reps=copies();
+        for(int i=0;i<n;i++)if(frontUris[i]==null||backUris[i]==null)throw new Exception("Please scan/import both sides for card "+(i+1)+".");
+        PdfDocument d=new PdfDocument();int total=n*reps,pages=Math.max(1,(total+7)/8);
+        for(int page=0;page<pages;page++){
+            PdfDocument.Page fp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,page*2+1).create());
+            drawSet(fp.getCanvas(),true,page*8,n,reps);d.finishPage(fp);
+            PdfDocument.Page bp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,page*2+2).create());
+            drawSet(bp.getCanvas(),false,page*8,n,reps);d.finishPage(bp);
+            if(progress!=null)progress.update(Math.round((page+1)*100f/pages));
+        }
+        File out=new File(getCacheDir(),"EasyCopy_"+new SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(new Date())+".pdf");
+        try(FileOutputStream o=new FileOutputStream(out)){d.writeTo(o);}d.close();
+        if(progress!=null)progress.update(100);return out;
+    }
+    void runPdfJob(String action){
+        final Dialog dialog=new Dialog(this);
+        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(28),dp(22),dp(28),dp(22));box.setBackgroundColor(Color.WHITE);
+        TextView title=tv("Preparing PDF…",20);title.setTypeface(null,Typeface.BOLD);box.addView(title);
+        TextView pct=tv("0%",18);pct.setGravity(Gravity.CENTER);box.addView(pct);
+        ProgressBar bar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);bar.setMax(100);bar.setProgress(0);box.addView(bar,new LinearLayout.LayoutParams(-1,dp(18)));
+        TextView detail=tv("Preparing pages…",13);detail.setTextColor(Color.rgb(102,112,133));box.addView(detail);
+        dialog.setContentView(box);dialog.setCancelable(false);dialog.show();
+        Window w=dialog.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.white);w.setLayout(dp(310),-2);}
+        pool.execute(()->{
+            try{
+                File pdf=makePdf(p->{runOnUiThread(()->{bar.setProgress(p);pct.setText(p+"%");detail.setText(p<100?"Processing pages…":"PDF ready.");});});
+                runOnUiThread(()->{dialog.dismiss();lastPdf=pdf;performPdfAction(action,pdf);});
+            }catch(Exception e){runOnUiThread(()->{dialog.dismiss();toast(e.getMessage());});}
+        });
+    }
+    void performPdfAction(String action,File pdf){
+        try{
+            if("preview".equals(action))openPdf(pdf);
+            else if("save".equals(action)){
+                pendingCopy=pdf;Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/pdf");i.putExtra(Intent.EXTRA_TITLE,pdf.getName());startActivityForResult(i,105);
+            }else if("share".equals(action)){
+                Intent i=new Intent(Intent.ACTION_SEND);i.setType("application/pdf");i.putExtra(Intent.EXTRA_STREAM,androidx.core.content.FileProvider.getUriForFile(this,"com.easycopy.app.fileprovider",pdf));startActivity(Intent.createChooser(i,"Share EasyCopy PDF"));
+            }else if("print".equals(action))printPdfFile(pdf);
+        }catch(Exception e){toast(e.getMessage());}
+    }
+    void printPdfFile(File pdf)throws Exception{
+        int pages=((cardCount()*copies()+7)/8)*2;PrintManager pm=(PrintManager)getSystemService(PRINT_SERVICE);
+        pm.print("EasyCopy",new PrintDocumentAdapter(){
+            public void onLayout(PrintAttributes a,PrintAttributes b,CancellationSignal c,LayoutResultCallback x,Bundle z){x.onLayoutFinished(new PrintDocumentInfo.Builder("EasyCopy.pdf").setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).setPageCount(pages).build(),true);}
+            public void onWrite(PageRange[] p,ParcelFileDescriptor d,CancellationSignal c,WriteResultCallback x){
+                try(InputStream in=new FileInputStream(pdf);OutputStream o=new FileOutputStream(d.getFileDescriptor())){byte[] bb=new byte[8192];int nn;while((nn=in.read(bb))>0)o.write(bb,0,nn);o.flush();x.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});}catch(Exception e){x.onWriteFailed(e.getMessage());}
+            }
+        },new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build());
     }
     void drawSet(Canvas c,boolean front,int start,int n,int reps){
         c.drawColor(Color.WHITE);
@@ -611,7 +657,9 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
                 float scale=Math.min(cardW/Math.max(1,srcW),cardH/Math.max(1,srcH));
                 float dw=srcW*scale,dh=srcH*scale;
                 float dx=x+(cardW-dw)/2f,dy=y+(cardH-dh)/2f;
+                if(!front){c.save();c.scale(-1f,1f,x+cardW/2f,0f);}
                 c.drawBitmap(im,null,new RectF(dx,dy,dx+dw,dy+dh),p);
+                if(!front)c.restore();
                 im.recycle();
             }catch(Exception ignored){}
         }
@@ -621,77 +669,90 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     void showImageEditor(Bitmap original){
         final Dialog dialog=new Dialog(this);
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(12),dp(8),dp(12),dp(12));root.setBackgroundColor(Color.WHITE);
-        TextView help=tv("Move image • pinch to zoom • rotate • fit inside the crop frame",13);help.setTextColor(Color.rgb(90,100,120));root.addView(help);
+        TextView help=tv("Move • pinch to zoom • rotate • stretch • choose print frame",13);help.setTextColor(Color.rgb(90,100,120));root.addView(help);
         ImageEditorView editor=new ImageEditorView(this,original);root.addView(editor,new LinearLayout.LayoutParams(-1,0,1));
+
+        TextView degreeText=tv("Rotation: 0°",14);degreeText.setGravity(Gravity.CENTER);root.addView(degreeText);
+        SeekBar degrees=new SeekBar(this);degrees.setMax(360);degrees.setProgress(180);root.addView(degrees,new LinearLayout.LayoutParams(-1,dp(40)));
+
+        LinearLayout orient=new LinearLayout(this);orient.setGravity(Gravity.CENTER_VERTICAL);
+        TextView ot=tv("Print frame",14);ot.setTypeface(null,Typeface.BOLD);orient.addView(ot,new LinearLayout.LayoutParams(0,dp(46),1));
+        Button portrait=actionBtn("Portrait",Color.rgb(238,242,255),Color.rgb(55,48,163));
+        Button landscape=actionBtn("Landscape",Color.rgb(238,242,255),Color.rgb(55,48,163));
+        orient.addView(portrait,new LinearLayout.LayoutParams(dp(108),dp(46)));orient.addView(landscape,new LinearLayout.LayoutParams(dp(108),dp(46)));root.addView(orient);
+
+        TextView stretchText=tv("Stretch 100% W • 100% H",14);stretchText.setGravity(Gravity.CENTER);root.addView(stretchText);
+        SeekBar stretchX=new SeekBar(this);stretchX.setMax(200);stretchX.setProgress(100);root.addView(stretchX,new LinearLayout.LayoutParams(-1,dp(32)));
+        SeekBar stretchY=new SeekBar(this);stretchY.setMax(200);stretchY.setProgress(100);root.addView(stretchY,new LinearLayout.LayoutParams(-1,dp(32)));
+
         LinearLayout tools=new LinearLayout(this);tools.setGravity(Gravity.CENTER);
-        Button left=actionBtn("↶",Color.rgb(238,242,255),Color.rgb(55,48,163)),right=actionBtn("↷",Color.rgb(238,242,255),Color.rgb(55,48,163)),fit=actionBtn("Fit",Color.rgb(238,242,255),Color.rgb(55,48,163)),reset=actionBtn("Reset",Color.rgb(238,242,255),Color.rgb(55,48,163));
-        tools.addView(left,new LinearLayout.LayoutParams(0,dp(48),1));tools.addView(right,new LinearLayout.LayoutParams(0,dp(48),1));tools.addView(fit,new LinearLayout.LayoutParams(0,dp(48),1));tools.addView(reset,new LinearLayout.LayoutParams(0,dp(48),1));root.addView(tools);
-        Button print=actionBtn("Print cropped image",Color.rgb(18,183,106),Color.WHITE);root.addView(print,new LinearLayout.LayoutParams(-1,dp(52)));
-        left.setOnClickListener(v->editor.rotate(-90));right.setOnClickListener(v->editor.rotate(90));fit.setOnClickListener(v->editor.fit());reset.setOnClickListener(v->editor.reset());
-        print.setOnClickListener(v->{Bitmap out=editor.exportCrop();dialog.dismiss();printBitmap(out);});
-        dialog.setContentView(root);dialog.show();Window w=dialog.getWindow();if(w!=null)w.setLayout(-1,-1);
+        Button fit=actionBtn("Fit",Color.rgb(238,242,255),Color.rgb(55,48,163));
+        Button reset=actionBtn("Reset",Color.rgb(238,242,255),Color.rgb(55,48,163));
+        tools.addView(fit,new LinearLayout.LayoutParams(0,dp(44),1));tools.addView(reset,new LinearLayout.LayoutParams(0,dp(44),1));root.addView(tools);
+        Button print=actionBtn("Print edited image",Color.rgb(18,183,106),Color.WHITE);root.addView(print,new LinearLayout.LayoutParams(-1,dp(50)));
+
+        degrees.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar s,int p,boolean from){editor.rotation=p-180f;degreeText.setText("Rotation: "+Math.round(editor.rotation)+"°");editor.invalidate();}public void onStartTrackingTouch(SeekBar s){}public void onStopTrackingTouch(SeekBar s){}});
+        stretchX.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar s,int p,boolean from){editor.stretchX=Math.max(.5f,p/100f);stretchText.setText("Stretch "+Math.round(editor.stretchX*100)+"% W • "+Math.round(editor.stretchY*100)+"% H");editor.invalidate();}public void onStartTrackingTouch(SeekBar s){}public void onStopTrackingTouch(SeekBar s){}});
+        stretchY.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar s,int p,boolean from){editor.stretchY=Math.max(.5f,p/100f);stretchText.setText("Stretch "+Math.round(editor.stretchX*100)+"% W • "+Math.round(editor.stretchY*100)+"% H");editor.invalidate();}public void onStartTrackingTouch(SeekBar s){}public void onStopTrackingTouch(SeekBar s){}});
+        portrait.setOnClickListener(v->{editor.landscape=false;editor.invalidate();});landscape.setOnClickListener(v->{editor.landscape=true;editor.invalidate();});
+        fit.setOnClickListener(v->{editor.fit();degrees.setProgress(180);stretchX.setProgress(100);stretchY.setProgress(100);});
+        reset.setOnClickListener(v->{editor.fit();degrees.setProgress(180);stretchX.setProgress(100);stretchY.setProgress(100);});
+        print.setOnClickListener(v->{try{Bitmap out=editor.exportCrop();boolean land=editor.landscape;dialog.dismiss();printBitmap(out,land);}catch(Exception e){toast(e.getMessage());}});
+        dialog.setContentView(root);dialog.show();Window w=dialog.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.white);w.setLayout(-1,-1);}
     }
 
-    void printBitmap(Bitmap bitmap){
-        if(bitmap==null){toast("Could not prepare the image.");return;}
-        File f=new File(getCacheDir(),"EasyCopy_image_"+System.currentTimeMillis()+".jpg");
-        try(FileOutputStream o=new FileOutputStream(f)){bitmap.compress(Bitmap.CompressFormat.JPEG,98,o);}catch(Exception e){toast("Could not prepare image: "+e.getMessage());return;}
+    void printBitmap(Bitmap bitmap,boolean landscape)throws Exception{
+        if(bitmap==null)throw new Exception("Could not prepare the image.");
+        int pw=landscape?842:595,ph=landscape?595:842;
+        PdfDocument d=new PdfDocument();PdfDocument.Page page=d.startPage(new PdfDocument.PageInfo.Builder(pw,ph,1).create());
+        Canvas cc=page.getCanvas();cc.drawColor(Color.WHITE);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG|Paint.DITHER_FLAG);
+        float margin=28f,aw=pw-margin*2,ah=ph-margin*2,scale=Math.min(aw/bitmap.getWidth(),ah/bitmap.getHeight()),dw=bitmap.getWidth()*scale,dh=bitmap.getHeight()*scale;
+        cc.drawBitmap(bitmap,null,new RectF((pw-dw)/2f,(ph-dh)/2f,(pw+dw)/2f,(ph+dh)/2f),p);d.finishPage(page);
+        File f=new File(getCacheDir(),"EasyCopy_image_"+System.currentTimeMillis()+".pdf");try(FileOutputStream o=new FileOutputStream(f)){d.writeTo(o);}d.close();bitmap.recycle();
         PrintManager pm=(PrintManager)getSystemService(PRINT_SERVICE);
         pm.print("EasyCopy Image",new PrintDocumentAdapter(){
-            public void onLayout(PrintAttributes a,PrintAttributes b,CancellationSignal c,LayoutResultCallback x,Bundle z){x.onLayoutFinished(new PrintDocumentInfo.Builder("EasyCopy_Image.jpg").setContentType(PrintDocumentInfo.CONTENT_TYPE_PHOTO).setPageCount(1).build(),true);}
-            public void onWrite(PageRange[] p,ParcelFileDescriptor d,CancellationSignal c,WriteResultCallback x){try(InputStream in=new FileInputStream(f);OutputStream o=new FileOutputStream(d.getFileDescriptor())){byte[] buf=new byte[8192];int n;while((n=in.read(buf))>0)o.write(buf,0,n);o.flush();x.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});}catch(Exception e){x.onWriteFailed(e.getMessage());}}
-        },new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build());
+            public void onLayout(PrintAttributes a,PrintAttributes b,CancellationSignal cs,LayoutResultCallback x,Bundle z){x.onLayoutFinished(new PrintDocumentInfo.Builder("EasyCopy_Image.pdf").setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).setPageCount(1).build(),true);}
+            public void onWrite(PageRange[] pages,ParcelFileDescriptor fd,CancellationSignal cs,WriteResultCallback x){try(InputStream in=new FileInputStream(f);OutputStream o=new FileOutputStream(fd.getFileDescriptor())){byte[] buf=new byte[8192];int n;while((n=in.read(buf))>0)o.write(buf,0,n);o.flush();x.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});}catch(Exception e){x.onWriteFailed(e.getMessage());}}
+        },new PrintAttributes.Builder().setMediaSize(landscape?PrintAttributes.MediaSize.ISO_A4_LANDSCAPE:PrintAttributes.MediaSize.ISO_A4).build());
     }
 
     class ImageEditorView extends View{
-        Bitmap image;Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);float zoom=1f,rotation=0f,tx=0f,ty=0f,lastX,lastY;boolean dragging;ScaleGestureDetector scaleDetector;
+        Bitmap image;Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);float zoom=1f,rotation=0f,tx=0f,ty=0f,stretchX=1f,stretchY=1f,lastX,lastY;boolean dragging,landscape=false;ScaleGestureDetector scaleDetector;
         ImageEditorView(Context c,Bitmap b){super(c);image=b;setBackgroundColor(Color.rgb(35,38,45));scaleDetector=new ScaleGestureDetector(c,new ScaleGestureDetector.SimpleOnScaleGestureListener(){public boolean onScale(ScaleGestureDetector d){zoom=Math.max(.25f,Math.min(6f,zoom*d.getScaleFactor()));invalidate();return true;}});}
         protected void onDraw(Canvas c){
             super.onDraw(c);if(image==null)return;
-            float fit=Math.min(getWidth()*.90f/image.getWidth(),getHeight()*.72f/image.getHeight());
-            Matrix m=new Matrix();m.postScale(fit*zoom,fit*zoom,image.getWidth()/2f,image.getHeight()/2f);m.postRotate(rotation,image.getWidth()/2f,image.getHeight()/2f);m.postTranslate(getWidth()/2f-image.getWidth()/2f+tx,getHeight()/2f-image.getHeight()/2f+ty);
+            float fit=Math.min(getWidth()*.82f/image.getWidth(),getHeight()*.62f/image.getHeight());
+            Matrix m=new Matrix();m.postScale(fit*zoom*stretchX,fit*zoom*stretchY,image.getWidth()/2f,image.getHeight()/2f);m.postRotate(rotation,image.getWidth()/2f,image.getHeight()/2f);m.postTranslate(getWidth()/2f-image.getWidth()/2f+tx,getHeight()/2f-image.getHeight()/2f+ty);
             c.drawBitmap(image,m,paint);
             RectF f=frameRect();Paint shade=new Paint();shade.setColor(Color.argb(150,0,0,0));c.drawRect(0,0,getWidth(),f.top,shade);c.drawRect(0,f.bottom,getWidth(),getHeight(),shade);c.drawRect(0,f.top,f.left,f.bottom,shade);c.drawRect(f.right,f.top,getWidth(),f.bottom,shade);
             Paint border=new Paint(Paint.ANTI_ALIAS_FLAG);border.setStyle(Paint.Style.STROKE);border.setStrokeWidth(dp(2));border.setColor(Color.WHITE);c.drawRect(f,border);
         }
-        RectF frameRect(){float fw=getWidth()*.90f,fh=Math.min(getHeight()*.72f,fw/(CARD_RATIO));float l=(getWidth()-fw)/2f,t=(getHeight()-fh)/2f;return new RectF(l,t,l+fw,t+fh);}
+        RectF frameRect(){float fw=getWidth()*.90f,ratio=landscape?(297f/210f):(210f/297f),fh=Math.min(getHeight()*.72f,fw/ratio),l=(getWidth()-fw)/2f,t=(getHeight()-fh)/2f;return new RectF(l,t,l+fw,t+fh);}
         public boolean onTouchEvent(MotionEvent e){
             scaleDetector.onTouchEvent(e);
             if(e.getPointerCount()==1){
                 if(e.getAction()==MotionEvent.ACTION_DOWN){lastX=e.getX();lastY=e.getY();dragging=true;}
                 else if(e.getAction()==MotionEvent.ACTION_MOVE&&dragging){tx+=e.getX()-lastX;ty+=e.getY()-lastY;lastX=e.getX();lastY=e.getY();invalidate();}
                 else if(e.getAction()==MotionEvent.ACTION_UP)dragging=false;
-            }
-            return true;
+            }return true;
         }
-        void rotate(float d){rotation=(rotation+d)%360f;invalidate();}
-        void fit(){zoom=1f;tx=0f;ty=0f;rotation=0f;invalidate();}
-        void reset(){fit();}
+        void fit(){zoom=1f;tx=0f;ty=0f;rotation=0f;stretchX=1f;stretchY=1f;invalidate();}
         Bitmap exportCrop(){
-            RectF f=frameRect();int ow=Math.max(1,(int)f.width()),oh=Math.max(1,(int)f.height());Bitmap out=Bitmap.createBitmap(ow,oh,Bitmap.Config.ARGB_8888);Canvas c=new Canvas(out);c.drawColor(Color.WHITE);
-            float fit=Math.min(getWidth()*.90f/image.getWidth(),getHeight()*.72f/image.getHeight());
-            Matrix m=new Matrix();m.postScale(fit*zoom,fit*zoom,image.getWidth()/2f,image.getHeight()/2f);m.postRotate(rotation,image.getWidth()/2f,image.getHeight()/2f);m.postTranslate(getWidth()/2f-image.getWidth()/2f+tx-f.left,getHeight()/2f-image.getHeight()/2f+ty-f.top);
-            c.drawBitmap(image,m,paint);return out;
+            RectF f=frameRect();int ow=Math.max(1,(int)f.width()),oh=Math.max(1,(int)f.height());Bitmap out=Bitmap.createBitmap(ow,oh,Bitmap.Config.ARGB_8888);Canvas cc=new Canvas(out);cc.drawColor(Color.WHITE);
+            float fit=Math.min(getWidth()*.82f/image.getWidth(),getHeight()*.62f/image.getHeight());Matrix m=new Matrix();m.postScale(fit*zoom*stretchX,fit*zoom*stretchY,image.getWidth()/2f,image.getHeight()/2f);m.postRotate(rotation,image.getWidth()/2f,image.getHeight()/2f);m.postTranslate(getWidth()/2f-image.getWidth()/2f+tx-f.left,getHeight()/2f-image.getHeight()/2f+ty-f.top);cc.drawBitmap(image,m,paint);return out;
         }
     }
 
     File lastPdf;
-    void safePdf(){try{lastPdf=makePdf();openPdf(lastPdf);}catch(Exception e){toast(e.getMessage());}}
-    void savePdf(){try{lastPdf=makePdf();pendingCopy=lastPdf;Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/pdf");i.putExtra(Intent.EXTRA_TITLE,lastPdf.getName());startActivityForResult(i,105);}catch(Exception e){toast(e.getMessage());}}
+    void safePdf(){runPdfJob("preview");}
+    void savePdf(){runPdfJob("save");}
     void openPdf(File f){
-        try{
-            Uri u=androidx.core.content.FileProvider.getUriForFile(this,"com.easycopy.app.fileprovider",f);
-            Intent i=new Intent(Intent.ACTION_VIEW);i.setDataAndType(u,"application/pdf");i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(i);
-        }catch(Exception e){toast("No PDF viewer is installed.");}
+        try{Uri u=androidx.core.content.FileProvider.getUriForFile(this,"com.easycopy.app.fileprovider",f);Intent i=new Intent(Intent.ACTION_VIEW);i.setDataAndType(u,"application/pdf");i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(i);}catch(Exception e){toast("No PDF viewer is installed.");}
     }
     void openPdf(Uri u){
-        try{
-            Intent i=new Intent(Intent.ACTION_VIEW);i.setDataAndType(u,"application/pdf");i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(i);
-        }catch(Exception e){toast("PDF saved, but no PDF viewer is installed.");}
+        try{Intent i=new Intent(Intent.ACTION_VIEW);i.setDataAndType(u,"application/pdf");i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(i);}catch(Exception e){toast("PDF saved, but no PDF viewer is installed.");}
     }
-    void sharePdf(){try{lastPdf=makePdf();Intent i=new Intent(Intent.ACTION_SEND);i.setType("application/pdf");i.putExtra(Intent.EXTRA_STREAM,androidx.core.content.FileProvider.getUriForFile(this,"com.easycopy.app.fileprovider",lastPdf));startActivity(Intent.createChooser(i,"Share EasyCopy PDF"));}catch(Exception e){toast(e.getMessage());}}
-    void printPdf(){try{lastPdf=makePdf();PrintManager pm=(PrintManager)getSystemService(PRINT_SERVICE);pm.print("EasyCopy",new PrintDocumentAdapter(){public void onLayout(PrintAttributes a,PrintAttributes b,CancellationSignal c,LayoutResultCallback x,Bundle z){x.onLayoutFinished(new PrintDocumentInfo.Builder("EasyCopy.pdf").setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT) .setPageCount(((cardCount()*copies()+7)/8)*2).build(),true);}public void onWrite(PageRange[] p,ParcelFileDescriptor d,CancellationSignal c,WriteResultCallback x){try(InputStream in=new FileInputStream(lastPdf);OutputStream o=new FileOutputStream(d.getFileDescriptor())){byte[] b=new byte[8192];int n;while((n=in.read(b))>0)o.write(b,0,n);o.flush();x.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});}catch(Exception e){x.onWriteFailed(e.getMessage());}}},new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build());}catch(Exception e){toast(e.getMessage());}}
+    void sharePdf(){runPdfJob("share");}
+    void printPdf(){runPdfJob("print");}
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 }
