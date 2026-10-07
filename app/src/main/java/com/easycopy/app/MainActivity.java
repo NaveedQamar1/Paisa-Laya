@@ -15,6 +15,10 @@ import java.io.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
+import org.opencv.android.OpenCVLoader;
+import org.opencv.android.Utils;
+import org.opencv.core.*;
+import org.opencv.imgproc.Imgproc;
 
 public class MainActivity extends Activity { // EasyCopy colorful UI build
     private EditText copiesEdit;
@@ -37,7 +41,14 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     Button btn(String s){return actionBtn(s,Color.WHITE,Color.rgb(55,48,163));}
     Button actionBtn(String s,int bg,int fg){Button b=new Button(this);b.setText(s);b.setTextSize(14);b.setAllCaps(false);b.setTextColor(fg);b.setTypeface(null,Typeface.BOLD);b.setPadding(dp(8),0,dp(8),0);GradientDrawable g=new GradientDrawable();g.setColor(bg);g.setCornerRadius(dp(14));g.setStroke(dp(1),Color.argb(35,0,0,0));b.setBackground(g);b.setStateListAnimator(null);return b;}
     LinearLayout card(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);l.setPadding(dp(16),dp(12),dp(16),dp(12));GradientDrawable g=new GradientDrawable();g.setColor(Color.WHITE);g.setCornerRadius(dp(18));g.setStroke(dp(1),Color.rgb(229,231,240));l.setBackground(g);return l;}
-    @Override public void onCreate(Bundle b){super.onCreate(b);getWindow().setStatusBarColor(Color.rgb(247,248,252));build();}
+    @Override public void onCreate(Bundle b){
+        super.onCreate(b);
+        getWindow().setStatusBarColor(Color.rgb(247,248,252));
+        if(!OpenCVLoader.initLocal()){
+            Toast.makeText(this,"OpenCV could not be loaded; using basic card detection.",Toast.LENGTH_LONG).show();
+        }
+        build();
+    }
 
     void build(){
         ScrollView sc=new ScrollView(this);sc.setBackgroundColor(Color.rgb(247,248,252));
@@ -143,23 +154,39 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
 
     ArrayList<Bitmap> prepareCards(Bitmap source,int wanted){
         if(source==null)throw new IllegalArgumentException("The scanner returned no image.");
-        int max=1800;
+        int max=2200;
         float scale=Math.min(1f,max/(float)Math.max(source.getWidth(),source.getHeight()));
         Bitmap work=scale<1f?Bitmap.createScaledBitmap(source,Math.max(1,(int)(source.getWidth()*scale)),Math.max(1,(int)(source.getHeight()*scale)),true):source;
+
+        ArrayList<Bitmap> detected=null;
+        try{
+            detected=detectCardsWithOpenCV(work,wanted);
+        }catch(Exception ignored){
+            detected=null;
+        }
+
+        if(detected!=null&&!detected.isEmpty()){
+            if(work!=source)work.recycle();
+            return detected;
+        }
+
+        // Keep the previous detector as a fallback for scanners/images where no
+        // usable four-corner contour can be found.
+        ArrayList<Bitmap> fallback=prepareCardsLegacy(work,wanted);
+        if(work!=source)work.recycle();
+        return fallback;
+    }
+
+    ArrayList<Bitmap> prepareCardsLegacy(Bitmap work,int wanted){
         int w=work.getWidth(),h=work.getHeight(),n=w*h;
         int[] px=new int[n];work.getPixels(px,0,w,0,0,w,h);
-
         int[] bg=estimateBackground(px,w,h);
         boolean[] fg=buildForegroundMask(px,w,h,bg[0],bg[1],bg[2]);
-        // Close small gaps inside a card so text, chips and graphics do not split the card
-        // into many tiny components.
         fg=morphClose(fg,w,h,3);
-
         boolean[] seen=new boolean[n];
         ArrayDeque<Integer> q=new ArrayDeque<>();
         ArrayList<Rect> boxes=new ArrayList<>();
         int minArea=Math.max(1200,n/9000);
-
         for(int y=0;y<h;y++)for(int x=0;x<w;x++){
             int idx=y*w+x;
             if(!fg[idx]||seen[idx])continue;
@@ -178,13 +205,10 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
             }
             int bw=r-l+1,bh=b-t+1;
             float ratio=bw/(float)Math.max(1,bh);
-            if(area>=minArea&&bw>80&&bh>50&&bw<.97f*w&&bh<.97f*h&&ratio>.30f&&ratio<4.5f){
+            if(area>=minArea&&bw>80&&bh>50&&bw<.97f*w&&bh<.97f*h&&ratio>.30f&&ratio<4.5f)
                 boxes.add(new Rect(l,t,r+1,b+1));
-            }
         }
-
         boxes.sort((a,b)->Integer.compare(b.width()*b.height(),a.width()*a.height()));
-
         ArrayList<Bitmap> out=new ArrayList<>();
         ArrayList<Rect> accepted=new ArrayList<>();
         for(Rect box:boxes){
@@ -193,19 +217,133 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
             Bitmap card=normalizeDetectedCard(work,box,px,w,h,bg[0],bg[1],bg[2]);
             if(card!=null){out.add(card);accepted.add(box);}
         }
-
         if(out.isEmpty()){
-            Rect fallback=findFallbackRegion(px,w,h,bg[0],bg[1],bg[2]);
-            if(fallback!=null){
-                Bitmap card=normalizeDetectedCard(work,fallback,px,w,h,bg[0],bg[1],bg[2]);
+            Rect fb=findFallbackRegion(px,w,h,bg[0],bg[1],bg[2]);
+            if(fb!=null){
+                Bitmap card=normalizeDetectedCard(work,fb,px,w,h,bg[0],bg[1],bg[2]);
                 if(card!=null)out.add(card);
             }
         }
-
         if(out.isEmpty())throw new IllegalArgumentException("No ID card detected. The scan was received, but the card could not be separated from the scanner background.");
-        if(work!=source)work.recycle();
         return out;
     }
+
+    ArrayList<Bitmap> detectCardsWithOpenCV(Bitmap source,int wanted){
+        ArrayList<Bitmap> out=new ArrayList<>();
+        Mat src=new Mat(),gray=new Mat(),blur=new Mat(),edges=new Mat(),kernel=new Mat();
+        Utils.bitmapToMat(source,src);
+        Imgproc.cvtColor(src,gray,Imgproc.COLOR_RGBA2GRAY);
+        Imgproc.GaussianBlur(gray,blur,new Size(5,5),0);
+        Imgproc.Canny(blur,edges,35,120);
+        kernel=Imgproc.getStructuringElement(Imgproc.MORPH_RECT,new Size(3,3));
+        Imgproc.dilate(edges,edges,kernel);
+        ArrayList<MatOfPoint> contours=new ArrayList<>();
+        Imgproc.findContours(edges,contours,new Mat(),Imgproc.RETR_LIST,Imgproc.CHAIN_APPROX_SIMPLE);
+
+        ArrayList<CardQuad> candidates=new ArrayList<>();
+        double total=src.cols()*src.rows();
+        double target=CARD_RATIO;
+
+        for(MatOfPoint contour:contours){
+            double area=Math.abs(Imgproc.contourArea(contour));
+            if(area<total*.0015||area>total*.65) {contour.release();continue;}
+            Rect bb=Imgproc.boundingRect(contour);
+            if(bb.width<80||bb.height<50||bb.width>src.cols()*.97||bb.height>src.rows()*.97){contour.release();continue;}
+
+            MatOfPoint2f c2=new MatOfPoint2f(contour.toArray());
+            double peri=Imgproc.arcLength(c2,true);
+            MatOfPoint2f approx=new MatOfPoint2f();
+            Imgproc.approxPolyDP(c2,approx,0.025*peri,true);
+            Point[] pts=approx.toArray();
+
+            if(pts.length==4&&Imgproc.isContourConvex(new MatOfPoint(pts))){
+                double ratio=quadRatio(pts);
+                double ratioScore=Math.max(0,1.0-Math.abs(ratio-target)/target);
+                double rectFill=area/(double)Math.max(1,bb.width*bb.height);
+                if(ratio>=1.15&&ratio<=2.15&&rectFill>.50&&ratioScore>.62){
+                    double score=ratioScore*.55+Math.min(1,rectFill)*.20+Math.min(1,Math.sqrt(area/total)*4)*.25;
+                    candidates.add(new CardQuad(pts,score,area));
+                }
+            }
+            approx.release();c2.release();contour.release();
+        }
+
+        candidates.sort((a,b)->Double.compare(b.score,a.score));
+        ArrayList<Point[]> accepted=new ArrayList<>();
+        for(CardQuad q:candidates){
+            if(out.size()>=wanted)break;
+            boolean overlap=false;
+            Rect qb=quadBounds(q.pts);
+            for(Point[] old:accepted){
+                Rect ob=quadBounds(old);
+                int l=Math.max(qb.left,ob.left),t=Math.max(qb.top,ob.top),r=Math.min(qb.right,ob.right),b=Math.min(qb.bottom,ob.bottom);
+                if(r>l&&b>t&&(r-l)*(b-t)>Math.min(qb.width()*qb.height(),ob.width()*ob.height())*.45f){overlap=true;break;}
+            }
+            if(overlap)continue;
+            Bitmap card=warpCard(source,q.pts);
+            if(card!=null){out.add(card);accepted.add(q.pts);}
+        }
+
+        src.release();gray.release();blur.release();edges.release();kernel.release();
+        return out;
+    }
+
+    static class CardQuad{
+        Point[] pts;double score,area;
+        CardQuad(Point[] p,double s,double a){pts=p;score=s;area=a;}
+    }
+
+    double quadRatio(Point[] p){
+        double a=dist(p[0],p[1]),b=dist(p[1],p[2]),c=dist(p[2],p[3]),d=dist(p[3],p[0]);
+        double longSide=Math.max((a+c)/2.0,(b+d)/2.0);
+        double shortSide=Math.min((a+c)/2.0,(b+d)/2.0);
+        return longSide/Math.max(1,shortSide);
+    }
+
+    double dist(Point a,Point b){
+        return Math.hypot(a.x-b.x,a.y-b.y);
+    }
+
+    Rect quadBounds(Point[] p){
+        int l=(int)Math.floor(Math.min(Math.min(p[0].x,p[1].x),Math.min(p[2].x,p[3].x)));
+        int t=(int)Math.floor(Math.min(Math.min(p[0].y,p[1].y),Math.min(p[2].y,p[3].y)));
+        int r=(int)Math.ceil(Math.max(Math.max(p[0].x,p[1].x),Math.max(p[2].x,p[3].x)));
+        int b=(int)Math.ceil(Math.max(Math.max(p[0].y,p[1].y),Math.max(p[2].y,p[3].y)));
+        return new Rect(Math.max(0,l),Math.max(0,t),Math.max(1,r),Math.max(1,b));
+    }
+
+    Bitmap warpCard(Bitmap source,Point[] raw){
+        Point[] p=orderQuad(raw);
+        double top=dist(p[0],p[1]),bottom=dist(p[3],p[2]),left=dist(p[0],p[3]),right=dist(p[1],p[2]);
+        double width=Math.max(top,bottom),height=Math.max(left,right);
+        if(width<height){Point tmp=p[0];p[0]=p[3];p[3]=tmp;tmp=p[1];p[1]=p[2];p[2]=tmp;width=Math.max(left,right);height=Math.max(top,bottom);}
+        int outW=1400,outH=Math.max(1,Math.round(outW/CARD_RATIO));
+
+        Mat src=new Mat(),dst=new Mat(),from=new Mat(4,1,CvType.CV_32FC2),to=new Mat(4,1,CvType.CV_32FC2),M=new Mat();
+        Utils.bitmapToMat(source,src);
+        from.put(0,0,p[0].x,p[0].y,p[1].x,p[1].y,p[2].x,p[2].y,p[3].x,p[3].y);
+        to.put(0,0,0,0,outW-1,0,outW-1,outH-1,0,outH-1);
+        M=Imgproc.getPerspectiveTransform(from,to);
+        Imgproc.warpPerspective(src,dst,M,new Size(outW,outH),Imgproc.INTER_LINEAR,Core.BORDER_REPLICATE,new Scalar(255,255,255,255));
+        Bitmap out=Bitmap.createBitmap(outW,outH,Bitmap.Config.ARGB_8888);
+        Utils.matToBitmap(dst,out);
+        src.release();dst.release();from.release();to.release();M.release();
+        return out;
+    }
+
+    Point[] orderQuad(Point[] pts){
+        Point[] o=new Point[4];
+        double minSum=Double.MAX_VALUE,maxSum=-Double.MAX_VALUE,minDiff=Double.MAX_VALUE,maxDiff=-Double.MAX_VALUE;
+        for(Point p:pts){
+            double sum=p.x+p.y,diff=p.x-p.y;
+            if(sum<minSum){minSum=sum;o[0]=p;}
+            if(sum>maxSum){maxSum=sum;o[2]=p;}
+            if(diff>maxDiff){maxDiff=diff;o[1]=p;}
+            if(diff<minDiff){minDiff=diff;o[3]=p;}
+        }
+        return o;
+    }
+
 
     int[] estimateBackground(int[] px,int w,int h){
         // Use a quantized color histogram from the outer border instead of an average.
