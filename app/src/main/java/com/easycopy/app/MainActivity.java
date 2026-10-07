@@ -17,8 +17,6 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public class MainActivity extends Activity { // EasyCopy colorful UI build
-    private ImageView frontPreview, backPreview;
-    private Uri frontUri, backUri;
     private EditText copiesEdit;
     private Spinner cardCountSpinner;
     private final Uri[] frontUris=new Uri[4], backUris=new Uri[4];
@@ -89,7 +87,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         devices.removeAllViews();scannerStatus.setText("Searching…");
         NetworkScanner ns=new NetworkScanner(this);ns.discover(new NetworkScanner.Listener(){
             public void onDevice(String name,String url){runOnUiThread(()->addDevice(name,url));}
-            public void onDone(){runOnUiThread(()->{if(devices.getChildCount()==0)scannerStatus.setText("No compatible eSCL scanner found. You can add its IP manually.");});}
+            public void onDone(){runOnUiThread(()->{if(devices.getChildCount()==0)scannerStatus.setText("No compatible eSCL scanner found on this network.");});}
             public void onError(String m){runOnUiThread(()->scannerStatus.setText(m));}
         });
     }
@@ -99,7 +97,6 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         if(selectedScanner==null)selectedScanner=url;
     }
     String selectedScanner;
-    void manualAdd(){String ip=ipEdit.getText().toString().trim();if(ip.isEmpty()){toast("Enter the scanner IP address.");return;}selectedScanner=(ip.startsWith("http")?ip:"https://"+ip+":443/eSCL/");scannerStatus.setText("Manual scanner selected: "+selectedScanner);}
     void pick(boolean front){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("image/*");startActivityForResult(i,front?101:102);}
     @Override protected void onActivityResult(int r,int c,Intent d){
         super.onActivityResult(r,c,d);
@@ -194,6 +191,6 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     void safePdf(){try{lastPdf=makePdf();status.setText("PDF preview ready: "+lastPdf.getName());}catch(Exception e){toast(e.getMessage());}}
     void savePdf(){try{lastPdf=makePdf();pendingCopy=lastPdf;Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("application/pdf");i.putExtra(Intent.EXTRA_TITLE,lastPdf.getName());startActivityForResult(i,105);}catch(Exception e){toast(e.getMessage());}}
     void sharePdf(){try{lastPdf=makePdf();Intent i=new Intent(Intent.ACTION_SEND);i.setType("application/pdf");i.putExtra(Intent.EXTRA_STREAM,androidx.core.content.FileProvider.getUriForFile(this,"com.easycopy.app.fileprovider",lastPdf));startActivity(Intent.createChooser(i,"Share EasyCopy PDF"));}catch(Exception e){toast(e.getMessage());}}
-    void printPdf(){try{lastPdf=makePdf();PrintManager pm=(PrintManager)getSystemService(PRINT_SERVICE);pm.print("EasyCopy",new PrintDocumentAdapter(){public void onLayout(PrintAttributes a,PrintAttributes b,CancellationSignal c,LayoutResultCallback x,Bundle z){x.onLayoutFinished(new PrintDocumentInfo.Builder("EasyCopy.pdf").setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).setPageCount((copies()+7)/8*2).build(),true);}public void onWrite(PageRange[] p,ParcelFileDescriptor d,CancellationSignal c,WriteResultCallback x){try(InputStream in=new FileInputStream(lastPdf);OutputStream o=new FileOutputStream(d.getFileDescriptor())){byte[] b=new byte[8192];int n;while((n=in.read(b))>0)o.write(b,0,n);o.flush();x.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});}catch(Exception e){x.onWriteFailed(e.getMessage());}}},new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build());}catch(Exception e){toast(e.getMessage());}}
+    void printPdf(){try{lastPdf=makePdf();PrintManager pm=(PrintManager)getSystemService(PRINT_SERVICE);pm.print("EasyCopy",new PrintDocumentAdapter(){public void onLayout(PrintAttributes a,PrintAttributes b,CancellationSignal c,LayoutResultCallback x,Bundle z){x.onLayoutFinished(new PrintDocumentInfo.Builder("EasyCopy.pdf").setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).setPageCount(((cardCount()*copies()+3)/4)*2).build(),true);}public void onWrite(PageRange[] p,ParcelFileDescriptor d,CancellationSignal c,WriteResultCallback x){try(InputStream in=new FileInputStream(lastPdf);OutputStream o=new FileOutputStream(d.getFileDescriptor())){byte[] b=new byte[8192];int n;while((n=in.read(b))>0)o.write(b,0,n);o.flush();x.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});}catch(Exception e){x.onWriteFailed(e.getMessage());}}},new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build());}catch(Exception e){toast(e.getMessage());}}
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 }
