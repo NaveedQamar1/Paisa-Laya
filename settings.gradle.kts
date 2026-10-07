@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "Paisa-Laya"
+rootProject.name = "EasyCopy"
 include(":app")
