@@ -13,116 +13,107 @@ import android.widget.*;
 import java.io.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.*;
 
 public class MainActivity extends Activity {
-    private static final int REQ_FRONT = 101, REQ_BACK = 102, REQ_IMPORT_FRONT = 103, REQ_IMPORT_BACK = 104, REQ_CREATE_PDF = 105;
     private ImageView frontPreview, backPreview;
-    private Uri frontUri, backUri, cameraUri;
-    private EditText copiesEdit;
-    private CheckBox grayscaleBox;
-    private TextView status;
-
-    @Override public void onCreate(Bundle b) { super.onCreate(b); buildUi(); }
-    private int dp(float v){ return (int)(v*getResources().getDisplayMetrics().density+0.5f); }
-    private TextView label(String s, int size){ TextView t=new TextView(this); t.setText(s); t.setTextSize(size); t.setTextColor(Color.DKGRAY); t.setPadding(0,dp(6),0,dp(6)); return t; }
-    private Button button(String s){ Button b=new Button(this); b.setText(s); return b; }
-
-    private void buildUi(){
-        ScrollView scroll=new ScrollView(this);
-        LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(18),dp(12),dp(18),dp(18));
-        TextView title=label("EasyCopy",30); title.setTextColor(Color.rgb(45,45,100)); title.setTypeface(null,Typeface.BOLD); root.addView(title);
-        root.addView(label("CNIC copier • A4 Portrait • 2 × 4 • Duplex",14));
-        LinearLayout steps=new LinearLayout(this); steps.setOrientation(LinearLayout.VERTICAL);
-        Button scanF=button("1. Scan FRONT (F)"); Button importF=button("Import FRONT from device / SD");
-        frontPreview=preview(); steps.addView(scanF); steps.addView(importF); steps.addView(frontPreview,new LinearLayout.LayoutParams(-1,dp(90)));
-        Button scanB=button("2. Scan BACK (B)"); Button importB=button("Import BACK from device / SD");
-        backPreview=preview(); steps.addView(scanB); steps.addView(importB); steps.addView(backPreview,new LinearLayout.LayoutParams(-1,dp(90))); root.addView(steps);
-        root.addView(label("3. Number of complete CNIC copies",16));
-        copiesEdit=new EditText(this); copiesEdit.setInputType(2); copiesEdit.setText("1"); copiesEdit.setSelectAllOnFocus(true); root.addView(copiesEdit,new LinearLayout.LayoutParams(-1,dp(55)));
-        grayscaleBox=new CheckBox(this); grayscaleBox.setText("Grayscale / economical copy"); root.addView(grayscaleBox);
-        root.addView(label("Fixed layout: A4 Portrait • 2 columns × 4 rows\n1  2\n3  4\n5  6\n7  8\nFront and Back use identical positions for duplex printing.",14));
-        Button pdf=button("Create PDF / Preview"); Button print=button("PRINT — Duplex A4"); Button save=button("Save PDF to device");
-        root.addView(pdf); root.addView(print); root.addView(save);
-        status=label("Ready. Start with the FRONT side.",13); status.setTextColor(Color.GRAY); root.addView(status);
-        scanF.setOnClickListener(v->capture(true)); importF.setOnClickListener(v->pick(true)); scanB.setOnClickListener(v->capture(false)); importB.setOnClickListener(v->pick(false));
-        pdf.setOnClickListener(v->createPdf()); print.setOnClickListener(v->printPdf()); save.setOnClickListener(v->savePdf());
-        scroll.addView(root); setContentView(scroll);
-    }
-    private ImageView preview(){ ImageView v=new ImageView(this); v.setBackgroundColor(Color.LTGRAY); v.setScaleType(ImageView.ScaleType.CENTER_INSIDE); return v; }
-
-    private void capture(boolean front){
-        try{
-            String name="EasyCopy_"+(front?"F":"B")+"_"+System.currentTimeMillis()+".jpg";
-            ContentValues cv=new ContentValues(); cv.put(MediaStore.Images.Media.DISPLAY_NAME,name); cv.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg"); cv.put(MediaStore.Images.Media.RELATIVE_PATH,"Pictures/EasyCopy");
-            cameraUri=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,cv);
-            Intent i=new Intent(MediaStore.ACTION_IMAGE_CAPTURE); i.putExtra(MediaStore.EXTRA_OUTPUT,cameraUri); startActivityForResult(i,front?REQ_FRONT:REQ_BACK);
-        }catch(Exception e){toast("Camera could not be opened: "+e.getMessage());}
-    }
-    private void pick(boolean front){
-        Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT); i.addCategory(Intent.CATEGORY_OPENABLE); i.setType("image/*"); i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,false); startActivityForResult(i,front?REQ_IMPORT_FRONT:REQ_IMPORT_BACK);
-    }
-    @Override protected void onActivityResult(int r,int c,Intent d){
-        super.onActivityResult(r,c,d);
-        if(r==REQ_CREATE_PDF){
-            if(c==RESULT_OK && d!=null && d.getData()!=null && pendingCopy!=null){
-                try(OutputStream out=getContentResolver().openOutputStream(d.getData()); InputStream in=new FileInputStream(pendingCopy)){
-                    byte[] buf=new byte[8192]; int n; while((n=in.read(buf))>0) out.write(buf,0,n); status.setText("PDF saved successfully.");
-                }catch(Exception e){toast("Could not save PDF: "+e.getMessage());}
-            } return;
-        }
-        if(c!=RESULT_OK) return;
-        Uri u=null; if(r==REQ_FRONT||r==REQ_BACK) u=cameraUri; else if(d!=null) u=d.getData();
-        if(u==null)return;
-        if(r==REQ_FRONT||r==REQ_IMPORT_FRONT){frontUri=u; frontPreview.setImageURI(u); status.setText("Front F loaded. Now scan/import the BACK B.");}
-        else {backUri=u; backPreview.setImageURI(u); status.setText("Both F and B are loaded. Choose copies and print.");}
-    }
-    private int copies(){ try{return Math.max(1,Math.min(9999,Integer.parseInt(copiesEdit.getText().toString().trim())));}catch(Exception e){return 1;} }
-    private Bitmap load(Uri u) throws IOException { return MediaStore.Images.Media.getBitmap(getContentResolver(),u); }
-    private Bitmap prepare(Bitmap src){
-        if(!grayscaleBox.isChecked()) return src;
-        Bitmap g=Bitmap.createBitmap(src.getWidth(),src.getHeight(),Bitmap.Config.ARGB_8888); Canvas c=new Canvas(g); Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
-        ColorMatrix m=new ColorMatrix(); m.setSaturation(0); p.setColorFilter(new ColorMatrixColorFilter(m)); c.drawBitmap(src,0,0,p); return g;
-    }
-    private File makePdf() throws Exception {
-        if(frontUri==null||backUri==null) throw new IllegalStateException("Please load both FRONT (F) and BACK (B) first.");
-        Bitmap f=prepare(load(frontUri)), b=prepare(load(backUri)); PdfDocument doc=new PdfDocument(); int total=copies(); int sheets=(total+7)/8;
-        for(int s=0;s<sheets;s++){
-            int start=s*8;
-            PdfDocument.Page fp=doc.startPage(new PdfDocument.PageInfo.Builder(595,842,s*2+1).create()); drawA4(fp.getCanvas(),f,total,start); doc.finishPage(fp);
-            PdfDocument.Page bp=doc.startPage(new PdfDocument.PageInfo.Builder(595,842,s*2+2).create()); drawA4(bp.getCanvas(),b,total,start); doc.finishPage(bp);
-        }
-        File out=new File(getCacheDir(),"EasyCopy_"+new SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(new Date())+".pdf");
-        FileOutputStream os=new FileOutputStream(out); doc.writeTo(os); os.close(); doc.close(); return out;
-    }
-    private void drawA4(Canvas c, Bitmap image, int total, int start){
-        c.drawColor(Color.WHITE); Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG); p.setStyle(Paint.Style.STROKE); p.setColor(Color.LTGRAY); p.setStrokeWidth(0.6f);
-        float margin=18f,gapX=8f,gapY=8f,cellW=(595-2*margin-gapX)/2f,cellH=(842-2*margin-3*gapY)/4f;
-        for(int slot=0;slot<8;slot++){
-            int n=start+slot;if(n>=total)break;int col=slot%2,row=slot/2;float x=margin+col*(cellW+gapX),y=margin+row*(cellH+gapY);
-            RectF cell=new RectF(x,y,x+cellW,y+cellH);c.drawRect(cell,p);
-            float scale=Math.min((cellW-6)/image.getWidth(),(cellH-6)/image.getHeight());float w=image.getWidth()*scale,h=image.getHeight()*scale;
-            c.drawBitmap(image,null,new RectF(x+(cellW-w)/2,y+(cellH-h)/2,x+(cellW+w)/2,y+(cellH+h)/2),new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG));
-        }
-    }
-    private void createPdf(){try{File f=makePdf();status.setText("PDF created: "+f.getName()+". Use Save PDF or Print.");}catch(Exception e){toast(e.getMessage());}}
-    private void printPdf(){
-        try{File f=makePdf();PrintManager pm=(PrintManager)getSystemService(PRINT_SERVICE);
-            pm.print("EasyCopy",new PdfPrintAdapter(f,(copies()+7)/8*2),new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).setColorMode(PrintAttributes.COLOR_MODE_COLOR).build());
-            status.setText("Print dialog opened. Select A4 and duplex/both sides in printer settings.");
-        }catch(Exception e){toast(e.getMessage());}
-    }
-    private void savePdf(){try{File f=makePdf();Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("application/pdf");i.putExtra(Intent.EXTRA_TITLE,f.getName());pendingCopy=f;startActivityForResult(i,REQ_CREATE_PDF);}catch(Exception e){toast(e.getMessage());}}
+    private Uri frontUri, backUri;
+    private EditText copiesEdit, ipEdit;
+    private Spinner dpiSpinner,colorSpinner,sourceSpinner;
+    private TextView status,scannerStatus;
+    private LinearLayout devices;
+    private ExecutorService pool=Executors.newFixedThreadPool(2);
     private File pendingCopy;
-    private class PdfPrintAdapter extends PrintDocumentAdapter{
-        File file;int pageCount;PdfPrintAdapter(File f,int count){file=f;pageCount=count;}
-        public void onLayout(PrintAttributes oldA,PrintAttributes newA,CancellationSignal cs,LayoutResultCallback cb,Bundle extras){
-            if(cs.isCanceled()){cb.onLayoutCancelled();return;}cb.onLayoutFinished(new PrintDocumentInfo.Builder(file.getName()).setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).setPageCount(pageCount).build(),!newA.equals(oldA));
-        }
-        public void onWrite(PageRange[] pages,ParcelFileDescriptor dest,CancellationSignal cs,WriteResultCallback cb){
-            try{InputStream in=new FileInputStream(file);OutputStream out=new FileOutputStream(dest.getFileDescriptor());byte[] buf=new byte[8192];int n;
-                while((n=in.read(buf))>0){if(cs.isCanceled()){in.close();cb.onWriteCancelled();return;}out.write(buf,0,n);}out.flush();in.close();cb.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});
-            }catch(Exception e){cb.onWriteFailed(e.getMessage());}
-        }
+
+    int dp(float x){return (int)(x*getResources().getDisplayMetrics().density+.5f);}
+    TextView tv(String s,float z){TextView t=new TextView(this);t.setText(s);t.setTextSize(z);t.setTextColor(Color.rgb(24,32,51));t.setPadding(0,dp(5),0,dp(5));return t;}
+    Button btn(String s){Button b=new Button(this);b.setText(s);b.setAllCaps(false);return b;}
+    LinearLayout card(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);l.setPadding(dp(16),dp(12),dp(16),dp(12));GradientDrawable g=new GradientDrawable();g.setColor(Color.WHITE);g.setCornerRadius(dp(18));l.setBackground(g);return l;}
+    @Override public void onCreate(Bundle b){super.onCreate(b);getWindow().setStatusBarColor(Color.rgb(247,248,252));build();}
+
+    void build(){
+        ScrollView sc=new ScrollView(this);sc.setBackgroundColor(Color.rgb(247,248,252));
+        LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(16),dp(10),dp(16),dp(24));
+        TextView title=tv("EasyCopy",32);title.setTypeface(null,Typeface.BOLD);title.setTextColor(Color.rgb(55,48,163));root.addView(title);
+        TextView sub=tv("Smart network scanner • CNIC copier • PDF",14);sub.setTextColor(Color.rgb(102,112,133));root.addView(sub);
+
+        LinearLayout net=card(); TextView nt=tv("Network scanner",20);nt.setTypeface(null,Typeface.BOLD);net.addView(nt);
+        scannerStatus=tv("Searching for scanners on this Wi‑Fi network…",13);scannerStatus.setTextColor(Color.rgb(102,112,133));net.addView(scannerStatus);
+        devices=new LinearLayout(this);devices.setOrientation(LinearLayout.VERTICAL);net.addView(devices);
+        LinearLayout iprow=new LinearLayout(this);iprow.setGravity(Gravity.CENTER_VERTICAL);
+        ipEdit=new EditText(this);ipEdit.setHint("Scanner IP address");ipEdit.setSingleLine(true);ipEdit.setInputType(33);iprow.addView(ipEdit,new LinearLayout.LayoutParams(0,dp(52),1));
+        Button add=btn("Add");iprow.addView(add,new LinearLayout.LayoutParams(dp(80),dp(52)));net.addView(iprow);
+        Button rescan=btn("↻  Find scanners again");net.addView(rescan);
+        root.addView(net,new LinearLayout.LayoutParams(-1,-2));
+
+        LinearLayout set=card(); TextView st=tv("Scan settings",20);st.setTypeface(null,Typeface.BOLD);set.addView(st);
+        LinearLayout row1=new LinearLayout(this);dpiSpinner=spinner(new String[]{"150 DPI","200 DPI","300 DPI","600 DPI"});colorSpinner=spinner(new String[]{"Color","Grayscale","Black & White"});row1.addView(dpiSpinner,new LinearLayout.LayoutParams(0,dp(55),1));row1.addView(colorSpinner,new LinearLayout.LayoutParams(0,dp(55),1));set.addView(row1);
+        sourceSpinner=spinner(new String[]{"Platen / Glass","Feeder","Duplex ADF"});set.addView(sourceSpinner,new LinearLayout.LayoutParams(-1,dp(55)));
+        root.addView(set,new LinearLayout.LayoutParams(-1,-2));
+
+        LinearLayout id=card();TextView it=tv("CNIC copy",20);it.setTypeface(null,Typeface.BOLD);id.addView(it);
+        TextView hint=tv("Scan or import FRONT and BACK. EasyCopy places matching sides in an A4 2 × 4 layout.",13);hint.setTextColor(Color.rgb(102,112,133));id.addView(hint);
+        LinearLayout sides=new LinearLayout(this);sides.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout f=side("FRONT",true), b=side("BACK",false);sides.addView(f,new LinearLayout.LayoutParams(0,dp(180),1));sides.addView(b,new LinearLayout.LayoutParams(0,dp(180),1));id.addView(sides);
+        LinearLayout copies=new LinearLayout(this);copies.setGravity(Gravity.CENTER_VERTICAL);copies.addView(tv("Complete copies",15),new LinearLayout.LayoutParams(0,dp(50),1));copiesEdit=new EditText(this);copiesEdit.setText("1");copiesEdit.setInputType(2);copiesEdit.setSelectAllOnFocus(true);copies.addView(copiesEdit,new LinearLayout.LayoutParams(dp(90),dp(52)));id.addView(copies);
+        CheckBox gray=new CheckBox(this);gray.setText("Economical grayscale output");gray.setId(9001);id.addView(gray);
+        root.addView(id,new LinearLayout.LayoutParams(-1,-2));
+
+        LinearLayout actions=card();TextView at=tv("Output",20);at.setTypeface(null,Typeface.BOLD);actions.addView(at);
+        Button pdf=btn("Create PDF preview"),save=btn("Save PDF"),print=btn("Print • A4 Duplex"),share=btn("Share PDF");
+        actions.addView(pdf);actions.addView(save);actions.addView(print);actions.addView(share);root.addView(actions,new LinearLayout.LayoutParams(-1,-2));
+        status=tv("Ready. Connect a network scanner or import images.",13);status.setTextColor(Color.rgb(102,112,133));root.addView(status);
+        sc.addView(root);setContentView(sc);
+
+        pdf.setOnClickListener(v->safePdf());save.setOnClickListener(v->savePdf());print.setOnClickListener(v->printPdf());share.setOnClickListener(v->sharePdf());
+        add.setOnClickListener(v->manualAdd());rescan.setOnClickListener(v->discover());
+        discover();
     }
-    private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
+    Spinner spinner(String[] a){Spinner s=new Spinner(this);ArrayAdapter<String>x=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,a);s.setAdapter(x);return s;}
+    LinearLayout side(String name,boolean front){
+        LinearLayout l=card();l.setPadding(dp(8),dp(6),dp(8),dp(6));TextView t=tv(name,15);t.setTypeface(null,Typeface.BOLD);l.addView(t);
+        ImageView p=new ImageView(this);p.setBackgroundColor(Color.rgb(239,241,246));p.setScaleType(ImageView.ScaleType.CENTER_INSIDE);if(front)frontPreview=p;else backPreview=p;l.addView(p,new LinearLayout.LayoutParams(-1,dp(70)));
+        Button scan=btn("Scan"),imp=btn("Import");LinearLayout r=new LinearLayout(this);r.addView(scan,new LinearLayout.LayoutParams(0,dp(48),1));r.addView(imp,new LinearLayout.LayoutParams(0,dp(48),1));l.addView(r);
+        scan.setOnClickListener(v->scanSide(front));imp.setOnClickListener(v->pick(front));return l;
+    }
+    void discover(){
+        devices.removeAllViews();scannerStatus.setText("Searching…");
+        NetworkScanner ns=new NetworkScanner(this);ns.discover(new NetworkScanner.Listener(){
+            public void onDevice(String name,String url){runOnUiThread(()->addDevice(name,url));}
+            public void onDone(){runOnUiThread(()->{if(devices.getChildCount()==0)scannerStatus.setText("No compatible eSCL scanner found. You can add its IP manually.");});}
+            public void onError(String m){runOnUiThread(()->scannerStatus.setText(m));}
+        });
+    }
+    void addDevice(String name,String url){
+        scannerStatus.setText("Scanner available");Button b=btn("●  "+name+"   "+url);b.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);b.setOnClickListener(v->{selectedScanner=url;scannerStatus.setText("Connected: "+name);});
+        devices.addView(b);
+        if(selectedScanner==null)selectedScanner=url;
+    }
+    String selectedScanner;
+    void manualAdd(){String ip=ipEdit.getText().toString().trim();if(ip.isEmpty()){toast("Enter the scanner IP address.");return;}selectedScanner=(ip.startsWith("http")?ip:"http://"+ip+":80/eSCL/");scannerStatus.setText("Manual scanner selected: "+selectedScanner);}
+    void pick(boolean front){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("image/*");startActivityForResult(i,front?101:102);}
+    @Override protected void onActivityResult(int r,int c,Intent d){super.onActivityResult(r,c,d);if(c!=RESULT_OK||d==null||d.getData()==null)return;Uri u=d.getData();if(r==101){frontUri=u;frontPreview.setImageURI(u);status.setText("Front loaded. Now scan/import the back.");}else if(r==102){backUri=u;backPreview.setImageURI(u);status.setText("Front and back loaded.");}else if(r==105&&pendingCopy!=null){try(OutputStream o=getContentResolver().openOutputStream(d.getData());InputStream in=new FileInputStream(pendingCopy)){byte[] b=new byte[8192];int n;while((n=in.read(b))>0)o.write(b,0,n);status.setText("PDF saved.");}catch(Exception e){toast(e.getMessage());}}}
+    void scanSide(boolean front){
+        if(selectedScanner==null){toast("Connect to a network scanner first.");return;}
+        status.setText("Scanning "+(front?"front":"back")+" from network scanner…");
+        int dpi=new int[]{150,200,300,600}[dpiSpinner.getSelectedItemPosition()];
+        String color=new String[]{"RGB24","Grayscale8","BlackAndWhite1"}[colorSpinner.getSelectedItemPosition()];
+        boolean duplex=sourceSpinner.getSelectedItemPosition()==2;
+        pool.execute(()->{try{byte[] data=NetworkScanner.scan(selectedScanner,dpi,color,duplex);File f=new File(getCacheDir(),"scan_"+System.currentTimeMillis()+".jpg");try(FileOutputStream o=new FileOutputStream(f)){o.write(data);}Uri u=Uri.fromFile(f);runOnUiThread(()->{if(front){frontUri=u;frontPreview.setImageURI(u);}else{backUri=u;backPreview.setImageURI(u);}status.setText((front?"Front":"Back")+" scanned successfully.");});}catch(Exception e){runOnUiThread(()->toast("Scan failed: "+e.getMessage()));}});
+    }
+    int copies(){try{return Math.max(1,Math.min(9999,Integer.parseInt(copiesEdit.getText().toString().trim())));}catch(Exception e){return 1;}}
+    Bitmap load(Uri u)throws Exception{return MediaStore.Images.Media.getBitmap(getContentResolver(),u);}
+    File makePdf()throws Exception{
+        if(frontUri==null||backUri==null)throw new Exception("Please load both FRONT and BACK first.");
+        Bitmap f=load(frontUri),b=load(backUri);PdfDocument d=new PdfDocument();int total=copies();
+        for(int s=0;s<(total+7)/8;s++){PdfDocument.Page fp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,s*2+1).create());draw(fp.getCanvas(),f,total,s*8);d.finishPage(fp);PdfDocument.Page bp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,s*2+2).create());draw(bp.getCanvas(),b,total,s*8);d.finishPage(bp);}
+        File out=new File(getCacheDir(),"EasyCopy_"+new SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(new Date())+".pdf");try(FileOutputStream o=new FileOutputStream(out)){d.writeTo(o);}d.close();return out;
+    }
+    void draw(Canvas c,Bitmap im,int total,int start){c.drawColor(Color.WHITE);Paint p=new Paint(3);p.setStyle(Paint.Style.STROKE);p.setColor(Color.LTGRAY);float m=18,gx=8,gy=8,w=(595-2*m-gx)/2,h=(842-2*m-3*gy)/4;for(int k=0;k<8;k++){int n=start+k;if(n>=total)break;float x=m+(k%2)*(w+gx),y=m+(k/2)*(h+gy);c.drawRect(x,y,x+w,y+h,p);float q=Math.min((w-8)/im.getWidth(),(h-8)/im.getHeight()),iw=im.getWidth()*q,ih=im.getHeight()*q;c.drawBitmap(im,null,new RectF(x+(w-iw)/2,y+(h-ih)/2,x+(w+iw)/2,y+(h+ih)/2),new Paint(3));}}
+    File lastPdf;
+    void safePdf(){try{lastPdf=makePdf();status.setText("PDF preview ready: "+lastPdf.getName());}catch(Exception e){toast(e.getMessage());}}
+    void savePdf(){try{lastPdf=makePdf();Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("application/pdf");i.putExtra(Intent.EXTRA_TITLE,lastPdf.getName());startActivityForResult(i,105);}catch(Exception e){toast(e.getMessage());}}
+    void sharePdf(){try{lastPdf=makePdf();Intent i=new Intent(Intent.ACTION_SEND);i.setType("application/pdf");i.putExtra(Intent.EXTRA_STREAM,Uri.fromFile(lastPdf));startActivity(Intent.createChooser(i,"Share EasyCopy PDF"));}catch(Exception e){toast(e.getMessage());}}
+    void printPdf(){try{lastPdf=makePdf();PrintManager pm=(PrintManager)getSystemService(PRINT_SERVICE);pm.print("EasyCopy",new PrintDocumentAdapter(){public void onLayout(PrintAttributes a,PrintAttributes b,CancellationSignal c,LayoutResultCallback x,Bundle z){x.onLayoutFinished(new PrintDocumentInfo.Builder("EasyCopy.pdf").setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).setPageCount(PdfDocument.PageInfo.Builder.class!=null?2:2).build(),true);}public void onWrite(PageRange[] p,ParcelFileDescriptor d,CancellationSignal c,WriteResultCallback x){try(InputStream in=new FileInputStream(lastPdf);OutputStream o=new FileOutputStream(d.getFileDescriptor())){byte[] b=new byte[8192];int n;while((n=in.read(b))>0)o.write(b,0,n);o.flush();x.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});}catch(Exception e){x.onWriteFailed(e.getMessage());}}},new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build());}catch(Exception e){toast(e.getMessage());}}
+    void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 }
