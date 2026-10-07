@@ -713,7 +713,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         pm.print("EasyCopy Image",new PrintDocumentAdapter(){
             public void onLayout(PrintAttributes a,PrintAttributes b,CancellationSignal cs,LayoutResultCallback x,Bundle z){x.onLayoutFinished(new PrintDocumentInfo.Builder("EasyCopy_Image.pdf").setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).setPageCount(1).build(),true);}
             public void onWrite(PageRange[] pages,ParcelFileDescriptor fd,CancellationSignal cs,WriteResultCallback x){try(InputStream in=new FileInputStream(f);OutputStream o=new FileOutputStream(fd.getFileDescriptor())){byte[] buf=new byte[8192];int n;while((n=in.read(buf))>0)o.write(buf,0,n);o.flush();x.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});}catch(Exception e){x.onWriteFailed(e.getMessage());}}
-        },new PrintAttributes.Builder().setMediaSize(landscape?PrintAttributes.MediaSize.ISO_A4_LANDSCAPE:PrintAttributes.MediaSize.ISO_A4).build());
+        },new PrintAttributes.Builder().setMediaSize(landscape?PrintAttributes.MediaSize.ISO_A4.asLandscape():PrintAttributes.MediaSize.ISO_A4).build());
     }
 
     class ImageEditorView extends View{
