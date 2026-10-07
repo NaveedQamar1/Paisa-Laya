@@ -21,6 +21,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     private Spinner cardCountSpinner;
     private final Uri[] frontUris=new Uri[4], backUris=new Uri[4];
     private final ImageView[] frontPreviews=new ImageView[4], backPreviews=new ImageView[4];
+    private final View[][] sideCells=new View[2][4];
     private Spinner dpiSpinner,colorSpinner,sourceSpinner;
     private TextView status,scannerStatus;
     private LinearLayout devices;
@@ -59,6 +60,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         TextView hint=tv("Place 1 to 4 cards anywhere on the scanner glass. EasyCopy scans the full area, finds the cards, straightens them and keeps each front paired with its own back.",13);hint.setTextColor(Color.rgb(102,112,133));id.addView(hint);
         LinearLayout countRow=new LinearLayout(this);countRow.setGravity(Gravity.CENTER_VERTICAL);countRow.addView(tv("Different ID cards",15),new LinearLayout.LayoutParams(0,dp(52),1));
         cardCountSpinner=spinner(new String[]{"1 card","2 cards","3 cards","4 cards"});countRow.addView(cardCountSpinner,new LinearLayout.LayoutParams(dp(130),dp(52)));id.addView(countRow);
+        cardCountSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){updateSlotVisibility();}public void onNothingSelected(android.widget.AdapterView<?> p){updateSlotVisibility();}});
         id.addView(side("FRONT SIDE",true));id.addView(side("BACK SIDE",false));
         LinearLayout copies=new LinearLayout(this);copies.setGravity(Gravity.CENTER_VERTICAL);copies.addView(tv("Copies of each complete set",15),new LinearLayout.LayoutParams(0,dp(50),1));copiesEdit=new EditText(this);copiesEdit.setText("1");copiesEdit.setInputType(2);copiesEdit.setSelectAllOnFocus(true);copies.addView(copiesEdit,new LinearLayout.LayoutParams(dp(90),dp(52)));id.addView(copies);
         CheckBox gray=new CheckBox(this);gray.setText("Economical grayscale output");gray.setId(9001);id.addView(gray);
@@ -67,7 +69,8 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         LinearLayout actions=card();TextView at=tv("Output",20);at.setTypeface(null,Typeface.BOLD);actions.addView(at);
         Button pdf=actionBtn("▣  Preview PDF",Color.rgb(55,48,163),Color.WHITE),save=actionBtn("↓  Save PDF",Color.rgb(18,183,106),Color.WHITE),print=actionBtn("⎙  Print A4 Duplex",Color.rgb(245,158,11),Color.WHITE),share=actionBtn("↗  Share PDF",Color.rgb(6,182,212),Color.WHITE);
         actions.addView(pdf);actions.addView(save);actions.addView(print);actions.addView(share);root.addView(actions,new LinearLayout.LayoutParams(-1,-2));
-        status=tv("Ready. Connect a network scanner or import images.",13);status.setTextColor(Color.rgb(102,112,133));root.addView(status);
+        status=tv("Ready. Connect a network scanner or import images.",13);
+        updateSlotVisibility();status.setTextColor(Color.rgb(102,112,133));root.addView(status);
         sc.addView(root);setContentView(sc);
 
         pdf.setOnClickListener(v->safePdf());save.setOnClickListener(v->savePdf());print.setOnClickListener(v->printPdf());share.setOnClickListener(v->sharePdf());
@@ -78,7 +81,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     LinearLayout side(String name,boolean front){
         LinearLayout l=card();l.setPadding(dp(8),dp(6),dp(8),dp(6));TextView t=tv(name,15);t.setTypeface(null,Typeface.BOLD);l.addView(t);
         GridLayout grid=new GridLayout(this);grid.setColumnCount(2);grid.setRowCount(2);
-        for(int i=0;i<4;i++){ImageView p=new ImageView(this);p.setBackgroundColor(Color.rgb(239,241,246));p.setScaleType(ImageView.ScaleType.CENTER_INSIDE);if(front)frontPreviews[i]=p;else backPreviews[i]=p;LinearLayout cell=new LinearLayout(this);cell.setOrientation(LinearLayout.VERTICAL);cell.addView(tv(""+(i+1),12));cell.addView(p,new LinearLayout.LayoutParams(-1,dp(75)));GridLayout.LayoutParams gp=new GridLayout.LayoutParams();gp.width=0;gp.height=dp(100);gp.columnSpec=GridLayout.spec(i%2,1,1);gp.rowSpec=GridLayout.spec(i/2,1,1);grid.addView(cell,gp);}
+        for(int i=0;i<4;i++){ImageView p=new ImageView(this);p.setBackgroundColor(Color.rgb(239,241,246));p.setScaleType(ImageView.ScaleType.CENTER_INSIDE);if(front)frontPreviews[i]=p;else backPreviews[i]=p;LinearLayout cell=new LinearLayout(this);cell.setOrientation(LinearLayout.VERTICAL);cell.addView(tv(""+(i+1),12));cell.addView(p,new LinearLayout.LayoutParams(-1,dp(75)));GridLayout.LayoutParams gp=new GridLayout.LayoutParams();gp.width=0;gp.height=dp(100);gp.columnSpec=GridLayout.spec(i%2,1,1);gp.rowSpec=GridLayout.spec(i/2,1,1);grid.addView(cell,gp);sideCells[front?0:1][i]=cell;}
         l.addView(grid);
         Button scan=actionBtn(front?"Scan all fronts":"Scan all backs",Color.rgb(55,48,163),Color.WHITE),imp=actionBtn(front?"Import fronts":"Import backs",Color.rgb(238,242,255),Color.rgb(55,48,163));LinearLayout r=new LinearLayout(this);r.addView(scan,new LinearLayout.LayoutParams(0,dp(48),1));r.addView(imp,new LinearLayout.LayoutParams(0,dp(48),1));l.addView(r);
         scan.setOnClickListener(v->scanSide(front));imp.setOnClickListener(v->pick(front));return l;
@@ -130,28 +133,169 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
 
     Bitmap load(Uri u)throws Exception{return MediaStore.Images.Media.getBitmap(getContentResolver(),u);}
 
+    void updateSlotVisibility(){
+        int count=cardCount();
+        for(int side=0;side<2;side++)for(int i=0;i<4;i++)if(sideCells[side][i]!=null)
+            sideCells[side][i].setVisibility(i<count?View.VISIBLE:View.GONE);
+    }
+
     ArrayList<Bitmap> prepareCards(Bitmap source,int wanted){
         if(source==null)throw new IllegalArgumentException("The scanner returned no image.");
-        int max=1800;float scale=Math.min(1f,max/(float)Math.max(source.getWidth(),source.getHeight()));
+        int max=1800;
+        float scale=Math.min(1f,max/(float)Math.max(source.getWidth(),source.getHeight()));
         Bitmap work=scale<1f?Bitmap.createScaledBitmap(source,Math.max(1,(int)(source.getWidth()*scale)),Math.max(1,(int)(source.getHeight()*scale)),true):source;
-        int w=work.getWidth(),h=work.getHeight(),n=w*h;int[] px=new int[n];work.getPixels(px,0,w,0,0,w,h);
-        int br=0,bg=0,bb=0,cnt=0,step=Math.max(1,Math.min(w,h)/100);
-        for(int y=0;y<h;y+=step)for(int x=0;x<w;x+=step)if(x<step*4||y<step*4||x>w-step*5||y>h-step*5){int c=px[y*w+x];br+=Color.red(c);bg+=Color.green(c);bb+=Color.blue(c);cnt++;}
-        br/=Math.max(1,cnt);bg/=Math.max(1,cnt);bb/=Math.max(1,cnt);
-        boolean[] fg=new boolean[n];for(int i=0;i<n;i++){int c=px[i];fg[i]=Math.abs(Color.red(c)-br)+Math.abs(Color.green(c)-bg)+Math.abs(Color.blue(c)-bb)>42;}
-        boolean[] seen=new boolean[n];ArrayDeque<Integer> q=new ArrayDeque<>();ArrayList<Rect> boxes=new ArrayList<>();int minArea=Math.max(2500,n/1500);
-        for(int y=0;y<h;y++)for(int x=0;x<w;x++){int idx=y*w+x;if(!fg[idx]||seen[idx])continue;q.clear();q.add(idx);seen[idx]=true;int l=x,r=x,t=y,b=y,area=0;
-            while(!q.isEmpty()){int z=q.removeFirst(),zx=z%w,zy=z/w;area++;l=Math.min(l,zx);r=Math.max(r,zx);t=Math.min(t,zy);b=Math.max(b,zy);
-                if(zx>0&&!seen[z-1]&&fg[z-1]){seen[z-1]=true;q.add(z-1);}if(zx<w-1&&!seen[z+1]&&fg[z+1]){seen[z+1]=true;q.add(z+1);}
-                if(zy>0&&!seen[z-w]&&fg[z-w]){seen[z-w]=true;q.add(z-w);}if(zy<h-1&&!seen[z+w]&&fg[z+w]){seen[z+w]=true;q.add(z+w);}
+        int w=work.getWidth(),h=work.getHeight(),n=w*h;
+        int[] px=new int[n];work.getPixels(px,0,w,0,0,w,h);
+
+        int br=0,bg=0,bb=0,cnt=0,step=Math.max(1,Math.min(w,h)/120);
+        for(int y=0;y<h;y+=step)for(int x=0;x<w;x+=step)
+            if(x<step*5||y<step*5||x>w-step*6||y>h-step*6){
+                int c=px[y*w+x];br+=Color.red(c);bg+=Color.green(c);bb+=Color.blue(c);cnt++;
             }
-            int bw=r-l+1,bh=b-t+1;float ratio=bw/(float)bh;if(area>=minArea&&bw>80&&bh>50&&bw<.95f*w&&bh<.95f*h&&ratio>1.15f&&ratio<2.2f)boxes.add(new Rect(l,t,r+1,b+1));
+        br/=Math.max(1,cnt);bg/=Math.max(1,cnt);bb/=Math.max(1,cnt);
+
+        boolean[] fg=new boolean[n];
+        for(int i=0;i<n;i++){
+            int c=px[i];
+            int diff=Math.abs(Color.red(c)-br)+Math.abs(Color.green(c)-bg)+Math.abs(Color.blue(c)-bb);
+            fg[i]=diff>25;
         }
-        boxes.sort((a,b)->a.top==b.top?Integer.compare(a.left,b.left):Integer.compare(a.top,b.top));
+
+        boolean[] seen=new boolean[n];
+        ArrayDeque<Integer> q=new ArrayDeque<>();
+        ArrayList<Rect> boxes=new ArrayList<>();
+        int minArea=Math.max(1800,n/5000);
+
+        for(int y=0;y<h;y++)for(int x=0;x<w;x++){
+            int idx=y*w+x;
+            if(!fg[idx]||seen[idx])continue;
+            q.clear();q.add(idx);seen[idx]=true;
+            int l=x,r=x,t=y,b=y,area=0;
+            while(!q.isEmpty()){
+                int z=q.removeFirst(),zx=z%w,zy=z/w;area++;
+                l=Math.min(l,zx);r=Math.max(r,zx);t=Math.min(t,zy);b=Math.max(b,zy);
+                if(zx>0&&!seen[z-1]&&fg[z-1]){seen[z-1]=true;q.add(z-1);}
+                if(zx<w-1&&!seen[z+1]&&fg[z+1]){seen[z+1]=true;q.add(z+1);}
+                if(zy>0&&!seen[z-w]&&fg[z-w]){seen[z-w]=true;q.add(z-w);}
+                if(zy<h-1&&!seen[z+w]&&fg[z+w]){seen[z+w]=true;q.add(z+w);}
+            }
+            int bw=r-l+1,bh=b-t+1;
+            float ratio=bw/(float)Math.max(1,bh);
+            // Allow heavily rotated cards: their axis-aligned bounding box can be almost square.
+            if(area>=minArea&&bw>70&&bh>45&&bw<.98f*w&&bh<.98f*h&&ratio>.45f&&ratio<3.8f)
+                boxes.add(new Rect(l,t,r+1,b+1));
+        }
+
+        boxes.sort((a,b)->Integer.compare(b.width()*b.height(),a.width()*a.height()));
+
         ArrayList<Bitmap> out=new ArrayList<>();
-        for(Rect box:boxes){if(out.size()>=wanted)break;float ew=box.width()*1.10f,eh=ew/CARD_RATIO;if(eh>box.height()*1.35f){eh=box.height()*1.10f;ew=eh*CARD_RATIO;}int l=Math.max(0,Math.min(w-(int)ew,(int)(box.centerX()-ew/2)));int t=Math.max(0,Math.min(h-(int)eh,(int)(box.centerY()-eh/2)));Bitmap c=Bitmap.createBitmap(work,l,t,Math.max(1,Math.min(w-l,(int)ew)),Math.max(1,Math.min(h-t,(int)eh)));if(c.getWidth()<c.getHeight()){Matrix m=new Matrix();m.postRotate(90);Bitmap r=Bitmap.createBitmap(c,0,0,c.getWidth(),c.getHeight(),m,true);c.recycle();c=r;}out.add(c);}
-        if(out.isEmpty())throw new IllegalArgumentException("No ID card detected. Place the entire card on the glass with some scanner-bed area around it.");
-        if(work!=source)work.recycle();return out;
+        for(Rect box:boxes){
+            if(out.size()>=wanted)break;
+            Bitmap card=normalizeDetectedCard(work,box,px,fg,w,h,br,bg,bb);
+            if(card!=null)out.add(card);
+        }
+
+        if(out.isEmpty()){
+            // Last-resort fallback: use the largest meaningful non-background region even when
+            // segmentation is imperfect. This avoids rejecting a real scan just because its
+            // color is close to the scanner glass.
+            Rect fallback=findFallbackRegion(px,w,h,br,bg,bb);
+            if(fallback!=null)out.add(normalizeDetectedCard(work,fallback,px,fg,w,h,br,bg,bb));
+        }
+
+        if(out.isEmpty())throw new IllegalArgumentException("No ID card detected. The scan was received, but the card could not be separated from the scanner background.");
+        if(work!=source)work.recycle();
+        return out;
+    }
+
+    Bitmap normalizeDetectedCard(Bitmap work,Rect box,int[] px,boolean[] fg,int w,int h,int br,int bg,int bb){
+        int pad=(int)(Math.max(box.width(),box.height())*.10f);
+        int l=Math.max(0,box.left-pad),t=Math.max(0,box.top-pad);
+        int r=Math.min(w,box.right+pad),b=Math.min(h,box.bottom+pad);
+        int bw=r-l,bh=b-t;
+        if(bw<40||bh<30)return null;
+
+        // Estimate the card's dominant axis with PCA, then rotate it to horizontal.
+        double sx=0,sy=0,sum=0;
+        for(int y=t;y<b;y++)for(int x=l;x<r;x++){
+            int i=y*w+x;
+            if(!fg[i])continue;
+            sx+=x;sy+=y;sum++;
+        }
+        if(sum<100)return null;
+        double mx=sx/sum,my=sy/sum,vx=0,vy=0,cov=0;
+        for(int y=t;y<b;y++)for(int x=l;x<r;x++){
+            int i=y*w+x;if(!fg[i])continue;
+            double dx=x-mx,dy=y-my;vx+=dx*dx;vy+=dy*dy;cov+=dx*dy;
+        }
+        double angle=.5*Math.atan2(2*cov,vx-vy);
+        double deg=Math.toDegrees(angle);
+        while(deg>90)deg-=180;while(deg<=-90)deg+=180;
+        Matrix rm=new Matrix();rm.postRotate((float)-deg);
+        Bitmap crop=Bitmap.createBitmap(work,l,t,bw,bh,rm,true);
+
+        // After rotation, find the card edges again and crop to the detected content.
+        Rect content=findForegroundBounds(crop,br,bg,bb);
+        if(content==null)content=new Rect(0,0,crop.getWidth(),crop.getHeight());
+        int margin=Math.max(2,(int)(Math.min(content.width(),content.height())*.015f));
+        int cl=Math.max(0,content.left-margin),ct=Math.max(0,content.top-margin);
+        int cr=Math.min(crop.getWidth(),content.right+margin),cb=Math.min(crop.getHeight(),content.bottom+margin);
+        if(cr-cl<50||cb-ct<40){crop.recycle();return null;}
+
+        Bitmap exact=Bitmap.createBitmap(crop,cl,ct,cr-cl,cb-ct);
+        crop.recycle();
+
+        if(exact.getWidth()<exact.getHeight()){
+            Matrix m=new Matrix();m.postRotate(90);
+            Bitmap r2=Bitmap.createBitmap(exact,0,0,exact.getWidth(),exact.getHeight(),m,true);
+            exact.recycle();exact=r2;
+        }
+
+        // Normalize the output to the real ID-card aspect ratio without adding large borders.
+        float ar=exact.getWidth()/(float)Math.max(1,exact.getHeight());
+        if(ar<1.15f||ar>2.0f){
+            int ew,eh;
+            if(ar<CARD_RATIO){
+                eh=exact.getHeight();ew=Math.max(1,Math.round(eh*CARD_RATIO));
+            }else{
+                ew=exact.getWidth();eh=Math.max(1,Math.round(ew/CARD_RATIO));
+            }
+            int nw=Math.min(exact.getWidth(),ew),nh=Math.min(exact.getHeight(),eh);
+            if(nw!=exact.getWidth()||nh!=exact.getHeight()){
+                int x=(exact.getWidth()-nw)/2,y=(exact.getHeight()-nh)/2;
+                Bitmap r3=Bitmap.createBitmap(exact,x,y,nw,nh);
+                exact.recycle();exact=r3;
+            }
+        }
+        return exact;
+    }
+
+    Rect findForegroundBounds(Bitmap b,int br,int bg,int bb){
+        int w=b.getWidth(),h=b.getHeight(),n=w*h;int[] p=new int[n];b.getPixels(p,0,w,0,0,w,h);
+        int l=w,t=h,r=0,bot=0,count=0;
+        for(int y=0;y<h;y++)for(int x=0;x<w;x++){
+            int c=p[y*w+x];
+            int diff=Math.abs(Color.red(c)-br)+Math.abs(Color.green(c)-bg)+Math.abs(Color.blue(c)-bb);
+            if(diff>25){l=Math.min(l,x);t=Math.min(t,y);r=Math.max(r,x+1);bot=Math.max(bot,y+1);count++;}
+        }
+        if(count<Math.max(100,w*h/10000)||r<=l||bot<=t)return null;
+        return new Rect(l,t,r,bot);
+    }
+
+    Rect findFallbackRegion(int[] px,int w,int h,int br,int bg,int bb){
+        // Use a coarse foreground projection when connected components fail.
+        int l=w,t=h,r=0,b=0,count=0;
+        int sx=Math.max(1,w/120),sy=Math.max(1,h/120);
+        for(int y=0;y<h;y+=sy)for(int x=0;x<w;x+=sx){
+            int c=px[y*w+x];
+            int diff=Math.abs(Color.red(c)-br)+Math.abs(Color.green(c)-bg)+Math.abs(Color.blue(c)-bb);
+            if(diff>18){l=Math.min(l,x);t=Math.min(t,y);r=Math.max(r,x+1);b=Math.max(b,y+1);count++;}
+        }
+        if(count<80)return null;
+        int margin=(int)(Math.min(w,h)*.03f);
+        l=Math.max(0,l-margin);t=Math.max(0,t-margin);r=Math.min(w,r+margin);b=Math.min(h,b+margin);
+        if(r-l<w*.08f||b-t<h*.05f)return null;
+        return new Rect(l,t,r,b);
     }
 
     int copies(){try{return Math.max(1,Math.min(9999,Integer.parseInt(copiesEdit.getText().toString().trim())));}catch(Exception e){return 1;}}
