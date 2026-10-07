@@ -3,7 +3,7 @@ name: Build EasyCopy APK
 on:
   workflow_dispatch:
   push:
-    branches: ["easycopy-apk"]
+    branches: ["easycopy-apk", "easycopy-v2"]
 
 jobs:
   build:
@@ -14,7 +14,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: easycopy-apk
+          ref: easycopy-v2
           fetch-depth: 1
 
       - name: Set up JDK 17
