@@ -133,8 +133,26 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         }
     }
     void processImported(Uri u,boolean front){
-        status.setText("Finding ID cards…");
-        pool.execute(()->{try{Bitmap raw=load(u);ArrayList<Bitmap> cards=prepareCards(raw,cardCount());for(int i=0;i<cards.size();i++)saveCard(cards.get(i),front,i);if(raw!=null)raw.recycle();runOnUiThread(()->status.setText((front?"Fronts":"Backs")+" ready."));}catch(Exception e){runOnUiThread(()->toast("Could not prepare image: "+e.getMessage()));}});
+        status.setText("Importing image…");
+        pool.execute(()->{try{
+            Bitmap raw=load(u);
+            if(raw==null)throw new IllegalArgumentException("Could not read the selected image.");
+            // Gallery images are treated as already-cropped card images. Do not run
+            // scanner/card detection on them again, otherwise a perfectly cropped
+            // NIC can be detected against its own background and cut in half.
+            Bitmap card=raw;
+            if(card.getWidth()<card.getHeight()){
+                Matrix m=new Matrix();
+                m.postRotate(90);
+                Bitmap rotated=Bitmap.createBitmap(card,0,0,card.getWidth(),card.getHeight(),m,true);
+                if(rotated!=card)card.recycle();
+                card=rotated;
+            }
+            saveCard(card,front,0);
+            if(card!=raw)card.recycle();
+            else raw.recycle();
+            runOnUiThread(()->status.setText((front?"Front":"Back")+" image imported."));
+        }catch(Exception e){runOnUiThread(()->toast("Could not import image: "+e.getMessage()));}});
     }
     void scanSide(boolean front){
         if(selectedScanner==null){toast("Select a scanner first.");return;}
@@ -260,7 +278,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
             double peri=Imgproc.arcLength(c2,true);
             MatOfPoint2f approx=new MatOfPoint2f();
             Imgproc.approxPolyDP(c2,approx,0.025*peri,true);
-            Point[] pts=approx.toArray();
+            org.opencv.core.Point[] pts=approx.toArray();
 
             if(pts.length==4&&Imgproc.isContourConvex(new MatOfPoint(pts))){
                 double ratio=quadRatio(pts);
@@ -310,7 +328,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         return Math.hypot(a.x-b.x,a.y-b.y);
     }
 
-    Rect quadBounds(Point[] p){
+    Rect quadBounds(org.opencv.core.Point[] p){
         int l=(int)Math.floor(Math.min(Math.min(p[0].x,p[1].x),Math.min(p[2].x,p[3].x)));
         int t=(int)Math.floor(Math.min(Math.min(p[0].y,p[1].y),Math.min(p[2].y,p[3].y)));
         int r=(int)Math.ceil(Math.max(Math.max(p[0].x,p[1].x),Math.max(p[2].x,p[3].x)));
@@ -319,10 +337,10 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     }
 
     Bitmap warpCard(Bitmap source,org.opencv.core.Point[] raw){
-        Point[] p=orderQuad(raw);
+        org.opencv.core.Point[] p=orderQuad(raw);
         double top=dist(p[0],p[1]),bottom=dist(p[3],p[2]),left=dist(p[0],p[3]),right=dist(p[1],p[2]);
         double width=Math.max(top,bottom),height=Math.max(left,right);
-        if(width<height){Point tmp=p[0];p[0]=p[3];p[3]=tmp;tmp=p[1];p[1]=p[2];p[2]=tmp;width=Math.max(left,right);height=Math.max(top,bottom);}
+        if(width<height){org.opencv.core.Point tmp=p[0];p[0]=p[3];p[3]=tmp;tmp=p[1];p[1]=p[2];p[2]=tmp;width=Math.max(left,right);height=Math.max(top,bottom);}
         int outW=1400,outH=Math.max(1,Math.round(outW/CARD_RATIO));
 
         Mat src=new Mat(),dst=new Mat(),from=new Mat(4,1,CvType.CV_32FC2),to=new Mat(4,1,CvType.CV_32FC2),M=new Mat();
@@ -581,7 +599,11 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
                 float nx=marginX+(k%2)*(cardW+gapX);
                 float x=nx;
                 float y=marginY+(k/2)*(cardH+gapY);
-                c.drawBitmap(im,null,new RectF(x,y,x+cardW,y+cardH),p);
+                float srcW=im.getWidth(),srcH=im.getHeight();
+                float scale=Math.min(cardW/Math.max(1,srcW),cardH/Math.max(1,srcH));
+                float dw=srcW*scale,dh=srcH*scale;
+                float dx=x+(cardW-dw)/2f,dy=y+(cardH-dh)/2f;
+                c.drawBitmap(im,null,new RectF(dx,dy,dx+dw,dy+dh),p);
                 im.recycle();
             }catch(Exception ignored){}
         }
