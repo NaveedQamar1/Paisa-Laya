@@ -57,13 +57,6 @@ public class NetworkScanner {
 
     public void close(){}
 
-    /*
-     * Network MFPs frequently expose eSCL over HTTPS with a device-generated
-     * certificate. Android quite correctly rejects that certificate, but this
-     * connection is only to the scanner on the user's local network. We use a
-     * scanner-only TLS connection that accepts the device certificate and do
-     * not change the app-wide Android trust store.
-     */
     private static HttpsURLConnection openHttps(URL u) throws Exception {
         HttpsURLConnection c=(HttpsURLConnection)u.openConnection();
         TrustManager[] trustAll=new TrustManager[]{new X509TrustManager(){
@@ -101,10 +94,6 @@ public class NetworkScanner {
         }catch(Exception e){
             first=e;
         }
-
-        // Some printers advertise the secure service but actually expose the
-        // usable eSCL endpoint on plain HTTP as well. Try the conventional
-        // HTTP eSCL endpoint before giving up.
         if(baseUrl.toLowerCase(Locale.US).startsWith("https://")){
             try{
                 URL u=new URL(baseUrl);
@@ -128,10 +117,9 @@ public class NetworkScanner {
             else if(containsIgnoreCase(caps,"Feeder"))source="Feeder";
         }
 
-        // Scan the entire supported platen/feeder area instead of a fixed A4 corner.
         int maxW=extractInt(caps,"MaxWidth",2550), maxH=extractInt(caps,"MaxHeight",4200);
-        String xml="<?xml version="1.0" encoding="UTF-8"?>"
-                +"<scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm" xmlns:escl="http://schemas.hp.com/imaging/escl/2011/05/03">"
+        String xml="<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                +"<scan:ScanSettings xmlns:scan=\"http://schemas.hp.com/imaging/escl/2011/05/03\" xmlns:pwg=\"http://www.pwg.org/schemas/2010/12/sm\" xmlns:escl=\"http://schemas.hp.com/imaging/escl/2011/05/03\">"
                 +"<pwg:Version>2.0</pwg:Version>"
                 +"<scan:Intent>Document</scan:Intent>"
                 +"<pwg:ScanRegions><pwg:ScanRegion>"
@@ -172,7 +160,10 @@ public class NetworkScanner {
     }
 
     private static int extractInt(String xml,String tag,int fallback){
-        try{java.util.regex.Matcher m=java.util.regex.Pattern.compile("<(?:\\w+:)?"+tag+">\\s*(\\d+)\\s*</(?:\\w+:)?"+tag+">",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(xml);return m.find()?Integer.parseInt(m.group(1)):fallback;}catch(Exception e){return fallback;}
+        try{
+            java.util.regex.Matcher m=java.util.regex.Pattern.compile("<(?:\\w+:)?"+tag+">\\s*(\\d+)\\s*</(?:\\w+:)?"+tag+">",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(xml);
+            return m.find()?Integer.parseInt(m.group(1)):fallback;
+        }catch(Exception e){return fallback;}
     }
 
     private static String resolve(String base,String location)throws Exception{
