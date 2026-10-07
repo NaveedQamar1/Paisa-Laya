@@ -17,7 +17,13 @@ import java.util.*;
 import java.util.concurrent.*;
 import org.opencv.android.OpenCVLoader;
 import org.opencv.android.Utils;
-import org.opencv.core.*;
+import org.opencv.core.Core;
+import org.opencv.core.CvType;
+import org.opencv.core.Mat;
+import org.opencv.core.MatOfPoint;
+import org.opencv.core.MatOfPoint2f;
+import org.opencv.core.Scalar;
+import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
 
 public class MainActivity extends Activity { // EasyCopy colorful UI build
@@ -247,7 +253,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         for(MatOfPoint contour:contours){
             double area=Math.abs(Imgproc.contourArea(contour));
             if(area<total*.0015||area>total*.65) {contour.release();continue;}
-            Rect bb=Imgproc.boundingRect(contour);
+            org.opencv.core.Rect bb=Imgproc.boundingRect(contour);
             if(bb.width<80||bb.height<50||bb.width>src.cols()*.97||bb.height>src.rows()*.97){contour.release();continue;}
 
             MatOfPoint2f c2=new MatOfPoint2f(contour.toArray());
@@ -269,12 +275,12 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         }
 
         candidates.sort((a,b)->Double.compare(b.score,a.score));
-        ArrayList<Point[]> accepted=new ArrayList<>();
+        ArrayList<org.opencv.core.Point[]> accepted=new ArrayList<>();
         for(CardQuad q:candidates){
             if(out.size()>=wanted)break;
             boolean overlap=false;
             Rect qb=quadBounds(q.pts);
-            for(Point[] old:accepted){
+            for(org.opencv.core.Point[] old:accepted){
                 Rect ob=quadBounds(old);
                 int l=Math.max(qb.left,ob.left),t=Math.max(qb.top,ob.top),r=Math.min(qb.right,ob.right),b=Math.min(qb.bottom,ob.bottom);
                 if(r>l&&b>t&&(r-l)*(b-t)>Math.min(qb.width()*qb.height(),ob.width()*ob.height())*.45f){overlap=true;break;}
@@ -289,18 +295,18 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     }
 
     static class CardQuad{
-        Point[] pts;double score,area;
-        CardQuad(Point[] p,double s,double a){pts=p;score=s;area=a;}
+        org.opencv.core.Point[] pts;double score,area;
+        CardQuad(org.opencv.core.Point[] p,double s,double a){pts=p;score=s;area=a;}
     }
 
-    double quadRatio(Point[] p){
+    double quadRatio(org.opencv.core.Point[] p){
         double a=dist(p[0],p[1]),b=dist(p[1],p[2]),c=dist(p[2],p[3]),d=dist(p[3],p[0]);
         double longSide=Math.max((a+c)/2.0,(b+d)/2.0);
         double shortSide=Math.min((a+c)/2.0,(b+d)/2.0);
         return longSide/Math.max(1,shortSide);
     }
 
-    double dist(Point a,Point b){
+    double dist(org.opencv.core.Point a,org.opencv.core.Point b){
         return Math.hypot(a.x-b.x,a.y-b.y);
     }
 
@@ -312,7 +318,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         return new Rect(Math.max(0,l),Math.max(0,t),Math.max(1,r),Math.max(1,b));
     }
 
-    Bitmap warpCard(Bitmap source,Point[] raw){
+    Bitmap warpCard(Bitmap source,org.opencv.core.Point[] raw){
         Point[] p=orderQuad(raw);
         double top=dist(p[0],p[1]),bottom=dist(p[3],p[2]),left=dist(p[0],p[3]),right=dist(p[1],p[2]);
         double width=Math.max(top,bottom),height=Math.max(left,right);
@@ -331,10 +337,10 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         return out;
     }
 
-    Point[] orderQuad(Point[] pts){
-        Point[] o=new Point[4];
+    org.opencv.core.Point[] orderQuad(org.opencv.core.Point[] pts){
+        org.opencv.core.Point[] o=new org.opencv.core.Point[4];
         double minSum=Double.MAX_VALUE,maxSum=-Double.MAX_VALUE,minDiff=Double.MAX_VALUE,maxDiff=-Double.MAX_VALUE;
-        for(Point p:pts){
+        for(org.opencv.core.Point p:pts){
             double sum=p.x+p.y,diff=p.x-p.y;
             if(sum<minSum){minSum=sum;o[0]=p;}
             if(sum>maxSum){maxSum=sum;o[2]=p;}
