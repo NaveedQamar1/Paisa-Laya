@@ -3,17 +3,15 @@ plugins {
 }
 
 android {
-    // Google AuthorizationClient is used for private Google Drive app-data sync.
-
-    namespace = "com.paisalaya.app"
+    namespace = "com.easycopy.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.paisalaya.app"
+        applicationId = "com.easycopy.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 1
+        versionName = "1.0.0"
     }
 
     buildTypes {
@@ -25,15 +23,10 @@ android {
             )
         }
     }
-}
 
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(17))
+    java {
+        toolchain {
+            languageVersion.set(JavaLanguageVersion.of(17))
+        }
     }
-}
-
-
-dependencies {
-    implementation("com.google.android.gms:play-services-auth:21.5.0")
 }
