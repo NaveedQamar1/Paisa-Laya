@@ -153,31 +153,31 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         pool.execute(()->{try{
             Bitmap raw=load(u);
             if(raw==null)throw new IllegalArgumentException("Could not read the selected image.");
-            updateProcessDialog(dialog,8,"Reading image…");
+            updateProcessDialog(dialog,6,"Reading image…");
 
             int max=2200;
             float scale=Math.min(1f,max/(float)Math.max(raw.getWidth(),raw.getHeight()));
             Bitmap work=scale<1f?Bitmap.createScaledBitmap(raw,Math.max(1,(int)(raw.getWidth()*scale)),Math.max(1,(int)(raw.getHeight()*scale)),true):raw;
+            updateProcessDialog(dialog,10,"Checking image type…");
 
-            ArrayList<Bitmap> detected=null;
-            try{
-                detected=detectCardsWithOpenCV(work,1,(p,d)->updateProcessDialog(dialog,10+Math.round(p*.70f),d));
-            }catch(Exception ignored){detected=null;}
-
-            Bitmap card;
-            if(detected!=null&&!detected.isEmpty()){
-                card=detected.get(0);
-                updateProcessDialog(dialog,82,"Card detected. Correcting orientation…");
-            }else{
-                // If the selected file is already a cropped card, keep it intact.
+            Bitmap card=null;
+            // A genuinely cropped card image should not be sent through contour detection:
+            // doing that is exactly how a chip/inner rectangle can become the "card".
+            if(isLikelyCroppedCardImage(work)){
                 card=work;
-                updateProcessDialog(dialog,82,"Using imported image as card…");
-                if(card.getWidth()<card.getHeight()){
-                    Matrix m=new Matrix();
-                    m.postRotate(90);
-                    Bitmap rotated=Bitmap.createBitmap(card,0,0,card.getWidth(),card.getHeight(),m,true);
-                    if(rotated!=card)card.recycle();
-                    card=rotated;
+                updateProcessDialog(dialog,72,"Cropped card image detected.");
+            }else{
+                ArrayList<Bitmap> detected=null;
+                try{
+                    detected=detectCardsWithOpenCV(work,1,(p,d)->updateProcessDialog(dialog,10+Math.round(p*.68f),d));
+                }catch(Exception ignored){detected=null;}
+
+                if(detected!=null&&!detected.isEmpty()){
+                    card=detected.get(0);
+                    updateProcessDialog(dialog,82,"Full card detected. Correcting orientation…");
+                    for(int i=1;i<detected.size();i++)if(detected.get(i)!=null)detected.get(i).recycle();
+                }else{
+                    throw new IllegalArgumentException("No complete ID card was detected. Please select a cropped card image or retry the scan.");
                 }
             }
 
@@ -188,14 +188,10 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
             updateProcessDialog(dialog,94,"Saving card…");
             saveCard(card,front,0);
 
-            if(detected!=null&&!detected.isEmpty()){
-                for(int i=1;i<detected.size();i++)if(detected.get(i)!=null)detected.get(i).recycle();
-            }
             if(work!=raw&&work!=card)work.recycle();
             if(raw!=card&&raw!=work)raw.recycle();
 
             updateProcessDialog(dialog,100,"Complete.");
-            Bitmap finalCard=card;
             runOnUiThread(()->{dialog.dismiss();status.setText((front?"Front":"Back")+" image imported.");});
         }catch(Exception e){runOnUiThread(()->{dialog.dismiss();toast("Could not import image: "+e.getMessage());});}});
     }
@@ -340,66 +336,175 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
 
     ArrayList<Bitmap> detectCardsWithOpenCV(Bitmap source,int wanted,ProcessProgress progress){
         ArrayList<Bitmap> out=new ArrayList<>();
-        Mat src=new Mat(),gray=new Mat(),blur=new Mat(),edges=new Mat(),kernel=new Mat();
+        if(source==null||source.getWidth()<200||source.getHeight()<150)return out;
+
+        Mat src=new Mat(),gray=new Mat(),blur=new Mat(),edges=new Mat(),closed=new Mat(),kernel=new Mat(),hierarchy=new Mat();
         Utils.bitmapToMat(source,src);
         Imgproc.cvtColor(src,gray,Imgproc.COLOR_RGBA2GRAY);
         Imgproc.GaussianBlur(gray,blur,new Size(5,5),0);
-        Imgproc.Canny(blur,edges,35,120);
-        kernel=Imgproc.getStructuringElement(Imgproc.MORPH_RECT,new Size(3,3));
-        Imgproc.dilate(edges,edges,kernel);
+        Imgproc.Canny(blur,edges,30,110);
+
+        // Close small gaps in the physical card border before finding contours.
+        // RETR_EXTERNAL is deliberate: nested rectangles such as the CNIC chip
+        // must never compete with the outer card boundary.
+        kernel=Imgproc.getStructuringElement(Imgproc.MORPH_RECT,new Size(7,7));
+        Imgproc.morphologyEx(edges,closed,Imgproc.MORPH_CLOSE,kernel);
+        Imgproc.dilate(closed,closed,Imgproc.getStructuringElement(Imgproc.MORPH_RECT,new Size(3,3)));
+
         ArrayList<MatOfPoint> contours=new ArrayList<>();
-        Imgproc.findContours(edges,contours,new Mat(),Imgproc.RETR_LIST,Imgproc.CHAIN_APPROX_SIMPLE);
+        Imgproc.findContours(closed,contours,hierarchy,Imgproc.RETR_EXTERNAL,Imgproc.CHAIN_APPROX_SIMPLE);
 
         ArrayList<CardQuad> candidates=new ArrayList<>();
-        double total=src.cols()*src.rows();
+        double total=(double)src.cols()*src.rows();
         double target=CARD_RATIO;
-
+        double expectedArea=0.0741; // ID-1 card area relative to an A4 scan.
         int contourIndex=0;
+
         for(MatOfPoint contour:contours){
             contourIndex++;
-            if(progress!=null&&contourIndex%Math.max(1,contours.size()/45)==0)progress.update(12+Math.round(contourIndex*45f/Math.max(1,contours.size())),"Detecting card edges…");
+            if(progress!=null&&contourIndex%Math.max(1,contours.size()/40)==0)
+                progress.update(12+Math.round(contourIndex*46f/Math.max(1,contours.size())),"Detecting complete card boundaries…");
+
             double area=Math.abs(Imgproc.contourArea(contour));
-            if(area<total*.015||area>total*.65) {contour.release();continue;}
+            double areaFrac=area/total;
+
+            // A real ID-1 card on a full A4/Letter scan is roughly 7–8% of
+            // the scan area. A chip, logo, rail or text box is much smaller.
+            // Allow a wide range for different scanner beds and for several cards.
+            if(areaFrac<0.035||areaFrac>0.24){contour.release();continue;}
+
             org.opencv.core.Rect bb=Imgproc.boundingRect(contour);
-            if(bb.width<Math.max(120,src.cols()*.07)||bb.height<Math.max(80,src.rows()*.045)||bb.width>src.cols()*.97||bb.height>src.rows()*.97){contour.release();continue;}
+            if(bb.width<Math.max(180,src.cols()*.12)||bb.height<Math.max(110,src.rows()*.055)
+                    ||bb.width>src.cols()*.90||bb.height>src.rows()*.90){contour.release();continue;}
 
             MatOfPoint2f c2=new MatOfPoint2f(contour.toArray());
             double peri=Imgproc.arcLength(c2,true);
             MatOfPoint2f approx=new MatOfPoint2f();
-            Imgproc.approxPolyDP(c2,approx,0.025*peri,true);
+            Imgproc.approxPolyDP(c2,approx,Math.max(2.0,0.018*peri),true);
             org.opencv.core.Point[] pts=approx.toArray();
 
+            // If the contour is not a clean quadrilateral, use its minimum-area
+            // rectangle only when that rectangle is a very good fit. This keeps
+            // perspective correction stable without accepting arbitrary slivers.
+            org.opencv.core.Point[] quad=null;
+            double rectFill=0;
             if(pts.length==4&&Imgproc.isContourConvex(new MatOfPoint(pts))){
-                double ratio=quadRatio(pts);
-                double ratioScore=Math.max(0,1.0-Math.abs(ratio-target)/target);
-                double rectFill=area/(double)Math.max(1,bb.width*bb.height);
-                if(ratio>=1.30&&ratio<=1.90&&rectFill>.62&&ratioScore>.72){
-                    double areaScore=Math.min(1,Math.sqrt(area/total)*7.0); double score=ratioScore*.48+Math.min(1,rectFill)*.17+areaScore*.35;
-                    candidates.add(new CardQuad(pts,score,area));
+                quad=pts;
+                rectFill=area/(double)Math.max(1,bb.width*bb.height);
+            }else{
+                org.opencv.core.RotatedRect rr=Imgproc.minAreaRect(c2);
+                double rectArea=Math.max(1,rr.size.width*rr.size.height);
+                rectFill=area/rectArea;
+                if(rectFill>.72){
+                    quad=new org.opencv.core.Point[4];
+                    rr.points(quad);
                 }
             }
+
+            if(quad!=null){
+                double ratio=quadRatio(quad);
+                double ratioScore=Math.max(0,1.0-Math.abs(ratio-target)/target);
+                double areaScore=Math.max(0,1.0-Math.abs(areaFrac-expectedArea)/0.065);
+                double sizeScore=Math.min(1.0,Math.max(0.0,(areaFrac-.035)/.045));
+                double fillScore=Math.min(1.0,Math.max(0.0,(rectFill-.60)/.30));
+
+                // Require both the ID-1 shape and a physically plausible amount
+                // of the scanner page. This is the key protection against the
+                // previous chip/partial-card false positives.
+                if(ratio>=1.30&&ratio<=1.90&&ratioScore>.72&&rectFill>.60
+                        &&areaFrac>=.035&&areaFrac<=.24){
+                    double score=ratioScore*.42+areaScore*.30+fillScore*.18+sizeScore*.10;
+                    candidates.add(new CardQuad(quad,score,area));
+                }
+            }
+
             approx.release();c2.release();contour.release();
         }
 
         candidates.sort((a,b)->Double.compare(b.score,a.score));
         ArrayList<org.opencv.core.Point[]> accepted=new ArrayList<>();
+
         for(CardQuad q:candidates){
-            if(progress!=null)progress.update(58+Math.round(out.size()*28f/Math.max(1,wanted)),"Correcting card perspective…");
+            if(progress!=null)progress.update(60+Math.round(out.size()*26f/Math.max(1,wanted)),"Validating full card…");
             if(out.size()>=wanted)break;
-            boolean overlap=false;
+
             Rect qb=quadBounds(q.pts);
+            boolean overlap=false;
             for(org.opencv.core.Point[] old:accepted){
                 Rect ob=quadBounds(old);
-                int l=Math.max(qb.left,ob.left),t=Math.max(qb.top,ob.top),r=Math.min(qb.right,ob.right),b=Math.min(qb.bottom,ob.bottom);
-                if(r>l&&b>t&&(r-l)*(b-t)>Math.min(qb.width()*qb.height(),ob.width()*ob.height())*.45f){overlap=true;break;}
+                int l=Math.max(qb.left,ob.left),t=Math.max(qb.top,ob.top);
+                int r=Math.min(qb.right,ob.right),b=Math.min(qb.bottom,ob.bottom);
+                if(r>l&&b>t&&(r-l)*(b-t)>Math.min(qb.width()*qb.height(),ob.width()*ob.height())*.45f){
+                    overlap=true;break;
+                }
             }
             if(overlap)continue;
+
             Bitmap card=warpCard(source,q.pts);
-            if(card!=null){out.add(card);accepted.add(q.pts);}
+            if(card!=null&&validateWarpedCard(card)){
+                out.add(card);
+                accepted.add(q.pts);
+            }else if(card!=null){
+                card.recycle();
+            }
         }
 
-        src.release();gray.release();blur.release();edges.release();kernel.release();
+        src.release();gray.release();blur.release();edges.release();closed.release();kernel.release();hierarchy.release();
         return out;
+    }
+
+    boolean isLikelyCroppedCardImage(Bitmap b){
+        if(b==null)return false;
+        float ar=b.getWidth()/(float)Math.max(1,b.getHeight());
+        if(ar<CARD_RATIO*.90f||ar>CARD_RATIO*1.10f)return false;
+        if(b.getWidth()<500||b.getHeight()<280)return false;
+
+        // A cropped card should occupy nearly the complete selected image.
+        // This intentionally excludes common A4/Letter scanner-page images.
+        int w=b.getWidth(),h=b.getHeight();
+        int border=Math.max(2,Math.round(Math.min(w,h)*.02f));
+        int[] px=new int[w*h];
+        b.getPixels(px,0,w,0,0,w,h);
+        int edge=0,diff=0;
+        long sr=0,sg=0,sb=0,n=0;
+        for(int y=0;y<h;y+=Math.max(1,h/80))for(int x=0;x<w;x+=Math.max(1,w/80)){
+            if(x<border||y<border||x>=w-border||y>=h-border){
+                int c=px[y*w+x];
+                sr+=Color.red(c);sg+=Color.green(c);sb+=Color.blue(c);n++;
+            }
+        }
+        if(n==0)return false;
+        int br=(int)(sr/n),bg=(int)(sg/n),bb=(int)(sb/n);
+        for(int y=border;y<h-border;y+=Math.max(1,h/70))for(int x=border;x<w-border;x+=Math.max(1,w/70)){
+            int c=px[y*w+x];
+            int d=Math.abs(Color.red(c)-br)+Math.abs(Color.green(c)-bg)+Math.abs(Color.blue(c)-bb);
+            if(d>35)diff++;
+            edge++;
+        }
+        return edge>0&&diff>edge*.08;
+    }
+
+    boolean validateWarpedCard(Bitmap card){
+        if(card==null)return false;
+        float ar=card.getWidth()/(float)Math.max(1,card.getHeight());
+        if(ar<CARD_RATIO*.94f||ar>CARD_RATIO*1.06f)return false;
+        int w=card.getWidth(),h=card.getHeight();
+        if(w<500||h<280)return false;
+
+        // Reject a warped candidate whose useful content is confined to a narrow
+        // strip. A genuine card should contain information across the whole frame.
+        int[] px=new int[w*h];
+        card.getPixels(px,0,w,0,0,w,h);
+        int step=Math.max(2,Math.min(w,h)/180);
+        int active=0,total=0;
+        for(int y=0;y<h;y+=step)for(int x=0;x<w;x+=step){
+            int c=px[y*w+x];
+            int r=Color.red(c),g=Color.green(c),b=Color.blue(c);
+            int mx=Math.max(r,Math.max(g,b)),mn=Math.min(r,Math.min(g,b));
+            if((mx-mn)>18||Math.abs(r-g)+Math.abs(g-b)+Math.abs(r-b)>55)active++;
+            total++;
+        }
+        return total>0&&active>total*.04;
     }
 
     static class CardQuad{
@@ -523,6 +628,8 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     }
 
     Bitmap normalizeDetectedCard(Bitmap work,Rect box,int[] px,int w,int h,int br,int bg,int bb){
+        double areaFrac=(double)box.width()*box.height()/Math.max(1,(double)w*h);
+        if(areaFrac<.035||areaFrac>.24)return null;
         int pad=(int)(Math.max(box.width(),box.height())*.05f);
         int l=Math.max(0,box.left-pad),t=Math.max(0,box.top-pad);
         int r=Math.min(w,box.right+pad),b=Math.min(h,box.bottom+pad);
