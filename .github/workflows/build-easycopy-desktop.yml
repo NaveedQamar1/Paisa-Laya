@@ -1,0 +1,28 @@
+name: Build EasyCopy Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["easycopy-v2"]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Restore
+        run: dotnet restore desktop/EasyCopy.Desktop.csproj
+      - name: Publish
+        run: dotnet publish desktop/EasyCopy.Desktop.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o desktop/publish
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: EasyCopy-Windows-x64
+          path: desktop/publish/EasyCopy.exe
+          if-no-files-found: error
+          retention-days: 30
