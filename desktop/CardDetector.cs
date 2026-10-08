@@ -24,11 +24,27 @@ static class CardDetector
         for(int i=0;i<contours.Length;i++)
         {
             progress?.Invoke(10+(int)(i*48.0/Math.Max(1,contours.Length)),"Detecting complete card boundaries…");
-            double area=Math.Abs(Cv2.ContourArea(contours[i])), af=area/total;if(af<.035||af>.24)continue;
-            var rr=Cv2.MinAreaRect(contours[i]);var q=rr.Points().Select(p=>new CvPoint((int)Math.Round(p.X),(int)Math.Round(p.Y))).ToArray();double ratio=SideRatio(q),fill=area/Math.Max(1,rr.Size.Width*rr.Size.Height);
-            if(ratio<1.30||ratio>1.90||fill<.60)continue;
-            double rs=Math.Max(0,1-Math.Abs(ratio-Ratio)/Ratio), ascore=Math.Max(0,1-Math.Abs(af-.0741)/.065);
-            candidates.Add((q,rs*.50+ascore*.30+Math.Min(1,(fill-.60)/.30)*.20));
+            double area=Math.Abs(Cv2.ContourArea(contours[i])), af=area/total;
+            if(af<.035||af>.20)continue;
+
+            var bb=Cv2.BoundingRect(contours[i]);
+            if(bb.Width<source.Width*.12||bb.Height<source.Height*.055)continue;
+
+            double peri=Cv2.ArcLength(contours[i],true);
+            var approx=Cv2.ApproxPolyDP(contours[i],Math.Max(2.0,.018*peri),true);
+            // Do not replace a non-quadrilateral contour with MinAreaRect:
+            // a line or small fragment can otherwise become a convincing fake card.
+            if(approx.Length!=4||!Cv2.IsContourConvex(approx))continue;
+
+            double fill=area/Math.Max(1,bb.Width*bb.Height),ratio=SideRatio(approx);
+            double angle=AngleScore(approx);
+            if(ratio<1.30||ratio>1.90||fill<.62||angle<.72)continue;
+
+            double rs=Math.Max(0,1-Math.Abs(ratio-Ratio)/Ratio);
+            double ascore=Math.Max(0,1-Math.Abs(af-.0741)/.065);
+            double size=Math.Min(1,Math.Max(0,(af-.035)/.045));
+            double fillScore=Math.Min(1,Math.Max(0,(fill-.62)/.30));
+            candidates.Add((approx,rs*.40+ascore*.28+fillScore*.17+size*.08+angle*.07));
         }
         candidates=candidates.OrderByDescending(x=>x.score).ToList();
         var result=new List<Bitmap>();
@@ -72,6 +88,20 @@ static class CardDetector
         var q=pts.OrderBy(p=>Math.Atan2(p.Y-cy,p.X-cx)).ToArray();
         int start=Array.IndexOf(q,q.OrderBy(p=>p.X+p.Y).First());
         return Enumerable.Range(0,4).Select(i=>q[(start+i)%4]).ToArray();
+    }
+
+    static double AngleScore(CvPoint[] p)
+    {
+        double score=1;
+        for(int i=0;i<4;i++)
+        {
+            var a=p[(i+3)%4];var c=p[i];var b=p[(i+1)%4];
+            double ax=a.X-c.X,ay=a.Y-c.Y,bx=b.X-c.X,by=b.Y-c.Y;
+            double den=Math.Sqrt((ax*ax+ay*ay)*(bx*bx+by*by));if(den<1)return 0;
+            double cos=Math.Abs((ax*bx+ay*by)/den);
+            score*=Math.Max(0,1-cos/.72);
+        }
+        return Math.Pow(score,.25);
     }
 
     static double Dist(CvPoint a,CvPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Y-b.Y)*(a.Y-b.Y));
