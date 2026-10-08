@@ -332,7 +332,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
             contourIndex++;
             if(progress!=null&&contourIndex%Math.max(1,contours.size()/45)==0)progress.update(12+Math.round(contourIndex*45f/Math.max(1,contours.size())),"Detecting card edges…");
             double area=Math.abs(Imgproc.contourArea(contour));
-            if(area<total*.0015||area>total*.65) {contour.release();continue;}
+            if(area<total*.006||area>total*.65) {contour.release();continue;}
             org.opencv.core.Rect bb=Imgproc.boundingRect(contour);
             if(bb.width<80||bb.height<50||bb.width>src.cols()*.97||bb.height>src.rows()*.97){contour.release();continue;}
 
@@ -346,8 +346,8 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
                 double ratio=quadRatio(pts);
                 double ratioScore=Math.max(0,1.0-Math.abs(ratio-target)/target);
                 double rectFill=area/(double)Math.max(1,bb.width*bb.height);
-                if(ratio>=1.15&&ratio<=2.15&&rectFill>.50&&ratioScore>.62){
-                    double score=ratioScore*.55+Math.min(1,rectFill)*.20+Math.min(1,Math.sqrt(area/total)*4)*.25;
+                if(ratio>=1.30&&ratio<=1.90&&rectFill>.55&&ratioScore>.68){
+                    double areaScore=Math.min(1,Math.sqrt(area/total)*6.0); double score=ratioScore*.50+Math.min(1,rectFill)*.15+areaScore*.35;
                     candidates.add(new CardQuad(pts,score,area));
                 }
             }
