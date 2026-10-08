@@ -7,4 +7,5 @@ android {
     java { toolchain { languageVersion.set(JavaLanguageVersion.of(17)) } }
 }
 dependencies { implementation("androidx.core:core:1.15.0")
-    implementation("org.opencv:opencv:4.10.0") }
+    implementation("org.opencv:opencv:4.10.0")
+    implementation("com.google.mlkit:text-recognition:16.0.1") }
