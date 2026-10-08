@@ -65,7 +65,7 @@ static class CardDetector
         return dst.Clone();
     }
 
-    static Point[] OrderStable(CvPoint[] pts)
+    static CvPoint[] OrderStable(CvPoint[] pts)
     {
         double cx=pts.Average(p=>p.X),cy=pts.Average(p=>p.Y);
         var q=pts.OrderBy(p=>Math.Atan2(p.Y-cy,p.X-cx)).ToArray();
@@ -74,7 +74,7 @@ static class CardDetector
     }
 
     static double Dist(CvPoint a,CvPoint b)=>Math.Hypot(a.X-b.X,a.Y-b.Y);
-    static double SideRatio(Point[] p){double a=Dist(p[0],p[1]),b=Dist(p[1],p[2]),c=Dist(p[2],p[3]),d=Dist(p[3],p[0]);return Math.Max((a+c)/2,(b+d)/2)/Math.Max(1,Math.Min((a+c)/2,(b+d)/2));}
+    static double SideRatio(CvPoint[] p){double a=Dist(p[0],p[1]),b=Dist(p[1],p[2]),c=Dist(p[2],p[3]),d=Dist(p[3],p[0]);return Math.Max((a+c)/2,(b+d)/2)/Math.Max(1,Math.Min((a+c)/2,(b+d)/2));}
 
     static bool Validate(Mat m){using var g=new Mat();Cv2.CvtColor(m,g,ColorConversionCodes.BGRA2GRAY);using var e=new Mat();Cv2.Canny(g,e,50,140);return Cv2.CountNonZero(e)>m.Width*m.Height*.02;}
 
