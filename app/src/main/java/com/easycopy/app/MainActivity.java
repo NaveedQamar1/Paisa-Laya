@@ -532,12 +532,37 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     }
 
     Bitmap warpCard(Bitmap source,org.opencv.core.Point[] raw){
-        org.opencv.core.Point[] p=orderQuad(raw);
-        double top=dist(p[0],p[1]),bottom=dist(p[3],p[2]),left=dist(p[0],p[3]),right=dist(p[1],p[2]);
-        double width=Math.max(top,bottom),height=Math.max(left,right);
-        if(width<height){org.opencv.core.Point tmp=p[0];p[0]=p[3];p[3]=tmp;tmp=p[1];p[1]=p[2];p[2]=tmp;width=Math.max(left,right);height=Math.max(top,bottom);}
-        int outW=1400,outH=Math.max(1,Math.round(outW/CARD_RATIO));
+        if(raw==null||raw.length!=4)return null;
 
+        // Order the four physical corners by angle around the centroid. This is
+        // more stable than sum/difference ordering when the card is near 90°.
+        org.opencv.core.Point[] p=orderQuadStable(raw);
+        double e01=dist(p[0],p[1]),e12=dist(p[1],p[2]),e23=dist(p[2],p[3]),e30=dist(p[3],p[0]);
+        double longA=(e01+e23)/2.0, longB=(e12+e30)/2.0;
+        boolean longIs01=longA>=longB;
+
+        // Rotate the corner sequence so the long physical edges become the
+        // destination's top/bottom edges. The destination is always landscape.
+        if(!longIs01){
+            org.opencv.core.Point[] q=new org.opencv.core.Point[]{p[1],p[2],p[3],p[0]};
+            p=q;
+            e01=dist(p[0],p[1]);e12=dist(p[1],p[2]);e23=dist(p[2],p[3]);e30=dist(p[3],p[0]);
+        }
+
+        // Pick the left-to-right direction from the actual image coordinates.
+        // This removes the 90° ambiguity that caused the sideways preview.
+        double dx=p[1].x-p[0].x,dy=p[1].y-p[0].y;
+        if(Math.abs(dx)<Math.abs(dy)){
+            // Degenerate/steep top edge: reverse the sequence while preserving
+            // the same long-edge pair.
+            org.opencv.core.Point tmp=p[0];p[0]=p[1];p[1]=tmp;
+            tmp=p[2];p[2]=p[3];p[3]=tmp;
+        }else if(dx<0){
+            org.opencv.core.Point tmp=p[0];p[0]=p[1];p[1]=tmp;
+            tmp=p[2];p[2]=p[3];p[3]=tmp;
+        }
+
+        int outW=1400,outH=Math.max(1,Math.round(outW/CARD_RATIO));
         Mat src=new Mat(),dst=new Mat(),from=new Mat(4,1,CvType.CV_32FC2),to=new Mat(4,1,CvType.CV_32FC2),M=new Mat();
         Utils.bitmapToMat(source,src);
         from.put(0,0,p[0].x,p[0].y,p[1].x,p[1].y,p[2].x,p[2].y,p[3].x,p[3].y);
@@ -550,19 +575,25 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         return out;
     }
 
-    org.opencv.core.Point[] orderQuad(org.opencv.core.Point[] pts){
-        org.opencv.core.Point[] o=new org.opencv.core.Point[4];
-        double minSum=Double.MAX_VALUE,maxSum=-Double.MAX_VALUE,minDiff=Double.MAX_VALUE,maxDiff=-Double.MAX_VALUE;
-        for(org.opencv.core.Point p:pts){
-            double sum=p.x+p.y,diff=p.x-p.y;
-            if(sum<minSum){minSum=sum;o[0]=p;}
-            if(sum>maxSum){maxSum=sum;o[2]=p;}
-            if(diff>maxDiff){maxDiff=diff;o[1]=p;}
-            if(diff<minDiff){minDiff=diff;o[3]=p;}
-        }
-        return o;
+    org.opencv.core.Point[] orderQuadStable(org.opencv.core.Point[] pts){
+        org.opencv.core.Point[] out=new org.opencv.core.Point[4];
+        double cx=0,cy=0;
+        for(org.opencv.core.Point p:pts){cx+=p.x;cy+=p.y;}
+        cx/=4.0;cy/=4.0;
+        org.opencv.core.Point[] q=pts.clone();
+        final double fx=cx,fy=cy;
+        java.util.Arrays.sort(q,(a,b)->Double.compare(Math.atan2(a.y-fy,a.x-fx),Math.atan2(b.y-fy,b.x-fx)));
+        // Angle order is counter-clockwise. Find the corner with the smallest
+        // x+y as the visual top-left anchor.
+        int start=0;double best=Double.MAX_VALUE;
+        for(int i=0;i<4;i++){double v=q[i].x+q[i].y;if(v<best){best=v;start=i;}}
+        for(int i=0;i<4;i++)out[i]=q[(start+i)%4];
+        return out;
     }
 
+    org.opencv.core.Point[] orderQuad(org.opencv.core.Point[] pts){
+        return orderQuadStable(pts);
+    }
 
     int[] estimateBackground(int[] px,int w,int h){
         // Use a quantized color histogram from the outer border instead of an average.
@@ -709,22 +740,39 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     Bitmap autoOrientCard(Bitmap card){
         if(card==null)return null;
         try{
-            int maxW=1000;
-            float sc=Math.min(1f,maxW/(float)Math.max(1,card.getWidth()));
-            Bitmap small=sc<1f?Bitmap.createScaledBitmap(card,Math.max(1,(int)(card.getWidth()*sc)),Math.max(1,(int)(card.getHeight()*sc)),true):card;
-            Bitmap normal=small;
-            Matrix rm=new Matrix();rm.postRotate(180);
-            Bitmap upside=Bitmap.createBitmap(small,0,0,small.getWidth(),small.getHeight(),rm,true);
-            Text a=Tasks.await(textRecognizer.process(InputImage.fromBitmap(normal,0)));
-            Text b=Tasks.await(textRecognizer.process(InputImage.fromBitmap(upside,0)));
-            int scoreA=orientationTextScore(a),scoreB=orientationTextScore(b);
-            if(small!=card)small.recycle();
-            if(scoreB>scoreA+3){
-                upside=resizeOrientationResultIfNeeded(upside,card);
-                return upside;
+            // Test all four physical orientations. The previous implementation
+            // only compared 0° and 180°, so a geometrically correct card could
+            // remain sideways after perspective correction.
+            Bitmap[] cand=new Bitmap[4];
+            cand[0]=card;
+            Matrix m90=new Matrix();m90.postRotate(90);
+            Matrix m180=new Matrix();m180.postRotate(180);
+            Matrix m270=new Matrix();m270.postRotate(270);
+            cand[1]=Bitmap.createBitmap(card,0,0,card.getWidth(),card.getHeight(),m90,true);
+            cand[2]=Bitmap.createBitmap(card,0,0,card.getWidth(),card.getHeight(),m180,true);
+            cand[3]=Bitmap.createBitmap(card,0,0,card.getWidth(),card.getHeight(),m270,true);
+
+            int best=0,bestScore=Integer.MIN_VALUE;
+            for(int i=0;i<4;i++){
+                Bitmap test=cand[i];
+                int maxW=1100;
+                float sc=Math.min(1f,maxW/(float)Math.max(1,test.getWidth()));
+                Bitmap small=sc<1f?Bitmap.createScaledBitmap(test,Math.max(1,(int)(test.getWidth()*sc)),Math.max(1,(int)(test.getHeight()*sc)),true):test;
+                Text txt=Tasks.await(textRecognizer.process(InputImage.fromBitmap(small,0)));
+                int score=orientationTextScore(txt);
+
+                // Prefer landscape only as a tie-breaker; OCR remains the primary
+                // orientation signal so Urdu/English cards are not hard-coded.
+                if(test.getWidth()>=test.getHeight())score+=2;
+                if(score>bestScore){bestScore=score;best=i;}
+                if(small!=test)small.recycle();
             }
-            upside.recycle();
-            return card;
+
+            Bitmap result=cand[best];
+            for(int i=0;i<4;i++)if(i!=best&&cand[i]!=card)cand[i].recycle();
+
+            if(result==card)return card;
+            return resizeOrientationResultIfNeeded(result,card);
         }catch(Exception e){
             return card;
         }
