@@ -25,6 +25,12 @@ import org.opencv.core.MatOfPoint2f;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
+import com.google.android.gms.tasks.Tasks;
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.Text;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.latin.TextRecognizer;
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
 public class MainActivity extends Activity { // EasyCopy colorful UI build
     private EditText copiesEdit;
@@ -39,6 +45,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     private final ArrayList<String> scannerNames=new ArrayList<>();
     private ExecutorService pool=Executors.newFixedThreadPool(2);
     private File pendingCopy;
+    private final TextRecognizer textRecognizer=TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
 
     private static final float CARD_W_MM=85.60f;
     private static final float CARD_H_MM=53.98f;
@@ -156,11 +163,36 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
                 if(rotated!=card)card.recycle();
                 card=rotated;
             }
+            Bitmap oriented=autoOrientCard(card);
+            if(oriented!=card)card.recycle();
+            card=oriented;
             saveCard(card,front,0);
             if(card!=raw)card.recycle();
             else raw.recycle();
             runOnUiThread(()->status.setText((front?"Front":"Back")+" image imported."));
         }catch(Exception e){runOnUiThread(()->toast("Could not import image: "+e.getMessage()));}});
+    }
+    interface ProcessProgress{void update(int percent,String detail);}
+    Dialog showProcessDialog(String title){
+        final Dialog dialog=new Dialog(this);
+        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(28),dp(22),dp(28),dp(22));box.setBackgroundColor(Color.WHITE);
+        TextView t=tv(title,20);t.setTypeface(null,Typeface.BOLD);box.addView(t);
+        TextView pct=tv("0%",18);pct.setGravity(Gravity.CENTER);box.addView(pct);
+        ProgressBar bar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);bar.setMax(100);bar.setProgress(0);box.addView(bar,new LinearLayout.LayoutParams(-1,dp(18)));
+        TextView detail=tv("Starting…",13);detail.setTextColor(Color.rgb(102,112,133));box.addView(detail);
+        dialog.setContentView(box);dialog.setCancelable(false);dialog.show();
+        Window w=dialog.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.white);w.setLayout(dp(310),-2);}
+        dialog.setTag(new Object[]{bar,pct,detail});
+        return dialog;
+    }
+    void updateProcessDialog(Dialog dialog,int percent,String detail){
+        runOnUiThread(()->{
+            Object[] v=(Object[])dialog.getTag();
+            int p=Math.max(0,Math.min(100,percent));
+            ((ProgressBar)v[0]).setProgress(p);
+            ((TextView)v[1]).setText(p+"%");
+            ((TextView)v[2]).setText(detail);
+        });
     }
     void scanSide(boolean front){
         if(selectedScanner==null){toast("Select a scanner first.");return;}
@@ -168,7 +200,21 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         int dpi=new int[]{150,200,300,600}[dpiSpinner.getSelectedItemPosition()];
         String color=new String[]{"RGB24","Grayscale8","BlackAndWhite1"}[colorSpinner.getSelectedItemPosition()];
         boolean duplex=sourceSpinner.getSelectedItemPosition()==2;
-        pool.execute(()->{try{byte[] data=NetworkScanner.scan(selectedScanner,dpi,color,duplex);Bitmap raw=BitmapFactory.decodeByteArray(data,0,data.length);ArrayList<Bitmap> cards=prepareCards(raw,cardCount());for(int i=0;i<cards.size();i++)saveCard(cards.get(i),front,i);if(raw!=null)raw.recycle();runOnUiThread(()->status.setText((front?"Fronts":"Backs")+" ready — "+cards.size()+" detected."));}catch(Exception e){runOnUiThread(()->toast("Scan failed: "+e.getMessage()));}});
+        Dialog dialog=showProcessDialog(front?"Scanning fronts…":"Scanning backs…");
+        pool.execute(()->{try{
+            byte[] data=NetworkScanner.scan(selectedScanner,dpi,color,duplex);
+            updateProcessDialog(dialog,10,"Scan received. Preparing image…");
+            Bitmap raw=BitmapFactory.decodeByteArray(data,0,data.length);
+            ArrayList<Bitmap> cards=prepareCards(raw,cardCount(),(p,d)->updateProcessDialog(dialog,10+Math.round(p*.80f),d));
+            updateProcessDialog(dialog,93,"Saving detected cards…");
+            for(int i=0;i<cards.size();i++){
+                saveCard(cards.get(i),front,i);
+                updateProcessDialog(dialog,93+Math.round((i+1)*7f/Math.max(1,cards.size())), "Saving card "+(i+1)+" of "+cards.size()+"…");
+            }
+            if(raw!=null)raw.recycle();
+            updateProcessDialog(dialog,100,"Complete.");
+            runOnUiThread(()->{dialog.dismiss();status.setText((front?"Fronts":"Backs")+" ready — "+cards.size()+" detected.");});
+        }catch(Exception e){runOnUiThread(()->{dialog.dismiss();toast("Scan failed: "+e.getMessage());});}});
     }
     int cardCount(){return cardCountSpinner==null?1:Math.max(1,Math.min(4,cardCountSpinner.getSelectedItemPosition()+1));}
     void saveCard(Bitmap card,boolean front,int index)throws Exception{
@@ -184,15 +230,16 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
             sideCells[side][i].setVisibility(i<count?View.VISIBLE:View.GONE);
     }
 
-    ArrayList<Bitmap> prepareCards(Bitmap source,int wanted){
+    ArrayList<Bitmap> prepareCards(Bitmap source,int wanted,ProcessProgress progress){
         if(source==null)throw new IllegalArgumentException("The scanner returned no image.");
         int max=2200;
         float scale=Math.min(1f,max/(float)Math.max(source.getWidth(),source.getHeight()));
         Bitmap work=scale<1f?Bitmap.createScaledBitmap(source,Math.max(1,(int)(source.getWidth()*scale)),Math.max(1,(int)(source.getHeight()*scale)),true):source;
 
+        if(progress!=null)progress.update(2,"Preparing scan…");
         ArrayList<Bitmap> detected=null;
         try{
-            detected=detectCardsWithOpenCV(work,wanted);
+            detected=detectCardsWithOpenCV(work,wanted,progress);
         }catch(Exception ignored){
             detected=null;
         }
@@ -204,12 +251,14 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
 
         // Keep the previous detector as a fallback for scanners/images where no
         // usable four-corner contour can be found.
-        ArrayList<Bitmap> fallback=prepareCardsLegacy(work,wanted);
+        if(progress!=null)progress.update(72,"Using backup card detection…");
+        ArrayList<Bitmap> fallback=prepareCardsLegacy(work,wanted,progress);
         if(work!=source)work.recycle();
+        if(progress!=null)progress.update(90,"Finalizing card orientation…");
         return fallback;
     }
 
-    ArrayList<Bitmap> prepareCardsLegacy(Bitmap work,int wanted){
+    ArrayList<Bitmap> prepareCardsLegacy(Bitmap work,int wanted,ProcessProgress progress){
         int w=work.getWidth(),h=work.getHeight(),n=w*h;
         int[] px=new int[n];work.getPixels(px,0,w,0,0,w,h);
         int[] bg=estimateBackground(px,w,h);
@@ -220,6 +269,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         ArrayList<Rect> boxes=new ArrayList<>();
         int minArea=Math.max(1200,n/9000);
         for(int y=0;y<h;y++)for(int x=0;x<w;x++){
+            if(progress!=null&&x==0&&y%(Math.max(1,h/45))==0)progress.update(10+Math.round(y*45f/Math.max(1,h)),"Analyzing scanner image…");
             int idx=y*w+x;
             if(!fg[idx]||seen[idx])continue;
             q.clear();q.add(idx);seen[idx]=true;
@@ -244,6 +294,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         ArrayList<Bitmap> out=new ArrayList<>();
         ArrayList<Rect> accepted=new ArrayList<>();
         for(Rect box:boxes){
+            if(progress!=null)progress.update(56+Math.round(out.size()*24f/Math.max(1,wanted)),"Straightening detected cards…");
             if(out.size()>=wanted)break;
             if(overlapsTooMuch(box,accepted))continue;
             Bitmap card=normalizeDetectedCard(work,box,px,w,h,bg[0],bg[1],bg[2]);
@@ -260,7 +311,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         return out;
     }
 
-    ArrayList<Bitmap> detectCardsWithOpenCV(Bitmap source,int wanted){
+    ArrayList<Bitmap> detectCardsWithOpenCV(Bitmap source,int wanted,ProcessProgress progress){
         ArrayList<Bitmap> out=new ArrayList<>();
         Mat src=new Mat(),gray=new Mat(),blur=new Mat(),edges=new Mat(),kernel=new Mat();
         Utils.bitmapToMat(source,src);
@@ -276,7 +327,10 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         double total=src.cols()*src.rows();
         double target=CARD_RATIO;
 
+        int contourIndex=0;
         for(MatOfPoint contour:contours){
+            contourIndex++;
+            if(progress!=null&&contourIndex%Math.max(1,contours.size()/45)==0)progress.update(12+Math.round(contourIndex*45f/Math.max(1,contours.size())),"Detecting card edges…");
             double area=Math.abs(Imgproc.contourArea(contour));
             if(area<total*.0015||area>total*.65) {contour.release();continue;}
             org.opencv.core.Rect bb=Imgproc.boundingRect(contour);
@@ -303,6 +357,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         candidates.sort((a,b)->Double.compare(b.score,a.score));
         ArrayList<org.opencv.core.Point[]> accepted=new ArrayList<>();
         for(CardQuad q:candidates){
+            if(progress!=null)progress.update(58+Math.round(out.size()*28f/Math.max(1,wanted)),"Correcting card perspective…");
             if(out.size()>=wanted)break;
             boolean overlap=false;
             Rect qb=quadBounds(q.pts);
@@ -517,6 +572,47 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         return exact;
     }
 
+    Bitmap autoOrientCard(Bitmap card){
+        if(card==null)return null;
+        try{
+            int maxW=1000;
+            float sc=Math.min(1f,maxW/(float)Math.max(1,card.getWidth()));
+            Bitmap small=sc<1f?Bitmap.createScaledBitmap(card,Math.max(1,(int)(card.getWidth()*sc)),Math.max(1,(int)(card.getHeight()*sc)),true):card;
+            Bitmap normal=small;
+            Matrix rm=new Matrix();rm.postRotate(180);
+            Bitmap upside=Bitmap.createBitmap(small,0,0,small.getWidth(),small.getHeight(),rm,true);
+            Text a=Tasks.await(textRecognizer.process(InputImage.fromBitmap(normal,0)));
+            Text b=Tasks.await(textRecognizer.process(InputImage.fromBitmap(upside,0)));
+            int scoreA=orientationTextScore(a),scoreB=orientationTextScore(b);
+            if(small!=card)small.recycle();
+            if(scoreB>scoreA+3){
+                upside=resizeOrientationResultIfNeeded(upside,card);
+                return upside;
+            }
+            upside.recycle();
+            return card;
+        }catch(Exception e){
+            return card;
+        }
+    }
+    int orientationTextScore(Text text){
+        if(text==null)return 0;
+        int score=0;
+        String all=text.getText();
+        if(all!=null)score+=Math.min(80,all.trim().length());
+        for(Text.TextBlock block:text.getTextBlocks()){
+            String s=block.getText();
+            if(s!=null)score+=Math.min(20,s.trim().length()/2);
+        }
+        return score;
+    }
+    Bitmap resizeOrientationResultIfNeeded(Bitmap rotated,Bitmap original){
+        if(rotated.getWidth()==original.getWidth()&&rotated.getHeight()==original.getHeight())return rotated;
+        Bitmap out=Bitmap.createScaledBitmap(rotated,original.getWidth(),original.getHeight(),true);
+        rotated.recycle();
+        return out;
+    }
+
     Bitmap rotateCropOnBackground(Bitmap source,int l,int t,int bw,int bh,float degrees,int background){
         if(bw<=0||bh<=0)return null;
         double rad=Math.toRadians(degrees);
@@ -587,17 +683,20 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     File makePdf(PdfProgress progress)throws Exception{
         int n=cardCount(),reps=copies();
         for(int i=0;i<n;i++)if(frontUris[i]==null||backUris[i]==null)throw new Exception("Please scan/import both sides for card "+(i+1)+".");
-        PdfDocument d=new PdfDocument();int total=n*reps,pages=Math.max(1,(total+7)/8);
+        PdfDocument d=new PdfDocument();int total=n*reps,pages=Math.max(1,(total+7)/8),work=Math.max(1,total*2);
+        int[] done=new int[]{0};
+        if(progress!=null)progress.update(0,"Starting PDF…");
         for(int page=0;page<pages;page++){
             PdfDocument.Page fp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,page*2+1).create());
-            drawSet(fp.getCanvas(),true,page*8,n,reps);d.finishPage(fp);
+            drawSet(fp.getCanvas(),true,page*8,n,reps,done,work,progress);d.finishPage(fp);
             PdfDocument.Page bp=d.startPage(new PdfDocument.PageInfo.Builder(595,842,page*2+2).create());
-            drawSet(bp.getCanvas(),false,page*8,n,reps);d.finishPage(bp);
-            if(progress!=null)progress.update(Math.round((page+1)*100f/pages));
+            drawSet(bp.getCanvas(),false,page*8,n,reps,done,work,progress);d.finishPage(bp);
         }
+        if(progress!=null)progress.update(97,"Writing PDF file…");
         File out=new File(getCacheDir(),"EasyCopy_"+new SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(new Date())+".pdf");
         try(FileOutputStream o=new FileOutputStream(out)){d.writeTo(o);}d.close();
-        if(progress!=null)progress.update(100);return out;
+        if(progress!=null)progress.update(100,"PDF ready.");
+        return out;
     }
     void runPdfJob(String action){
         final Dialog dialog=new Dialog(this);
@@ -610,7 +709,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         Window w=dialog.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.white);w.setLayout(dp(310),-2);}
         pool.execute(()->{
             try{
-                File pdf=makePdf(p->{runOnUiThread(()->{bar.setProgress(p);pct.setText(p+"%");detail.setText(p<100?"Processing pages…":"PDF ready.");});});
+                File pdf=makePdf((p,d)->runOnUiThread(()->{bar.setProgress(p);pct.setText(p+"%");detail.setText(d);}));
                 runOnUiThread(()->{dialog.dismiss();lastPdf=pdf;performPdfAction(action,pdf);});
             }catch(Exception e){runOnUiThread(()->{dialog.dismiss();toast(e.getMessage());});}
         });
@@ -634,7 +733,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
             }
         },new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build());
     }
-    void drawSet(Canvas c,boolean front,int start,int n,int reps){
+    void drawSet(Canvas c,boolean front,int start,int n,int reps,int[] done,int work,PdfProgress progress){
         c.drawColor(Color.WHITE);
         float cardW=595f*CARD_W_MM/210f;
         float cardH=842f*CARD_H_MM/297f;
@@ -647,21 +746,22 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
             int global=start+k;
             if(global>=n*reps)break;
             int ci=global%n;
+            int slot=front?k:(k/2)*2+(1-(k%2));
             Uri u=front?frontUris[ci]:backUris[ci];
             try{
                 Bitmap im=load(u);
-                float nx=marginX+(k%2)*(cardW+gapX);
+                float nx=marginX+(slot%2)*(cardW+gapX);
                 float x=nx;
-                float y=marginY+(k/2)*(cardH+gapY);
+                float y=marginY+(slot/2)*(cardH+gapY);
                 float srcW=im.getWidth(),srcH=im.getHeight();
                 float scale=Math.min(cardW/Math.max(1,srcW),cardH/Math.max(1,srcH));
                 float dw=srcW*scale,dh=srcH*scale;
                 float dx=x+(cardW-dw)/2f,dy=y+(cardH-dh)/2f;
-                if(!front){c.save();c.scale(-1f,1f,x+cardW/2f,0f);}
                 c.drawBitmap(im,null,new RectF(dx,dy,dx+dw,dy+dh),p);
-                if(!front)c.restore();
                 im.recycle();
             }catch(Exception ignored){}
+            done[0]++;
+            if(progress!=null)progress.update(Math.min(95,Math.round(done[0]*95f/work)),(front?"Front":"Back")+" cards: "+done[0]+"/"+work);
         }
     }
 
@@ -754,5 +854,6 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     }
     void sharePdf(){runPdfJob("share");}
     void printPdf(){runPdfJob("print");}
+    @Override protected void onDestroy(){try{textRecognizer.close();}catch(Exception ignored){}super.onDestroy();}
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 }
