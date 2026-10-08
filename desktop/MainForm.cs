@@ -58,8 +58,8 @@ public sealed class MainForm : Form
         var tf=new TabPage("FRONT SIDE"); var tb=new TabPage("BACK SIDE");
         for(int i=0;i<4;i++){front[i]=Preview();back[i]=Preview();tf.Controls.Add(MakeCell(front[i],i));tb.Controls.Add(MakeCell(back[i],i));}
         id.Controls.Add(tabs);tabs.Controls.Add(tf);tabs.Controls.Add(tb);
-        scanF.Text="Scan all fronts";scanF.Width=170;scanF.Height=42;scanF.Location=new Point(15,265);scanF.BackColor=Color.FromArgb(55,48,163);scanF.ForeColor=Color.White;scanF.FlatStyle=FlatStyleStyle.Flat;scanF.Click+=async(_,__)=>await ScanAsync(true);
-        scanB.Text="Scan all backs";scanB.Width=170;scanB.Height=42;scanB.Location=new Point(195,265);scanB.BackColor=Color.FromArgb(55,48,163);scanB.ForeColor=Color.White;scanB.FlatStyle;scanB.Click+=async(_,__)=>await ScanAsync(false);
+        scanF.Text="Scan all fronts";scanF.Width=170;scanF.Height=42;scanF.Location=new Point(15,265);scanF.BackColor=Color.FromArgb(55,48,163);scanF.ForeColor=Color.White;scanF.FlatStyle=FlatStyle.Flat;scanF.Click+=async(_,__)=>await ScanAsync(true);
+        scanB.Text="Scan all backs";scanB.Width=170;scanB.Height=42;scanB.Location=new Point(195,265);scanB.BackColor=Color.FromArgb(55,48,163);scanB.ForeColor=Color.White;scanB.FlatStyle=FlatStyle.Flat;scanB.Click+=async(_,__)=>await ScanAsync(false);
         var impF=Btn("Import fronts");impF.Location=new Point(375,265);impF.Width=150;impF.Click+=(_,__)=>Import(true);
         var impB=Btn("Import backs");impB.Location=new Point(535,265);impB.Width=150;impB.Click+=(_,__)=>Import(false);
         id.Controls.AddRange(new Control[]{scanF,scanB,impF,impB});root.Controls.Add(id,0,3);
