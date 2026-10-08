@@ -10,8 +10,8 @@ static class PdfMaker
         var doc=new PdfDocument();int total=n*copies,pages=Math.Max(1,(total+7)/8),done=0,work=Math.Max(1,total*2);
         for(int page=0;page<pages;page++)
         {
-            var fp=doc.AddPage();fp.Size=PageSize.A4;fp.Orientation=PageOrientation.Portrait;Draw(fp,fronts,n,copies,page*8,true,ref done,work,progress);
-            var bp=doc.AddPage();bp.Size=PageSize.A4;bp.Orientation=PageOrientation.Portrait;Draw(bp,backs,n,copies,page*8,false,ref done,work,progress);
+            var fp=doc.AddPage();fp.Width=595.28;fp.Height=841.89;Draw(fp,fronts,n,copies,page*8,true,ref done,work,progress);
+            var bp=doc.AddPage();bp.Width=595.28;bp.Height=841.89;Draw(bp,backs,n,copies,page*8,false,ref done,work,progress);
         }
         var file=Path.Combine(Path.GetTempPath(),$"EasyCopy_{DateTime.Now:yyyyMMdd_HHmmss}.pdf");doc.Save(file);progress(100,"PDF ready.");return file;
     }
