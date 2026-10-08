@@ -29,7 +29,7 @@ import com.google.android.gms.tasks.Tasks;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.text.Text;
 import com.google.mlkit.vision.text.TextRecognition;
-import com.google.mlkit.vision.text.latin.TextRecognizer;
+import com.google.mlkit.vision.text.TextRecognizer;
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
 public class MainActivity extends Activity { // EasyCopy colorful UI build
@@ -182,12 +182,12 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         TextView detail=tv("Starting…",13);detail.setTextColor(Color.rgb(102,112,133));box.addView(detail);
         dialog.setContentView(box);dialog.setCancelable(false);dialog.show();
         Window w=dialog.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.white);w.setLayout(dp(310),-2);}
-        dialog.setTag(new Object[]{bar,pct,detail});
+        if(dialog.getWindow()!=null)dialog.getWindow().getDecorView().setTag(new Object[]{bar,pct,detail});
         return dialog;
     }
     void updateProcessDialog(Dialog dialog,int percent,String detail){
         runOnUiThread(()->{
-            Object[] v=(Object[])dialog.getTag();
+            Object[] v=(Object[])dialog.getWindow().getDecorView().getTag();
             int p=Math.max(0,Math.min(100,percent));
             ((ProgressBar)v[0]).setProgress(p);
             ((TextView)v[1]).setText(p+"%");
@@ -679,7 +679,7 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     int copies(){try{return Math.max(1,Math.min(9999,Integer.parseInt(copiesEdit.getText().toString().trim())));}catch(Exception e){return 1;}}
 
     File makePdf()throws Exception{return makePdf(null);}
-    interface PdfProgress{void update(int percent);}
+    interface PdfProgress{void update(int percent,String detail);}
     File makePdf(PdfProgress progress)throws Exception{
         int n=cardCount(),reps=copies();
         for(int i=0;i<n;i++)if(frontUris[i]==null||backUris[i]==null)throw new Exception("Please scan/import both sides for card "+(i+1)+".");
