@@ -383,38 +383,22 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
             Imgproc.approxPolyDP(c2,approx,Math.max(2.0,0.018*peri),true);
             org.opencv.core.Point[] pts=approx.toArray();
 
-            // If the contour is not a clean quadrilateral, use its minimum-area
-            // rectangle only when that rectangle is a very good fit. This keeps
-            // perspective correction stable without accepting arbitrary slivers.
-            org.opencv.core.Point[] quad=null;
-            double rectFill=0;
+            // ONLY accept a genuine four-corner contour. A minimum-area
+            // rectangle around a line, chip, text box or other fragment can look
+            // like an ID card and was the cause of the white/diagonal sliver.
             if(pts.length==4&&Imgproc.isContourConvex(new MatOfPoint(pts))){
-                quad=pts;
-                rectFill=area/(double)Math.max(1,bb.width*bb.height);
-            }else{
-                org.opencv.core.RotatedRect rr=Imgproc.minAreaRect(c2);
-                double rectArea=Math.max(1,rr.size.width*rr.size.height);
-                rectFill=area/rectArea;
-                if(rectFill>.72){
-                    quad=new org.opencv.core.Point[4];
-                    rr.points(quad);
-                }
-            }
-
-            if(quad!=null){
-                double ratio=quadRatio(quad);
+                double rectFill=area/(double)Math.max(1,bb.width*bb.height);
+                double ratio=quadRatio(pts);
                 double ratioScore=Math.max(0,1.0-Math.abs(ratio-target)/target);
                 double areaScore=Math.max(0,1.0-Math.abs(areaFrac-expectedArea)/0.065);
                 double sizeScore=Math.min(1.0,Math.max(0.0,(areaFrac-.035)/.045));
                 double fillScore=Math.min(1.0,Math.max(0.0,(rectFill-.60)/.30));
+                double angleScore=quadAngleScore(pts);
 
-                // Require both the ID-1 shape and a physically plausible amount
-                // of the scanner page. This is the key protection against the
-                // previous chip/partial-card false positives.
-                if(ratio>=1.30&&ratio<=1.90&&ratioScore>.72&&rectFill>.60
-                        &&areaFrac>=.035&&areaFrac<=.24){
-                    double score=ratioScore*.42+areaScore*.30+fillScore*.18+sizeScore*.10;
-                    candidates.add(new CardQuad(quad,score,area));
+                if(ratio>=1.30&&ratio<=1.90&&ratioScore>.72&&rectFill>.62
+                        &&angleScore>.72&&areaFrac>=.035&&areaFrac<=.20){
+                    double score=ratioScore*.40+areaScore*.28+fillScore*.17+sizeScore*.08+angleScore*.07;
+                    candidates.add(new CardQuad(pts,score,area));
                 }
             }
 
@@ -517,6 +501,19 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         double longSide=Math.max((a+c)/2.0,(b+d)/2.0);
         double shortSide=Math.min((a+c)/2.0,(b+d)/2.0);
         return longSide/Math.max(1,shortSide);
+    }
+
+    double quadAngleScore(org.opencv.core.Point[] p){
+        double score=1.0;
+        for(int i=0;i<4;i++){
+            org.opencv.core.Point prev=p[(i+3)%4],cur=p[i],next=p[(i+1)%4];
+            double ax=prev.x-cur.x,ay=prev.y-cur.y,bx=next.x-cur.x,by=next.y-cur.y;
+            double den=Math.hypot(ax,ay)*Math.hypot(bx,by);
+            if(den<1) return 0;
+            double cos=Math.abs((ax*bx+ay*by)/den);
+            score*=Math.max(0,1.0-cos/.72);
+        }
+        return Math.pow(score,.25);
     }
 
     double dist(org.opencv.core.Point a,org.opencv.core.Point b){
