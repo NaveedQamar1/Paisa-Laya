@@ -149,28 +149,55 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
     }
     void processImported(Uri u,boolean front){
         status.setText("Importing image…");
+        Dialog dialog=showProcessDialog(front?"Importing front…":"Importing back…");
         pool.execute(()->{try{
             Bitmap raw=load(u);
             if(raw==null)throw new IllegalArgumentException("Could not read the selected image.");
-            // Gallery images are treated as already-cropped card images. Do not run
-            // scanner/card detection on them again, otherwise a perfectly cropped
-            // NIC can be detected against its own background and cut in half.
-            Bitmap card=raw;
-            if(card.getWidth()<card.getHeight()){
-                Matrix m=new Matrix();
-                m.postRotate(90);
-                Bitmap rotated=Bitmap.createBitmap(card,0,0,card.getWidth(),card.getHeight(),m,true);
-                if(rotated!=card)card.recycle();
-                card=rotated;
+            updateProcessDialog(dialog,8,"Reading image…");
+
+            int max=2200;
+            float scale=Math.min(1f,max/(float)Math.max(raw.getWidth(),raw.getHeight()));
+            Bitmap work=scale<1f?Bitmap.createScaledBitmap(raw,Math.max(1,(int)(raw.getWidth()*scale)),Math.max(1,(int)(raw.getHeight()*scale)),true):raw;
+
+            ArrayList<Bitmap> detected=null;
+            try{
+                detected=detectCardsWithOpenCV(work,1,(p,d)->updateProcessDialog(dialog,10+Math.round(p*.70f),d));
+            }catch(Exception ignored){detected=null;}
+
+            Bitmap card;
+            if(detected!=null&&!detected.isEmpty()){
+                card=detected.get(0);
+                updateProcessDialog(dialog,82,"Card detected. Correcting orientation…");
+            }else{
+                // If the selected file is already a cropped card, keep it intact.
+                card=work;
+                updateProcessDialog(dialog,82,"Using imported image as card…");
+                if(card.getWidth()<card.getHeight()){
+                    Matrix m=new Matrix();
+                    m.postRotate(90);
+                    Bitmap rotated=Bitmap.createBitmap(card,0,0,card.getWidth(),card.getHeight(),m,true);
+                    if(rotated!=card)card.recycle();
+                    card=rotated;
+                }
             }
+
             Bitmap oriented=autoOrientCard(card);
             if(oriented!=card)card.recycle();
             card=oriented;
+
+            updateProcessDialog(dialog,94,"Saving card…");
             saveCard(card,front,0);
-            if(card!=raw)card.recycle();
-            else raw.recycle();
-            runOnUiThread(()->status.setText((front?"Front":"Back")+" image imported."));
-        }catch(Exception e){runOnUiThread(()->toast("Could not import image: "+e.getMessage()));}});
+
+            if(detected!=null&&!detected.isEmpty()){
+                for(int i=1;i<detected.size();i++)if(detected.get(i)!=null)detected.get(i).recycle();
+            }
+            if(work!=raw&&work!=card)work.recycle();
+            if(raw!=card&&raw!=work)raw.recycle();
+
+            updateProcessDialog(dialog,100,"Complete.");
+            Bitmap finalCard=card;
+            runOnUiThread(()->{dialog.dismiss();status.setText((front?"Front":"Back")+" image imported.");});
+        }catch(Exception e){runOnUiThread(()->{dialog.dismiss();toast("Could not import image: "+e.getMessage());});}});
     }
     interface ProcessProgress{void update(int percent,String detail);}
     Dialog showProcessDialog(String title){
@@ -332,9 +359,9 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
             contourIndex++;
             if(progress!=null&&contourIndex%Math.max(1,contours.size()/45)==0)progress.update(12+Math.round(contourIndex*45f/Math.max(1,contours.size())),"Detecting card edges…");
             double area=Math.abs(Imgproc.contourArea(contour));
-            if(area<total*.006||area>total*.65) {contour.release();continue;}
+            if(area<total*.015||area>total*.65) {contour.release();continue;}
             org.opencv.core.Rect bb=Imgproc.boundingRect(contour);
-            if(bb.width<80||bb.height<50||bb.width>src.cols()*.97||bb.height>src.rows()*.97){contour.release();continue;}
+            if(bb.width<Math.max(120,src.cols()*.07)||bb.height<Math.max(80,src.rows()*.045)||bb.width>src.cols()*.97||bb.height>src.rows()*.97){contour.release();continue;}
 
             MatOfPoint2f c2=new MatOfPoint2f(contour.toArray());
             double peri=Imgproc.arcLength(c2,true);
@@ -346,8 +373,8 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
                 double ratio=quadRatio(pts);
                 double ratioScore=Math.max(0,1.0-Math.abs(ratio-target)/target);
                 double rectFill=area/(double)Math.max(1,bb.width*bb.height);
-                if(ratio>=1.30&&ratio<=1.90&&rectFill>.55&&ratioScore>.68){
-                    double areaScore=Math.min(1,Math.sqrt(area/total)*6.0); double score=ratioScore*.50+Math.min(1,rectFill)*.15+areaScore*.35;
+                if(ratio>=1.30&&ratio<=1.90&&rectFill>.62&&ratioScore>.72){
+                    double areaScore=Math.min(1,Math.sqrt(area/total)*7.0); double score=ratioScore*.48+Math.min(1,rectFill)*.17+areaScore*.35;
                     candidates.add(new CardQuad(pts,score,area));
                 }
             }
