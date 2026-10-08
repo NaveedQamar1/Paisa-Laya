@@ -14,7 +14,7 @@ static class CardDetector
         using var src=BitmapConverter.ToMat(source);
         using var gray=new Mat();using var blur=new Mat();using var edges=new Mat();using var closed=new Mat();
         Cv2.CvtColor(src,gray,ColorConversionCodes.BGRA2GRAY);
-        Cv2.GaussianBlur(gray,blur,new Size(5,5),0);Cv2.Canny(blur,edges,30,110);
+        Cv2.GaussianBlur(gray,blur,new CvSize(5,5),0);Cv2.Canny(blur,edges,30,110);
         using var k=Cv2.GetStructuringElement(MorphShapes.Rect,new CvSize(7,7));
         Cv2.MorphologyEx(edges,closed,MorphTypes.Close,k);
         using var d=Cv2.GetStructuringElement(MorphShapes.Rect,new CvSize(3,3));Cv2.Dilate(closed,closed,d);
