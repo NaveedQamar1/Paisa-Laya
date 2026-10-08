@@ -1,5 +1,6 @@
 using OpenCvSharp;
 using OpenCvSharp.Extensions;
+using CvPoint = OpenCvSharp.Point;
 
 namespace EasyCopy.Desktop;
 
@@ -16,9 +17,9 @@ static class CardDetector
         using var k=Cv2.GetStructuringElement(MorphShapes.Rect,new Size(7,7));
         Cv2.MorphologyEx(edges,closed,MorphTypes.Close,k);
         using var d=Cv2.GetStructuringElement(MorphShapes.Rect,new Size(3,3));Cv2.Dilate(closed,closed,d);
-        Cv2.FindContours(closed,out Point[][] contours,out _,RetrievalModes.External,ContourApproximationModes.ApproxSimple);
+        Cv2.FindContours(closed,out CvPoint[][] contours,out _,RetrievalModes.External,ContourApproximationModes.ApproxSimple);
         double total=src.Width*src.Height;
-        var candidates=new List<(Point[] q,double score)>();
+        var candidates=new List<(CvPoint[] q,double score)>();
         for(int i=0;i<contours.Length;i++)
         {
             progress?.Invoke(10+(int)(i*48.0/Math.Max(1,contours.Length)),"Detecting complete card boundaries…");
@@ -51,7 +52,7 @@ static class CardDetector
         return Detect(source,1,(_,__)=>{ }).First();
     }
 
-    static Mat Warp(Bitmap source,Point[] raw)
+    static Mat Warp(Bitmap source,CvPoint[] raw)
     {
         var p=OrderStable(raw);
         double a=Dist(p[0],p[1]),b=Dist(p[1],p[2]),c=Dist(p[2],p[3]),d=Dist(p[3],p[0]);
@@ -64,7 +65,7 @@ static class CardDetector
         return dst.Clone();
     }
 
-    static Point[] OrderStable(Point[] pts)
+    static Point[] OrderStable(CvPoint[] pts)
     {
         double cx=pts.Average(p=>p.X),cy=pts.Average(p=>p.Y);
         var q=pts.OrderBy(p=>Math.Atan2(p.Y-cy,p.X-cx)).ToArray();
@@ -72,7 +73,7 @@ static class CardDetector
         return Enumerable.Range(0,4).Select(i=>q[(start+i)%4]).ToArray();
     }
 
-    static double Dist(Point a,Point b)=>Math.Hypot(a.X-b.X,a.Y-b.Y);
+    static double Dist(CvPoint a,CvPoint b)=>Math.Hypot(a.X-b.X,a.Y-b.Y);
     static double SideRatio(Point[] p){double a=Dist(p[0],p[1]),b=Dist(p[1],p[2]),c=Dist(p[2],p[3]),d=Dist(p[3],p[0]);return Math.Max((a+c)/2,(b+d)/2)/Math.Max(1,Math.Min((a+c)/2,(b+d)/2));}
 
     static bool Validate(Mat m){using var g=new Mat();Cv2.CvtColor(m,g,ColorConversionCodes.BGRA2GRAY);using var e=new Mat();Cv2.Canny(g,e,50,140);return Cv2.CountNonZero(e)>m.Width*m.Height*.02;}
