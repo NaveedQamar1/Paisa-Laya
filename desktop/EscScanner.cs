@@ -60,4 +60,34 @@ static class EscScanner
         var m = Regex.Match(xml, "<(?:\\w+:)?" + tag + ">\\s*(\\d+)\\s*</(?:\\w+:)?" + tag + ">", RegexOptions.IgnoreCase);
         return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : fallback;
     }
+}        string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+            "<scan:ScanSettings xmlns:scan=\"http://schemas.hp.com/imaging/escl/2011/05/03\" xmlns:pwg=\"http://www.pwg.org/schemas/2010/12/sm\" xmlns:escl=\"http://schemas.hp.com/imaging/escl/2011/05/03\">" +
+            "<pwg:Version>2.0</pwg:Version><scan:Intent>Document</scan:Intent><pwg:ScanRegions><pwg:ScanRegion>" +
+            "<pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits><pwg:XOffset>0</pwg:XOffset><pwg:YOffset>0</pwg:YOffset>" +
+            $"<pwg:Width>{maxW}</pwg:Width><pwg:Height>{maxH}</pwg:Height></pwg:ScanRegion></pwg:ScanRegions>" +
+            $"<pwg:InputSource>{src}</pwg:InputSource><pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>" +
+            $"<scan:XResolution>{dpi}</scan:XResolution><scan:YResolution>{dpi}</scan:YResolution><scan:ColorMode>{color}</scan:ColorMode>{duplexXml}</scan:ScanSettings>";
+
+        using var resp = await Client.PostAsync(baseUrl + "ScanJobs", new StringContent(xml, Encoding.UTF8, "text/xml"), ct);
+        if (!resp.IsSuccessStatusCode) throw new Exception($"Scanner rejected scan ({(int)resp.StatusCode}).");
+        var loc = resp.Headers.Location?.ToString();
+        if (string.IsNullOrWhiteSpace(loc)) throw new Exception("Scanner did not return a scan job.");
+        var job = new Uri(new Uri(baseUrl), loc);
+        for (int i = 0; i < 90; i++)
+        {
+            await Task.Delay(500, ct);
+            using var r = await Client.GetAsync(new Uri(job, "NextDocument"), ct);
+            if (r.StatusCode == HttpStatusCode.NotFound || r.StatusCode == HttpStatusCode.NoContent) continue;
+            if (!r.IsSuccessStatusCode) continue;
+            var bytes = await r.Content.ReadAsByteArrayAsync(ct);
+            if (bytes.Length > 1000) return bytes;
+        }
+        throw new TimeoutException("Timed out waiting for scanner.");
+    }
+
+    static int IntTag(string xml, string tag, int fallback)
+    {
+        var m = Regex.Match(xml, "<(?:\\w+:)?" + tag + ">\\s*(\\d+)\\s*</(?:\\w+:)?" + tag + ">", RegexOptions.IgnoreCase);
+        return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : fallback;
+    }
 }
