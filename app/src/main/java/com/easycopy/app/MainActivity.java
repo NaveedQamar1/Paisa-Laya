@@ -786,10 +786,10 @@ public class MainActivity extends Activity { // EasyCopy colorful UI build
         return score;
     }
     Bitmap resizeOrientationResultIfNeeded(Bitmap rotated,Bitmap original){
-        if(rotated.getWidth()==original.getWidth()&&rotated.getHeight()==original.getHeight())return rotated;
-        Bitmap out=Bitmap.createScaledBitmap(rotated,original.getWidth(),original.getHeight(),true);
-        rotated.recycle();
-        return out;
+        // Never stretch a 90°/270° result back to the original landscape dimensions.
+        // Doing so distorts the card and makes correctly oriented text look wrong.
+        // Preserve the rotated bitmap's native dimensions and aspect ratio.
+        return rotated;
     }
 
     Bitmap rotateCropOnBackground(Bitmap source,int l,int t,int bw,int bh,float degrees,int background){
