@@ -20,6 +20,14 @@ def init_db():
             UNIQUE(user_id,punch_time,status))""")
         c.execute("""CREATE TABLE IF NOT EXISTS staff (
             user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')""")
+        c.execute("""CREATE TABLE IF NOT EXISTS staff_rules (
+            user_id TEXT PRIMARY KEY, start_time TEXT NOT NULL DEFAULT '10:00',
+            end_time TEXT NOT NULL DEFAULT '18:00', grace_minutes INTEGER NOT NULL DEFAULT 10,
+            half_day_after TEXT NOT NULL DEFAULT '12:00', min_hours REAL NOT NULL DEFAULT 4.0)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS app_settings (
+            setting TEXT PRIMARY KEY, value TEXT NOT NULL)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS holidays (
+            holiday_date TEXT PRIMARY KEY, label TEXT NOT NULL DEFAULT '')""")
 
 class App(tk.Tk):
     def __init__(self):
@@ -70,6 +78,7 @@ class App(tk.Tk):
             ttk.Entry(conn,textvariable=var,width=width).grid(row=1,column=col+1,sticky="w",padx=(0,16))
         ttk.Button(conn,text="⟳  Fetch from K50",style="Accent.TButton",command=self.fetch).grid(row=1,column=6,padx=(0,8))
         ttk.Button(conn,text="＋  Import CSV",command=self.import_csv).grid(row=1,column=7)
+        ttk.Button(conn,text="⚙  Custom Rules",command=self.open_rules).grid(row=1,column=8,padx=(8,0))
         filters=ttk.Frame(self,padding=(18,0,18,10)); filters.pack(fill="x")
         ttk.Label(filters,text="From").pack(side="left")
         ttk.Entry(filters,textvariable=self.start_date,width=12).pack(side="left",padx=(6,14))
@@ -113,6 +122,132 @@ class App(tk.Tk):
             self.tree.heading(col,text=title); self.tree.column(col,width=width,anchor="w")
         self.tree.pack(fill="both",expand=True)
         self.tree.tag_configure("odd",background="#f8fafc")
+
+    def _rules(self):
+        defaults={"default_start":"10:00","default_end":"18:00","default_grace":"10",
+                  "half_day_after":"12:00","min_hours":"4.0","workdays":"0,1,2,3,4"}
+        with sqlite3.connect(DB) as c:
+            saved=dict(c.execute("SELECT setting,value FROM app_settings"))
+            rules={k:saved.get(k,v) for k,v in defaults.items()}
+            staff_rules={str(r[0]):{"start":r[1],"end":r[2],"grace":int(r[3]),"half":r[4],"min_hours":float(r[5])}
+                         for r in c.execute("SELECT user_id,start_time,end_time,grace_minutes,half_day_after,min_hours FROM staff_rules")}
+            holidays=dict(c.execute("SELECT holiday_date,label FROM holidays"))
+        return rules,staff_rules,holidays
+
+    def open_rules(self):
+        rules,staff_rules,holidays=self._rules()
+        win=tk.Toplevel(self); win.title("Custom Attendance Rules"); win.geometry("900x680"); win.minsize(780,560); win.transient(self)
+        outer=ttk.Frame(win,padding=16); outer.pack(fill="both",expand=True)
+        ttk.Label(outer,text="CUSTOM ATTENDANCE RULES",font=("Segoe UI",16,"bold")).pack(anchor="w")
+        ttk.Label(outer,text="Set defaults, then override schedules for individual staff. Rules apply to attendance reports.",style="Sub.TLabel").pack(anchor="w",pady=(2,12))
+        defaults=ttk.LabelFrame(outer,text="Default schedule and thresholds",padding=10); defaults.pack(fill="x")
+        vars={}
+        fields=[("default_start","Shift start (HH:MM)"),("default_end","Shift end (HH:MM)"),("default_grace","Late grace (minutes)"),("half_day_after","Half-day cutoff (HH:MM)"),("min_hours","Minimum hours for full day"),("workdays","Working weekdays (0=Mon, 6=Sun; comma-separated)")]
+        for i,(key,label) in enumerate(fields):
+            row=i//3; col=(i%3)*2
+            ttk.Label(defaults,text=label).grid(row=row,column=col,sticky="w",padx=(0,5),pady=5)
+            vars[key]=tk.StringVar(value=rules[key])
+            ttk.Entry(defaults,textvariable=vars[key],width=20).grid(row=row,column=col+1,sticky="ew",padx=(0,12),pady=5)
+        for col in range(6): defaults.columnconfigure(col,weight=1)
+        staffbox=ttk.LabelFrame(outer,text="Per-staff schedule overrides",padding=8); staffbox.pack(fill="both",expand=True,pady=(12,0))
+        ttk.Label(staffbox,text="Select an employee, then set their shift, grace period, half-day cutoff and minimum hours.").pack(anchor="w")
+        available=sorted(set(self._staff_names())|set(staff_rules),key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
+        choices=[f"{self._name(uid)} ({uid})" for uid in available]
+        selected=tk.StringVar(value=choices[0] if choices else "")
+        top=ttk.Frame(staffbox); top.pack(fill="x",pady=8)
+        ttk.Label(top,text="Staff").pack(side="left")
+        combo=ttk.Combobox(top,textvariable=selected,values=choices,state="readonly",width=34); combo.pack(side="left",padx=8)
+        ov={}
+        for i,(key,label) in enumerate([("start","Shift start"),("end","Shift end"),("grace","Grace minutes"),("half","Half-day cutoff"),("min_hours","Minimum hours")]):
+            ttk.Label(top,text=label).pack(side="left",padx=(6,2))
+            ov[key]=tk.StringVar(value="")
+            ttk.Entry(top,textvariable=ov[key],width=8).pack(side="left",padx=(0,3))
+        def load_staff(*_):
+            uid=selected.get().rsplit(" (",1)[-1].rstrip(")") if selected.get() else ""
+            r=staff_rules.get(uid,{})
+            for k,default_key in [("start","default_start"),("end","default_end"),("grace","default_grace"),("half","half_day_after"),("min_hours","min_hours")]:
+                ov[k].set(str(r.get(k,vars[default_key].get())))
+        combo.bind("<<ComboboxSelected>>",load_staff)
+        def save_override():
+            label=selected.get()
+            if not label: messagebox.showwarning("Select staff","Fetch staff from K50 first or select a staff member."); return
+            uid=label.rsplit(" (",1)[-1].rstrip(")")
+            try:
+                datetime.strptime(ov["start"].get(),"%H:%M"); datetime.strptime(ov["end"].get(),"%H:%M"); datetime.strptime(ov["half"].get(),"%H:%M")
+                grace=int(ov["grace"].get()); hours=float(ov["min_hours"].get())
+                if grace<0 or hours<0 or hours>24: raise ValueError()
+            except ValueError:
+                messagebox.showerror("Invalid rule","Use HH:MM times, non-negative grace minutes, and minimum hours from 0 to 24."); return
+            staff_rules[uid]={"start":ov["start"].get(),"end":ov["end"].get(),"grace":grace,"half":ov["half"].get(),"min_hours":hours}
+            messagebox.showinfo("Schedule override","Override prepared. Click Save all rules to save changes.")
+        ttk.Button(staffbox,text="Save selected staff override",command=save_override).pack(anchor="e",pady=(0,8))
+        holidaysbox=ttk.LabelFrame(outer,text="Public holidays / closed dates",padding=8); holidaysbox.pack(fill="x",pady=(12,0))
+        hrow=ttk.Frame(holidaysbox); hrow.pack(fill="x")
+        hdate=tk.StringVar(); hlabel=tk.StringVar()
+        ttk.Label(hrow,text="Date (YYYY-MM-DD)").pack(side="left"); ttk.Entry(hrow,textvariable=hdate,width=14).pack(side="left",padx=5)
+        ttk.Label(hrow,text="Label").pack(side="left"); ttk.Entry(hrow,textvariable=hlabel,width=24).pack(side="left",padx=5)
+        holiday_list=tk.Listbox(holidaysbox,height=4); holiday_list.pack(fill="x",pady=6)
+        def refresh_holidays():
+            holiday_list.delete(0,"end")
+            for d,l in sorted(holidays.items()): holiday_list.insert("end",f"{d} — {l}")
+        def add_holiday():
+            try: datetime.strptime(hdate.get().strip(),"%Y-%m-%d")
+            except ValueError: messagebox.showerror("Invalid date","Use YYYY-MM-DD."); return
+            holidays[hdate.get().strip()]=hlabel.get().strip() or "Holiday"; refresh_holidays()
+        def remove_holiday():
+            sel=holiday_list.curselection()
+            if not sel: return
+            d=holiday_list.get(sel[0]).split(" — ",1)[0]; holidays.pop(d,None); refresh_holidays()
+        hb=ttk.Frame(holidaysbox); hb.pack(fill="x")
+        ttk.Button(hb,text="Add holiday",command=add_holiday).pack(side="left")
+        ttk.Button(hb,text="Remove selected",command=remove_holiday).pack(side="left",padx=8)
+        refresh_holidays(); load_staff()
+        def save_all():
+            try:
+                datetime.strptime(vars["default_start"].get(),"%H:%M"); datetime.strptime(vars["default_end"].get(),"%H:%M"); datetime.strptime(vars["half_day_after"].get(),"%H:%M")
+                grace=int(vars["default_grace"].get()); hours=float(vars["min_hours"].get())
+                days=[int(x.strip()) for x in vars["workdays"].get().split(",") if x.strip()]
+                if grace<0 or hours<0 or hours>24 or not days or any(x<0 or x>6 for x in days): raise ValueError()
+            except ValueError:
+                messagebox.showerror("Invalid defaults","Check HH:MM times, grace, hours, and weekdays (0–6)."); return
+            with sqlite3.connect(DB) as c:
+                for k,v in vars.items(): c.execute("INSERT INTO app_settings(setting,value) VALUES(?,?) ON CONFLICT(setting) DO UPDATE SET value=excluded.value",(k,v.get().strip()))
+                for uid,r in staff_rules.items():
+                    c.execute("""INSERT INTO staff_rules(user_id,start_time,end_time,grace_minutes,half_day_after,min_hours) VALUES(?,?,?,?,?,?)
+                                 ON CONFLICT(user_id) DO UPDATE SET start_time=excluded.start_time,end_time=excluded.end_time,grace_minutes=excluded.grace_minutes,half_day_after=excluded.half_day_after,min_hours=excluded.min_hours""",
+                              (uid,r["start"],r["end"],r["grace"],r["half"],r["min_hours"]))
+                c.execute("DELETE FROM holidays")
+                c.executemany("INSERT INTO holidays(holiday_date,label) VALUES(?,?)",sorted(holidays.items()))
+            messagebox.showinfo("Rules saved","Custom attendance rules saved on this computer.")
+            win.destroy()
+        buttons=ttk.Frame(outer); buttons.pack(fill="x",pady=(12,0))
+        ttk.Button(buttons,text="Save all rules",style="Accent.TButton",command=save_all).pack(side="right")
+        ttk.Button(buttons,text="Close",command=win.destroy).pack(side="right",padx=8)
+
+    def _attendance_day_status(self,uid,day,stamps):
+        rules,overrides,holidays=self._rules()
+        if day in holidays: return "Holiday", "", "", 0.0
+        try: workdays={int(x.strip()) for x in rules["workdays"].split(",") if x.strip()}
+        except ValueError: workdays={0,1,2,3,4}
+        d=datetime.strptime(day,"%Y-%m-%d").date()
+        if d.weekday() not in workdays: return "Day off", "", "", 0.0
+        r=overrides.get(str(uid),{})
+        start=r.get("start",rules["default_start"]); end=r.get("end",rules["default_end"])
+        grace=int(r.get("grace",rules["default_grace"])); half=r.get("half",rules["half_day_after"])
+        min_hours=float(r.get("min_hours",rules["min_hours"]))
+        stamps=sorted(stamps)
+        if not stamps: return "Absent", "", "", 0.0
+        first=datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S")
+        last=datetime.strptime(stamps[-1],"%Y-%m-%d %H:%M:%S")
+        scheduled=datetime.strptime(day+" "+start,"%Y-%m-%d %H:%M")
+        late=(first-scheduled).total_seconds()/60
+        worked=max(0,(last-first).total_seconds()/3600)
+        if len(stamps)<2: return "Incomplete punch",first.strftime("%H:%M"),last.strftime("%H:%M"),worked
+        if late>grace: status="Late"
+        elif first.strftime("%H:%M")>=half or worked<min_hours: status="Half-day"
+        else: status="Present"
+        if end and last.strftime("%H:%M") < end: status += " (early departure)"
+        return status,first.strftime("%H:%M"),last.strftime("%H:%M"),worked
 
     def _staff_names(self):
         if not hasattr(self,"_names_cache") or self._names_cache is None:
