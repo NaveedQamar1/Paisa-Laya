@@ -1,4 +1,4 @@
-import csv, sqlite3, threading
+import csv, sqlite3, threading, shutil
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import tkinter as tk
@@ -95,6 +95,8 @@ class App(tk.Tk):
         ttk.Button(conn,text="＋  Import CSV",command=self.import_csv).grid(row=1,column=7)
         ttk.Button(conn,text="⚙  Custom Rules",command=self.open_rules).grid(row=1,column=8,padx=(8,0))
         ttk.Button(conn,text="Staff Schedules",command=self.open_staff_schedules).grid(row=1,column=9,padx=(8,0))
+        ttk.Button(conn,text="Backup Database",command=self.backup_database).grid(row=2,column=6,sticky="w",pady=(8,0))
+        ttk.Button(conn,text="Restore Database",command=self.restore_database).grid(row=2,column=7,sticky="w",pady=(8,0))
         filters=ttk.Frame(self,padding=(18,0,18,10)); filters.pack(fill="x")
         ttk.Label(filters,text="From").pack(side="left")
         ttk.Entry(filters,textvariable=self.start_date,width=12).pack(side="left",padx=(6,14))
@@ -508,6 +510,59 @@ class App(tk.Tk):
             self.refresh()
             messagebox.showinfo("Import complete",f"Imported {count} new records.")
         except Exception as e: messagebox.showerror("Import failed",str(e))
+
+    def backup_database(self):
+        """Export a consistent SQLite backup without copying a live database file."""
+        path=filedialog.asksaveasfilename(
+            title="Back up SCAFA Workforce database",
+            defaultextension=".db",
+            filetypes=[("SQLite database","*.db"),("All files","*.*")],
+            initialfile=f"SCAFA_Workforce_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
+        if not path:
+            return
+        try:
+            with sqlite3.connect(DB) as source, sqlite3.connect(path) as target:
+                source.backup(target)
+            messagebox.showinfo("Backup complete",f"Database backup saved to:\\n{path}")
+            self.status.set(f"Database backup saved • {path}")
+        except Exception as e:
+            messagebox.showerror("Backup failed",f"Could not back up the database:\\n{e}")
+
+    def restore_database(self):
+        """Validate a backup, preserve the current database, then restore safely."""
+        path=filedialog.askopenfilename(
+            title="Select SCAFA Workforce database backup",
+            filetypes=[("SQLite database","*.db *.sqlite *.sqlite3"),("All files","*.*")])
+        if not path:
+            return
+        try:
+            if Path(path).resolve()==DB.resolve():
+                messagebox.showerror("Invalid backup","Choose a backup file, not the database currently in use.")
+                return
+            with sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro",uri=True) as check:
+                integrity=check.execute("PRAGMA integrity_check").fetchone()
+                tables={r[0] for r in check.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                if not integrity or integrity[0]!="ok":
+                    raise ValueError("The selected file failed SQLite's integrity check.")
+                if not {"punches","staff"}.issubset(tables):
+                    raise ValueError("This file does not look like a SCAFA Workforce attendance database.")
+            if not messagebox.askyesno(
+                "Confirm database restore",
+                "Restoring replaces the current attendance data and settings. "
+                "A safety backup of the current database will be created first. Continue?"):
+                return
+            safety=BASE / f"Pre_Restore_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            with sqlite3.connect(DB) as current, sqlite3.connect(safety) as backup:
+                current.backup(backup)
+            with sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro",uri=True) as source, sqlite3.connect(DB) as target:
+                source.backup(target)
+            self._names_cache=None
+            init_db()
+            self.refresh()
+            messagebox.showinfo("Restore complete",f"Database restored successfully.\\nSafety backup: {safety}")
+            self.status.set("Database restored • current database safety backup retained")
+        except Exception as e:
+            messagebox.showerror("Restore failed",f"Could not restore this database:\\n{e}")
 
     def export_csv(self):
         rows=self._rows()
