@@ -4,8 +4,15 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
-BASE = Path.home() / "SCAFAWorkforce"
-BASE.mkdir(exist_ok=True)
+NEW_BASE = Path.home() / "SCAFAWorkforce"
+LEGACY_BASE = Path.home() / "K50AttendanceManager"
+# Keep using the legacy database when it exists, so upgrades do not silently start
+# with an empty database. If a SCAFA Workforce database already exists, prefer it.
+if (NEW_BASE / "attendance.db").exists() or not (LEGACY_BASE / "attendance.db").exists():
+    BASE = NEW_BASE
+else:
+    BASE = LEGACY_BASE
+BASE.mkdir(parents=True, exist_ok=True)
 DB = BASE / "attendance.db"
 BG = "#f5f7f4"
 NAVY = "#17251d"
