@@ -267,7 +267,7 @@ class App(tk.Tk):
         cells={}
         for wd,name in enumerate(days):
             ttk.Label(grid,text=name).grid(row=wd+1,column=0,sticky="w",padx=5,pady=4)
-            vals=existing.get((selected.get().rsplit(" (",1)[-1].rstrip(")"),wd),("09:45","20:00" if wd<5 else ("17:00" if wd==5 else "17:00"),15,"Off" if wd==6 else "Full day"))
+            vals=existing.get((selected.get().rsplit(" (",1)[-1].rstrip(")"),wd),("09:45","20:00" if wd<5 else "17:00",15,"Off" if wd==6 else "Full day"))
             sv,ev,gv,tv=tk.StringVar(value=vals[0]),tk.StringVar(value=vals[1]),tk.StringVar(value=str(vals[2])),tk.StringVar(value=vals[3])
             cells[wd]=(sv,ev,gv,tv)
             ttk.Entry(grid,textvariable=sv,width=14).grid(row=wd+1,column=1,padx=5,pady=3)
@@ -326,7 +326,10 @@ class App(tk.Tk):
         scheduled=datetime.strptime(day+" "+start,"%Y-%m-%d %H:%M")
         late=(first-scheduled).total_seconds()/60
         worked=max(0,(last-first).total_seconds()/3600)
-        if len(stamps)<2: return "Incomplete punch",first.strftime("%H:%M"),last.strftime("%H:%M"),worked
+        if len(stamps)<2:
+            status="Incomplete punch"
+            if late>grace: status+=" — Late"
+            return status,first.strftime("%H:%M"),last.strftime("%H:%M"),worked
         if shift_type=="Half day":
             status="Half-day"
         elif shift_type=="Custom":
