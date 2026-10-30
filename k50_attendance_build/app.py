@@ -306,14 +306,15 @@ class App(tk.Tk):
         try: workdays={int(x.strip()) for x in rules["workdays"].split(",") if x.strip()}
         except ValueError: workdays={0,1,2,3,4}
         d=datetime.strptime(day,"%Y-%m-%d").date()
-        if d.weekday() not in workdays: return "Day off", "", "", 0.0
         r=overrides.get(str(uid),{})
         with sqlite3.connect(DB) as c:
             day_rule=c.execute("SELECT start_time,end_time,grace_minutes,shift_type FROM staff_day_rules WHERE user_id=? AND weekday=?",(str(uid),d.weekday())).fetchone()
+        # An explicit employee/day schedule takes precedence over the global workweek.
         if day_rule:
             start,end,grace,shift_type=day_rule[0],day_rule[1],int(day_rule[2]),day_rule[3]
             if shift_type=="Off": return "Day off", "", "", 0.0
         else:
+            if d.weekday() not in workdays: return "Day off", "", "", 0.0
             start=r.get("start",rules["default_start"]); end=r.get("end",rules["default_end"])
             grace=int(r.get("grace",rules["default_grace"])); shift_type="Full day"
         half=r.get("half",rules["half_day_after"])
@@ -388,7 +389,9 @@ class App(tk.Tk):
         for i in self.tree.get_children(): self.tree.delete(i)
         for idx,row in enumerate(reversed(rows[-5000:])):
             self.tree.insert("","end",values=(row[0],self._name(row[0]),row[1],row[2]),tags=("odd",) if idx%2 else ())
-        users=sorted(set(str(r[0]) for r in rows),key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
+        with sqlite3.connect(DB) as c:
+            registered={str(r[0]) for r in c.execute("SELECT user_id FROM staff")}
+        users=sorted(registered | set(str(r[0]) for r in rows),key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
         choices=["All staff"]+[f"{self._name(uid)} ({uid})" for uid in users]
         self.user_combo["values"]=choices
         if self.report_user.get() not in choices: self.report_user.set("All staff")
@@ -516,15 +519,18 @@ class App(tk.Tk):
     def export_pdf(self):
         rows=self._rows()
         if rows is None: return
-        if not rows:
-            messagebox.showwarning("No data","There are no attendance records in the selected date range."); return
         scope_label=self.report_user.get()
         scope=scope_label
         if scope_label!="All staff":
             scope=scope_label.rsplit(" (",1)[-1].rstrip(")")
             rows=[r for r in rows if str(r[0])==scope]
-        if not rows:
-            messagebox.showwarning("No data","No records found for the selected staff ID."); return
+        # A report may legitimately contain only absences, provided staff are registered.
+        with sqlite3.connect(DB) as c:
+            registered={str(r[0]) for r in c.execute("SELECT user_id FROM staff")}
+        if scope=="All staff" and not (rows or registered):
+            messagebox.showwarning("No staff","No attendance punches or registered staff were found. Fetch staff from the K50 first."); return
+        if scope!="All staff" and scope not in (registered | {str(r[0]) for r in rows}):
+            messagebox.showwarning("Unknown staff","This staff ID is not registered and has no punches in the selected period."); return
         suffix="All_Staff" if scope=="All staff" else "Staff_"+scope
         path=filedialog.asksaveasfilename(title="Save PDF attendance report",defaultextension=".pdf",filetypes=[("PDF report","*.pdf")],initialfile=f"SCAFA_Workforce_Attendance_{suffix}_{date.today().isoformat()}.pdf")
         if not path: return
