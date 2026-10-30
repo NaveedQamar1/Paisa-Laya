@@ -553,7 +553,20 @@ class App(tk.Tk):
             uid=str(uid); day=stamp[:10]
             by_user_day.setdefault((uid,day),[]).append(stamp)
             all_by_day[day]=all_by_day.get(day,0)+1
-        staff_ids=sorted({uid for uid,_ in by_user_day},key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
+        try:
+            first_day=datetime.strptime(start_date,"%Y-%m-%d").date()
+            last_day=datetime.strptime(end_date,"%Y-%m-%d").date()
+            report_dates=[]
+            cursor=first_day
+            while cursor<=last_day:
+                report_dates.append(cursor.isoformat())
+                cursor+=timedelta(days=1)
+        except ValueError:
+            raise ValueError("Report dates must use YYYY-MM-DD and the end date must not precede the start date.")
+        with sqlite3.connect(DB) as c:
+            known_ids={str(r[0]) for r in c.execute("SELECT user_id FROM staff")}
+        punch_ids={uid for uid,_ in by_user_day}
+        staff_ids=sorted(known_ids|punch_ids,key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
         is_collective=(scope=="All staff"); pagesize=landscape(A4); story=[]
 
         def make_stats(stat_items):
@@ -584,9 +597,8 @@ class App(tk.Tk):
 
         def make_detail(uid):
             detail=[["Date","Punches","First punch","Last punch","Hours","Attendance status"]]
-            entries=sorted((day,stamps) for (u,day),stamps in by_user_day.items() if u==uid)
-            for day,stamps in entries:
-                stamps=sorted(stamps)
+            for day in report_dates:
+                stamps=sorted(by_user_day.get((uid,day),[]))
                 status,first,last,worked=self._attendance_day_status(uid,day,stamps)
                 detail.append([day,str(len(stamps)),first or "—",last or "—",f"{worked:.2f}",status])
             tab=Table(detail,repeatRows=1,colWidths=[35*mm,23*mm,32*mm,32*mm,25*mm,65*mm])
@@ -594,16 +606,17 @@ class App(tk.Tk):
             return tab
 
         def employee_page(uid):
-            entries=sorted((day,stamps) for (u,day),stamps in by_user_day.items() if u==uid)
+            entries=[(day,by_user_day.get((uid,day),[])) for day in report_dates]
             employee_rows=[r for r in rows if str(r[0])==uid]
-            daily_counts={day:len(stamps) for day,stamps in entries}
+            daily_counts={day:len(stamps) for day,stamps in entries if stamps}
             incomplete=sum(1 for day,stamps in entries if len(stamps)==1)
+            active_days=sum(1 for day,stamps in entries if stamps)
             first_stamp=min((r[1] for r in employee_rows),default="—")
             last_stamp=max((r[1] for r in employee_rows),default="—")
             story.append(Paragraph(self._name(uid),styles["EmployeeTitle"]))
             story.append(Paragraph(f"Employee ID: {uid}  |  Period: {start_date} to {end_date}",styles["BodyText"]))
             story.append(Spacer(1,3*mm))
-            story.append(make_stats([("TOTAL PUNCHES",len(employee_rows)),("ACTIVE DAYS",len(entries)),("INCOMPLETE",incomplete),("FIRST PUNCH",first_stamp[:16] if first_stamp!="—" else "—"),("LAST PUNCH",last_stamp[:16] if last_stamp!="—" else "—")]))
+            story.append(make_stats([("TOTAL PUNCHES",len(employee_rows)),("ACTIVE DAYS",active_days),("INCOMPLETE",incomplete),("FIRST PUNCH",first_stamp[:16] if first_stamp!="—" else "—"),("LAST PUNCH",last_stamp[:16] if last_stamp!="—" else "—")]))
             story.extend([Spacer(1,2*mm),Paragraph("Attendance activity",styles["Heading2"]),make_chart(daily_counts),Spacer(1,1*mm),Paragraph("Daily records",styles["Heading2"]),make_detail(uid),Spacer(1,2*mm),Paragraph("Status uses saved schedules, grace periods, minimum hours, working weekdays and holidays. A single punch is flagged as Incomplete punch.",styles["SmallNote"])])
 
         if is_collective:
