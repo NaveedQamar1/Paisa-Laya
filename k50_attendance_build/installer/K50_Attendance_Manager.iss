@@ -10,7 +10,7 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\K50 Attendance Manager
 DefaultGroupName={#MyAppName}
-OutputDir=installer-output
+OutputDir=..\..\installer-output
 OutputBaseFilename=K50_Attendance_Manager_Setup
 Compression=lzma2
 SolidCompression=yes
@@ -29,7 +29,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "..\dist\K50_Attendance_Manager.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\dist\K50_Attendance_Manager.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\K50 Attendance Manager"; Filename: "{app}\{#MyAppExeName}"
