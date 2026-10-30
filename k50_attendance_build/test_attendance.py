@@ -9,7 +9,7 @@ import app
 
 class AttendanceStatusTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.old_db = app.DB
         app.DB = Path(self.temp.name) / "attendance.db"
         app.init_db()
