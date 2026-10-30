@@ -28,6 +28,14 @@ def init_db():
             setting TEXT PRIMARY KEY, value TEXT NOT NULL)""")
         c.execute("""CREATE TABLE IF NOT EXISTS holidays (
             holiday_date TEXT PRIMARY KEY, label TEXT NOT NULL DEFAULT '')""")
+        c.execute("""CREATE TABLE IF NOT EXISTS staff_day_rules (
+            user_id TEXT NOT NULL, weekday INTEGER NOT NULL, start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL, grace_minutes INTEGER NOT NULL DEFAULT 15,
+            shift_type TEXT NOT NULL DEFAULT 'Full day', PRIMARY KEY(user_id,weekday))""")
+        seed = {"weekday_window_start":"09:00","weekday_window_end":"20:00",
+                "saturday_window_start":"09:00","saturday_window_end":"17:00"}
+        for k,v in seed.items():
+            c.execute("INSERT OR IGNORE INTO app_settings(setting,value) VALUES(?,?)",(k,v))
 
 class App(tk.Tk):
     def __init__(self):
@@ -79,6 +87,7 @@ class App(tk.Tk):
         ttk.Button(conn,text="⟳  Fetch from K50",style="Accent.TButton",command=self.fetch).grid(row=1,column=6,padx=(0,8))
         ttk.Button(conn,text="＋  Import CSV",command=self.import_csv).grid(row=1,column=7)
         ttk.Button(conn,text="⚙  Custom Rules",command=self.open_rules).grid(row=1,column=8,padx=(8,0))
+        ttk.Button(conn,text="Staff Schedules",command=self.open_staff_schedules).grid(row=1,column=9,padx=(8,0))
         filters=ttk.Frame(self,padding=(18,0,18,10)); filters.pack(fill="x")
         ttk.Label(filters,text="From").pack(side="left")
         ttk.Entry(filters,textvariable=self.start_date,width=12).pack(side="left",padx=(6,14))
@@ -225,6 +234,64 @@ class App(tk.Tk):
         buttons=ttk.Frame(outer); buttons.pack(fill="x",pady=(12,0))
         ttk.Button(buttons,text="Save all rules",style="Accent.TButton",command=save_all).pack(side="right")
         ttk.Button(buttons,text="Close",command=win.destroy).pack(side="right",padx=8)
+
+    def open_staff_schedules(self):
+        """Set individual schedules for each employee and weekday."""
+        with sqlite3.connect(DB) as c:
+            staff = dict(c.execute("SELECT user_id,name FROM staff"))
+            existing = {(str(uid),int(wd)):(st,en,int(gr),typ) for uid,wd,st,en,gr,typ in
+                c.execute("SELECT user_id,weekday,start_time,end_time,grace_minutes,shift_type FROM staff_day_rules")}
+        staff.update({uid:self._name(uid) for uid in self._staff_names()})
+        if not staff:
+            messagebox.showinfo("No employees","Fetch employee names from the K50 first.")
+            return
+        win=tk.Toplevel(self); win.title("SCAFA Workforce — Staff Schedules"); win.geometry("850x560"); win.transient(self)
+        outer=ttk.Frame(win,padding=16); outer.pack(fill="both",expand=True)
+        ttk.Label(outer,text="INDIVIDUAL STAFF SCHEDULES",font=("Segoe UI",16,"bold")).pack(anchor="w")
+        ttk.Label(outer,text="Configure each employee's shift and grace period separately for every weekday.",style="Sub.TLabel").pack(anchor="w",pady=(3,12))
+        choices=[f"{staff[uid]} ({uid})" for uid in sorted(staff,key=lambda x:staff[x].lower())]
+        selected=tk.StringVar(value=choices[0]); top=ttk.Frame(outer); top.pack(fill="x")
+        ttk.Label(top,text="Employee").pack(side="left")
+        combo=ttk.Combobox(top,textvariable=selected,values=choices,state="readonly",width=40); combo.pack(side="left",padx=8)
+        grid=ttk.Frame(outer); grid.pack(fill="both",expand=True,pady=12)
+        for j,title in enumerate(("Day","Start (HH:MM)","End (HH:MM)","Grace minutes","Shift type")):
+            ttk.Label(grid,text=title,font=("Segoe UI",9,"bold")).grid(row=0,column=j,sticky="w",padx=5,pady=5)
+        days=("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday")
+        cells={}
+        for wd,name in enumerate(days):
+            ttk.Label(grid,text=name).grid(row=wd+1,column=0,sticky="w",padx=5,pady=4)
+            vals=existing.get((selected.get().rsplit(" (",1)[-1].rstrip(")"),wd),("09:45","20:00" if wd<5 else "17:00",15,"Full day"))
+            sv,ev,gv,tv=tk.StringVar(value=vals[0]),tk.StringVar(value=vals[1]),tk.StringVar(value=str(vals[2])),tk.StringVar(value=vals[3])
+            cells[wd]=(sv,ev,gv,tv)
+            ttk.Entry(grid,textvariable=sv,width=14).grid(row=wd+1,column=1,padx=5,pady=3)
+            ttk.Entry(grid,textvariable=ev,width=14).grid(row=wd+1,column=2,padx=5,pady=3)
+            ttk.Entry(grid,textvariable=gv,width=14).grid(row=wd+1,column=3,padx=5,pady=3)
+            ttk.Combobox(grid,textvariable=tv,values=("Full day","Half day","Custom","Off"),state="readonly",width=13).grid(row=wd+1,column=4,padx=5,pady=3)
+        def load_employee(*_):
+            uid=selected.get().rsplit(" (",1)[-1].rstrip(")")
+            for wd in range(7):
+                vals=existing.get((uid,wd),("09:45","20:00" if wd<5 else "17:00",15,"Full day"))
+                for var,val in zip(cells[wd],vals): var.set(str(val))
+        combo.bind("<<ComboboxSelected>>",load_employee)
+        def save():
+            uid=selected.get().rsplit(" (",1)[-1].rstrip(")")
+            try:
+                rows=[]
+                for wd,vs in cells.items():
+                    st,en,gr,typ=[v.get().strip() for v in vs]
+                    datetime.strptime(st,"%H:%M"); datetime.strptime(en,"%H:%M")
+                    if int(gr)<0 or typ not in ("Full day","Half day","Custom","Off"): raise ValueError()
+                    rows.append((uid,wd,st,en,int(gr),typ))
+            except ValueError:
+                messagebox.showerror("Invalid schedule","Use HH:MM times, a non-negative grace period, and a valid shift type."); return
+            with sqlite3.connect(DB) as c:
+                c.executemany("""INSERT INTO staff_day_rules(user_id,weekday,start_time,end_time,grace_minutes,shift_type)
+                    VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,weekday) DO UPDATE SET start_time=excluded.start_time,
+                    end_time=excluded.end_time,grace_minutes=excluded.grace_minutes,shift_type=excluded.shift_type""",rows)
+            for uid0,wd,st,en,gr,typ in rows: existing[(uid0,wd)]=(st,en,gr,typ)
+            messagebox.showinfo("Saved","Individual schedules saved.")
+        ttk.Label(outer,text="Default windows: Mon–Fri 9:00 AM–8:00 PM; Saturday 9:00 AM–5:00 PM. Change these in Custom Rules.",style="Sub.TLabel").pack(anchor="w")
+        ttk.Button(outer,text="Save employee schedule",style="Accent.TButton",command=save).pack(anchor="e")
 
     def _attendance_day_status(self,uid,day,stamps):
         rules,overrides,holidays=self._rules()
