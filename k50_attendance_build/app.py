@@ -453,61 +453,88 @@ class App(tk.Tk):
 
     def _make_pdf(self,path,rows,scope,colors,A4,landscape,getStyles,ParagraphStyle,TA_CENTER,mm,Doc,Paragraph,Spacer,Table,TableStyle,PageBreak,Image,Drawing,String,VerticalBarChart):
         styles=getStyles()
-        styles.add(ParagraphStyle(name="ReportTitle",parent=styles["Title"],textColor=colors.HexColor("#172554"),fontSize=20,leading=24,alignment=0,spaceAfter=5))
-        styles.add(ParagraphStyle(name="SmallNote",parent=styles["BodyText"],fontSize=8,textColor=colors.HexColor("#64748b"),leading=11))
-        start=self.start_date.get(); end=self.end_date.get()
-        by_day={}; by_user={}; by_user_day={}
+        styles.add(ParagraphStyle(name="ReportTitle",parent=styles["Title"],textColor=colors.HexColor("#172554"),fontSize=20,leading=23,alignment=0,spaceAfter=4))
+        styles.add(ParagraphStyle(name="EmployeeTitle",parent=styles["Title"],textColor=colors.HexColor("#172554"),fontSize=18,leading=21,alignment=0,spaceAfter=4))
+        styles.add(ParagraphStyle(name="SmallNote",parent=styles["BodyText"],fontSize=7,textColor=colors.HexColor("#64748b"),leading=9))
+        start_date=self.start_date.get(); end_date=self.end_date.get()
+        by_user_day={}; all_by_day={}
         for uid,stamp,state in rows:
-            day=stamp[:10]; uid=str(uid)
-            by_day[day]=by_day.get(day,0)+1
-            by_user[uid]=by_user.get(uid,0)+1
+            uid=str(uid); day=stamp[:10]
             by_user_day.setdefault((uid,day),[]).append(stamp)
-        days=len(by_day); users=len(by_user)
-        scope_name="All staff" if scope=="All staff" else f"{self._name(scope)} (ID {scope})"
-        story=[Paragraph("K50 Attendance Report",styles["ReportTitle"]),Paragraph(f"Scope: {scope_name}  |  Period: {start} to {end}  |  Generated: {datetime.now().strftime('%d %b %Y, %H:%M')}",styles["BodyText"]),Spacer(1,7*mm)]
-        stats=[["TOTAL PUNCHES",str(len(rows)),"STAFF IDs",str(users),"ACTIVE DAYS",str(days)]]
-        t=Table(stats,colWidths=[28*mm,18*mm,22*mm,18*mm,23*mm,18*mm])
-        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#eaf1ff")),("TEXTCOLOR",(0,0),(-1,-1),colors.HexColor("#172554")),("FONTNAME",(0,0),(-1,-1),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),8),("BOX",(0,0),(-1,-1),.5,colors.HexColor("#cbd5e1")),("INNERGRID",(0,0),(-1,-1),.4,colors.HexColor("#cbd5e1")),("TOPPADDING",(0,0),(-1,-1),9),("BOTTOMPADDING",(0,0),(-1,-1),9)]))
-        story.extend([t,Spacer(1,5*mm),Paragraph("Attendance activity",styles["Heading2"])])
-        chart=Drawing(175*mm,58*mm)
-        bc=VerticalBarChart(); bc.x=24; bc.y=16; bc.height=38*mm; bc.width=160*mm
-        ordered=sorted(by_day.items())
-        # Keep the graph readable for longer periods by showing up to 31 day buckets.
-        ordered=ordered[-31:]
-        bc.data=[tuple(v for _,v in ordered)]
-        bc.categoryAxis.categoryNames=[d[5:] for d,_ in ordered]
-        bc.categoryAxis.labels.fontSize=7; bc.categoryAxis.labels.angle=45; bc.categoryAxis.labels.boxAnchor="ne"
-        bc.valueAxis.valueMin=0; bc.valueAxis.valueMax=max(1,max(v for _,v in ordered)*1.15); bc.valueAxis.valueStep=max(1,int(bc.valueAxis.valueMax/4))
-        bc.bars[0].fillColor=colors.HexColor("#2563eb")
-        chart.add(bc); story.extend([chart,Spacer(1,4*mm)])
-        if scope=="All staff":
-            story.append(Paragraph("Summary by staff ID",styles["Heading2"]))
-            user_data=[["Staff name","Device User ID","Total punches","Active days","First punch","Last punch"]]
-            for uid,count in sorted(by_user.items(),key=lambda x:(-x[1],x[0])):
-                u_days=sorted(d for (u,d) in by_user_day if u==uid)
-                stamps=[r[1] for r in rows if str(r[0])==uid]
-                user_data.append([self._name(uid),uid,str(count),str(len(u_days)),min(stamps)[0:16],max(stamps)[0:16]])
-            tab=Table(user_data,repeatRows=1,colWidths=[42*mm,22*mm,22*mm,20*mm,35*mm,35*mm])
-            tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#172554")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#cbd5e1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f8fafc")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
-            story.extend([tab,Spacer(1,4*mm)])
-        story.append(Paragraph("Detailed daily records",styles["Heading2"]))
-        detail=[["Staff name","Staff ID","Date","Punches","Earliest","Latest","Hours","Attendance status"]]
-        for (uid,day),stamps in sorted(by_user_day.items(),key=lambda x:(x[0][1],x[0][0])):
-            if scope!="All staff" and uid!=scope: continue
-            stamps.sort()
-            att_status,first,last,worked=self._attendance_day_status(uid,day,stamps)
-            detail.append([self._name(uid),uid,day,str(len(stamps)),first,last,f"{worked:.2f}",att_status])
-        tab=Table(detail,repeatRows=1,colWidths=[32*mm,15*mm,22*mm,15*mm,18*mm,18*mm,15*mm,35*mm])
-        tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#172554")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#cbd5e1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f8fafc")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
-        story.extend([tab,Spacer(1,4*mm),Paragraph("Attendance status is calculated from the earliest and latest recorded punch using the saved schedules, grace periods, minimum hours, working weekdays and holiday list. A single punch is flagged as Incomplete punch. Verify that device punches represent actual check-in and check-out events before using this report for payroll.",styles["SmallNote"])])
+            all_by_day[day]=all_by_day.get(day,0)+1
+        staff_ids=sorted({uid for uid,_ in by_user_day},key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
+        is_collective=(scope=="All staff"); pagesize=landscape(A4); story=[]
+
+        def make_stats(stat_items):
+            data=[[]]
+            for label,value in stat_items: data[0].extend([label,str(value)])
+            widths=[]
+            for _ in stat_items: widths.extend([25*mm,17*mm])
+            table=Table(data,colWidths=widths)
+            table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#eaf1ff")),("TEXTCOLOR",(0,0),(-1,-1),colors.HexColor("#172554")),("FONTNAME",(0,0),(-1,-1),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),8),("BOX",(0,0),(-1,-1),.5,colors.HexColor("#cbd5e1")),("INNERGRID",(0,0),(-1,-1),.4,colors.HexColor("#cbd5e1")),("TOPPADDING",(0,0),(-1,-1),7),("BOTTOMPADDING",(0,0),(-1,-1),7),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+            return table
+
+        def make_chart(day_counts):
+            ordered=sorted(day_counts.items())[-31:]
+            chart=Drawing(245*mm,43*mm)
+            bc=VerticalBarChart(); bc.x=22; bc.y=13; bc.height=28*mm; bc.width=225*mm
+            if ordered:
+                bc.data=[tuple(v for _,v in ordered)]
+                bc.categoryAxis.categoryNames=[d[5:] for d,_ in ordered]
+                maxv=max(v for _,v in ordered) or 1
+                bc.valueAxis.valueMin=0; bc.valueAxis.valueMax=maxv*1.15; bc.valueAxis.valueStep=max(1,int(maxv/4))
+                bc.bars[0].fillColor=colors.HexColor("#2563eb")
+            else:
+                bc.data=[(0,)]; bc.categoryAxis.categoryNames=["No records"]
+                bc.valueAxis.valueMin=0; bc.valueAxis.valueMax=1; bc.valueAxis.valueStep=1
+            bc.categoryAxis.labels.fontSize=6; bc.categoryAxis.labels.angle=45; bc.categoryAxis.labels.boxAnchor="ne"; bc.valueAxis.labels.fontSize=7
+            chart.add(bc)
+            return chart
+
+        def make_detail(uid):
+            detail=[["Date","Punches","First punch","Last punch","Hours","Attendance status"]]
+            entries=sorted((day,stamps) for (u,day),stamps in by_user_day.items() if u==uid)
+            for day,stamps in entries:
+                stamps=sorted(stamps)
+                status,first,last,worked=self._attendance_day_status(uid,day,stamps)
+                detail.append([day,str(len(stamps)),first or "—",last or "—",f"{worked:.2f}",status])
+            tab=Table(detail,repeatRows=1,colWidths=[35*mm,23*mm,32*mm,32*mm,25*mm,65*mm])
+            tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#172554")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),7.5),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#cbd5e1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f8fafc")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
+            return tab
+
+        def employee_page(uid):
+            entries=sorted((day,stamps) for (u,day),stamps in by_user_day.items() if u==uid)
+            employee_rows=[r for r in rows if str(r[0])==uid]
+            daily_counts={day:len(stamps) for day,stamps in entries}
+            incomplete=sum(1 for day,stamps in entries if len(stamps)==1)
+            first_stamp=min((r[1] for r in employee_rows),default="—")
+            last_stamp=max((r[1] for r in employee_rows),default="—")
+            story.append(Paragraph(self._name(uid),styles["EmployeeTitle"]))
+            story.append(Paragraph(f"Employee ID: {uid}  |  Period: {start_date} to {end_date}",styles["BodyText"]))
+            story.append(Spacer(1,3*mm))
+            story.append(make_stats([("TOTAL PUNCHES",len(employee_rows)),("ACTIVE DAYS",len(entries)),("INCOMPLETE",incomplete),("FIRST PUNCH",first_stamp[:16] if first_stamp!="—" else "—"),("LAST PUNCH",last_stamp[:16] if last_stamp!="—" else "—")]))
+            story.extend([Spacer(1,2*mm),Paragraph("Attendance activity",styles["Heading2"]),make_chart(daily_counts),Spacer(1,1*mm),Paragraph("Daily records",styles["Heading2"]),make_detail(uid),Spacer(1,2*mm),Paragraph("Status uses saved schedules, grace periods, minimum hours, working weekdays and holidays. A single punch is flagged as Incomplete punch.",styles["SmallNote])])
+
+        if is_collective:
+            story.append(Paragraph("K50 Attendance Report — Collective Overview",styles["ReportTitle"]))
+            story.append(Paragraph(f"All staff  |  Period: {start_date} to {end_date}  |  Generated: {datetime.now().strftime('%d %b %Y, %H:%M')}",styles["BodyText"]))
+            story.append(Spacer(1,4*mm))
+            story.append(make_stats([("TOTAL PUNCHES",len(rows)),("STAFF IDs",len(staff_ids)),("ACTIVE DAYS",len(all_by_day)),("AVG PUNCHES/DAY",f"{len(rows)/max(1,len(all_by_day)):.1f}")]))
+            story.extend([Spacer(1,3*mm),Paragraph("Collective attendance activity",styles["Heading2"]),make_chart(all_by_day)])
+            for uid in staff_ids:
+                story.append(PageBreak())
+                employee_page(uid)
+        else:
+            employee_page(str(scope))
+
         def footer(canvas,doc):
-            canvas.saveState(); canvas.setStrokeColor(colors.HexColor("#cbd5e1")); canvas.line(15*mm,13*mm,landscape(A4)[0]-15*mm if scope=="All staff" else A4[0]-15*mm,13*mm)
-            canvas.setFont("Helvetica",8); canvas.setFillColor(colors.HexColor("#64748b")); canvas.drawString(15*mm,8*mm,"K50 Attendance Manager • Generated from local attendance database")
-            canvas.drawRightString((landscape(A4)[0] if scope=="All staff" else A4[0])-15*mm,8*mm,f"Page {doc.page}")
+            canvas.saveState(); width=pagesize[0]
+            canvas.setStrokeColor(colors.HexColor("#cbd5e1")); canvas.line(15*mm,12*mm,width-15*mm,12*mm)
+            canvas.setFont("Helvetica",7.5); canvas.setFillColor(colors.HexColor("#64748b"))
+            canvas.drawString(15*mm,7*mm,"K50 Attendance Manager • Generated from local attendance database")
+            canvas.drawRightString(width-15*mm,7*mm,f"Page {doc.page}")
             canvas.restoreState()
-        # Use landscape pages for combined reports; portrait pages for individual reports.
-        pagesize=landscape(A4) if scope=="All staff" else A4
-        doc=Doc(path,pagesize=pagesize,rightMargin=15*mm,leftMargin=15*mm,topMargin=14*mm,bottomMargin=19*mm,title="K50 Attendance Report")
+        doc=Doc(path,pagesize=pagesize,rightMargin=15*mm,leftMargin=15*mm,topMargin=12*mm,bottomMargin=16*mm,title="K50 Attendance Report")
         doc.build(story,onFirstPage=footer,onLaterPages=footer)
 
 if __name__=="__main__":
