@@ -4,14 +4,14 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
-BASE = Path.home() / "K50AttendanceManager"
+BASE = Path.home() / "SCAFAWorkforce"
 BASE.mkdir(exist_ok=True)
 DB = BASE / "attendance.db"
-BG = "#f3f6fb"
-NAVY = "#172554"
-BLUE = "#2563eb"
-TEAL = "#0f766e"
-MUTED = "#64748b"
+BG = "#f5f7f4"
+NAVY = "#17251d"
+BLUE = "#2f6b45"
+TEAL = "#477c57"
+MUTED = "#68756b"
 
 def init_db():
     with sqlite3.connect(DB) as c:
@@ -32,7 +32,7 @@ def init_db():
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("K50 Attendance Manager")
+        self.title("SCAFA Workforce")
         self.geometry("1180x780")
         self.minsize(960, 650)
         self.configure(bg=BG)
@@ -69,8 +69,8 @@ class App(tk.Tk):
     def _ui(self):
         header=tk.Frame(self,bg=NAVY,height=94); header.pack(fill="x")
         header.pack_propagate(False)
-        tk.Label(header,text="▦  K50 ATTENDANCE MANAGER",bg=NAVY,fg="white",font=("Segoe UI",21,"bold")).pack(anchor="w",padx=24,pady=(15,2))
-        tk.Label(header,text="Device sync  •  Attendance dashboard  •  PDF reporting",bg=NAVY,fg="#cbd5e1",font=("Segoe UI",10)).pack(anchor="w",padx=26)
+        tk.Label(header,text="SCAFA  |  WORKFORCE",bg="#2f6b45",fg="white",font=("Segoe UI",21,"bold")).pack(anchor="w",padx=24,pady=(15,2))
+        tk.Label(header,text="Staff attendance  •  K50 synchronisation  •  Management reporting",bg="#2f6b45",fg="#cbd5e1",font=("Segoe UI",10)).pack(anchor="w",padx=26)
         conn=ttk.Frame(self,padding=(18,14,18,10)); conn.pack(fill="x")
         ttk.Label(conn,text="DEVICE CONNECTION",font=("Segoe UI",9,"bold")).grid(row=0,column=0,columnspan=8,sticky="w",pady=(0,6))
         for col,label,var,width in [(0,"Device IP",self.ip,17),(2,"Port",self.port,7),(4,"Comm key",self.key,7)]:
@@ -124,8 +124,10 @@ class App(tk.Tk):
         self.tree.tag_configure("odd",background="#f8fafc")
 
     def _rules(self):
-        defaults={"default_start":"10:00","default_end":"18:00","default_grace":"10",
-                  "half_day_after":"12:00","min_hours":"4.0","workdays":"0,1,2,3,4"}
+        defaults={"default_start":"09:45","default_end":"20:00","default_grace":"15",
+                  "half_day_after":"12:00","min_hours":"4.0","workdays":"0,1,2,3,4,5",
+                  "weekday_window_start":"09:00","weekday_window_end":"20:00",
+                  "saturday_window_start":"09:00","saturday_window_end":"17:00"}
         with sqlite3.connect(DB) as c:
             saved=dict(c.execute("SELECT setting,value FROM app_settings"))
             rules={k:saved.get(k,v) for k,v in defaults.items()}
@@ -314,12 +316,12 @@ class App(tk.Tk):
         for uid,stamp,state in rows:
             daily[stamp[:10]]=daily.get(stamp[:10],0)+1
             staff[str(uid)]=staff.get(str(uid),0)+1
-        self._bar_chart(self.daily_canvas,sorted(daily.items())[-14:], "#2563eb", date_labels=True)
+        self._bar_chart(self.daily_canvas,sorted(daily.items())[-14:], "#2f6b45", date_labels=True)
         named_staff={}
         for uid,count in staff.items():
             label=self._name(uid)
             named_staff[label]=named_staff.get(label,0)+count
-        self._bar_chart(self.staff_canvas,sorted(named_staff.items(),key=lambda x:x[1],reverse=True)[:10], "#0f766e", date_labels=False)
+        self._bar_chart(self.staff_canvas,sorted(named_staff.items(),key=lambda x:x[1],reverse=True)[:10], "#477c57", date_labels=False)
 
     def _bar_chart(self,canvas,items,color,date_labels=False):
         canvas.delete("all")
@@ -435,7 +437,7 @@ class App(tk.Tk):
         if not rows:
             messagebox.showwarning("No data","No records found for the selected staff ID."); return
         suffix="All_Staff" if scope=="All staff" else "Staff_"+scope
-        path=filedialog.asksaveasfilename(title="Save PDF attendance report",defaultextension=".pdf",filetypes=[("PDF report","*.pdf")],initialfile=f"K50_Attendance_{suffix}_{date.today().isoformat()}.pdf")
+        path=filedialog.asksaveasfilename(title="Save PDF attendance report",defaultextension=".pdf",filetypes=[("PDF report","*.pdf")],initialfile=f"SCAFA_Workforce_Attendance_{suffix}_{date.today().isoformat()}.pdf")
         if not path: return
         try:
             from reportlab.lib import colors
