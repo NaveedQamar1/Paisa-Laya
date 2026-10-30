@@ -1,4 +1,5 @@
 import tempfile
+import sqlite3
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,18 +38,20 @@ class AttendanceStatusTests(unittest.TestCase):
         self.assertEqual(status, "Incomplete punch")
 
     def test_holiday_takes_precedence_over_missing_punches(self):
-        with __import__("sqlite3").connect(app.DB) as c:
-            c.execute("INSERT INTO holidays(holiday_date,label) VALUES(?,?)", ("2026-10-26", "Test holiday"))
-            c.close()
+        c = sqlite3.connect(app.DB)
+        c.execute("INSERT INTO holidays(holiday_date,label) VALUES(?,?)", ("2026-10-26", "Test holiday"))
+        c.commit()
+        c.close()
         self.assertEqual(self.status("1", "2026-10-26", []), "Holiday")
 
     def test_explicit_staff_day_off_overrides_global_workweek(self):
-        with __import__("sqlite3").connect(app.DB) as c:
-            c.execute(
-                "INSERT INTO staff_day_rules(user_id,weekday,start_time,end_time,grace_minutes,shift_type) VALUES(?,?,?,?,?,?)",
-                ("1", 0, "09:45", "20:00", 15, "Off"),
-            )
-            c.close()
+        c = sqlite3.connect(app.DB)
+        c.execute(
+            "INSERT INTO staff_day_rules(user_id,weekday,start_time,end_time,grace_minutes,shift_type) VALUES(?,?,?,?,?,?)",
+            ("1", 0, "09:45", "20:00", 15, "Off"),
+        )
+        c.commit()
+        c.close()
         self.assertEqual(self.status("1", "2026-10-26", []), "Day off")
 
 
