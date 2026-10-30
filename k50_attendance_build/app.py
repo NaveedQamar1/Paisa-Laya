@@ -301,8 +301,15 @@ class App(tk.Tk):
         d=datetime.strptime(day,"%Y-%m-%d").date()
         if d.weekday() not in workdays: return "Day off", "", "", 0.0
         r=overrides.get(str(uid),{})
-        start=r.get("start",rules["default_start"]); end=r.get("end",rules["default_end"])
-        grace=int(r.get("grace",rules["default_grace"])); half=r.get("half",rules["half_day_after"])
+        with sqlite3.connect(DB) as c:
+            day_rule=c.execute("SELECT start_time,end_time,grace_minutes,shift_type FROM staff_day_rules WHERE user_id=? AND weekday=?",(str(uid),d.weekday())).fetchone()
+        if day_rule:
+            start,end,grace,shift_type=day_rule[0],day_rule[1],int(day_rule[2]),day_rule[3]
+            if shift_type=="Off": return "Day off", "", "", 0.0
+        else:
+            start=r.get("start",rules["default_start"]); end=r.get("end",rules["default_end"])
+            grace=int(r.get("grace",rules["default_grace"])); shift_type="Full day"
+        half=r.get("half",rules["half_day_after"])
         min_hours=float(r.get("min_hours",rules["min_hours"]))
         stamps=sorted(stamps)
         if not stamps: return "Absent", "", "", 0.0
@@ -312,10 +319,18 @@ class App(tk.Tk):
         late=(first-scheduled).total_seconds()/60
         worked=max(0,(last-first).total_seconds()/3600)
         if len(stamps)<2: return "Incomplete punch",first.strftime("%H:%M"),last.strftime("%H:%M"),worked
-        if late>grace: status="Late"
-        elif first.strftime("%H:%M")>=half or worked<min_hours: status="Half-day"
-        else: status="Present"
-        if end and last.strftime("%H:%M") < end: status += " (early departure)"
+        if shift_type=="Half day":
+            status="Half-day"
+        elif shift_type=="Custom":
+            status="Present" if worked>=min_hours else "Half-day"
+        elif first.strftime("%H:%M")>=half or worked<min_hours:
+            status="Half-day"
+        else:
+            status="Present"
+        if late>grace:
+            status = "Late" if status=="Present" else status+" — Late"
+        if end and last.strftime("%H:%M") < end:
+            status += " (early departure)"
         return status,first.strftime("%H:%M"),last.strftime("%H:%M"),worked
 
     def _staff_names(self):
