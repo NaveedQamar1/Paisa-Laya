@@ -21,6 +21,8 @@ jobs:
           python-version: '3.12'
       - name: Install Python dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r k50_attendance_build/requirements.txt
+      - name: Run attendance logic tests
+        run: python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
       - name: Build standalone Windows executable
         run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name SCAFA_Workforce k50_attendance_build/app.py
       - name: Install Inno Setup
