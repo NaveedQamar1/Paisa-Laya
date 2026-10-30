@@ -115,8 +115,10 @@ class App(tk.Tk):
         self.tree.tag_configure("odd",background="#f8fafc")
 
     def _staff_names(self):
-        with sqlite3.connect(DB) as c:
-            return {str(uid): str(name or "").strip() for uid,name in c.execute("SELECT user_id,name FROM staff")}
+        if not hasattr(self,"_names_cache") or self._names_cache is None:
+            with sqlite3.connect(DB) as c:
+                self._names_cache={str(uid): str(name or "").strip() for uid,name in c.execute("SELECT user_id,name FROM staff")}
+        return self._names_cache
 
     def _name(self, uid):
         name=self._staff_names().get(str(uid), "")
@@ -133,6 +135,7 @@ class App(tk.Tk):
                 c.execute("""INSERT INTO staff(user_id,name) VALUES(?,?)
                              ON CONFLICT(user_id) DO UPDATE SET name=excluded.name""",(uid,name))
                 saved+=1
+        self._names_cache=None
         return saved
 
     def _date_filter(self):
