@@ -491,14 +491,15 @@ class App(tk.Tk):
             tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#172554")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#cbd5e1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f8fafc")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
             story.extend([tab,Spacer(1,4*mm)])
         story.append(Paragraph("Detailed daily records",styles["Heading2"]))
-        detail=[["Staff name","Staff ID","Date","Punch count","First punch","Last punch"]]
+        detail=[["Staff name","Staff ID","Date","Punches","Earliest","Latest","Hours","Attendance status"]]
         for (uid,day),stamps in sorted(by_user_day.items(),key=lambda x:(x[0][1],x[0][0])):
             if scope!="All staff" and uid!=scope: continue
             stamps.sort()
-            detail.append([self._name(uid),uid,day,str(len(stamps)),stamps[0][11:16],stamps[-1][11:16]])
-        tab=Table(detail,repeatRows=1,colWidths=[40*mm,20*mm,25*mm,22*mm,22*mm,22*mm])
+            att_status,first,last,worked=self._attendance_day_status(uid,day,stamps)
+            detail.append([self._name(uid),uid,day,str(len(stamps)),first,last,f"{worked:.2f}",att_status])
+        tab=Table(detail,repeatRows=1,colWidths=[32*mm,15*mm,22*mm,15*mm,18*mm,18*mm,15*mm,35*mm])
         tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#172554")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#cbd5e1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f8fafc")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
-        story.extend([tab,Spacer(1,4*mm),Paragraph("Methodology: This report summarizes recorded device punches only. First/last punch is not necessarily official shift start/end. Late arrivals, absences, overtime, and paid hours require confirmed employee names, work schedules, holidays, and punch rules.",styles["SmallNote"])])
+        story.extend([tab,Spacer(1,4*mm),Paragraph("Attendance status is calculated from the earliest and latest recorded punch using the saved schedules, grace periods, minimum hours, working weekdays and holiday list. A single punch is flagged as Incomplete punch. Verify that device punches represent actual check-in and check-out events before using this report for payroll.",styles["SmallNote"])])
         def footer(canvas,doc):
             canvas.saveState(); canvas.setStrokeColor(colors.HexColor("#cbd5e1")); canvas.line(15*mm,13*mm,landscape(A4)[0]-15*mm if scope=="All staff" else A4[0]-15*mm,13*mm)
             canvas.setFont("Helvetica",8); canvas.setFillColor(colors.HexColor("#64748b")); canvas.drawString(15*mm,8*mm,"K50 Attendance Manager • Generated from local attendance database")
