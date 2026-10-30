@@ -1,4 +1,4 @@
-name: Temporary K50 Windows EXE build
+name: K50 Attendance Manager Windows build and installer
 on:
   push:
     branches:
@@ -19,14 +19,30 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r k50_attendance_build/requirements.txt
-      - name: Build executable
+      - name: Build standalone Windows executable
         run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name K50_Attendance_Manager k50_attendance_build/app.py
-      - name: Upload Windows executable
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) { throw "Inno Setup compiler not found at $iscc" }
+          & $iscc "k50_attendance_build\installer\K50_Attendance_Manager.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload installable setup EXE
         uses: actions/upload-artifact@v4
         with:
-          name: K50_Attendance_Manager_Windows_EXE
+          name: K50_Attendance_Manager_Installer
+          path: installer-output/K50_Attendance_Manager_Setup.exe
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload standalone portable EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: K50_Attendance_Manager_Portable_EXE
           path: dist/K50_Attendance_Manager.exe
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
