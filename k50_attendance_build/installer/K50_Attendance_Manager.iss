@@ -1,17 +1,17 @@
-#define MyAppName "K50 Attendance Manager"
+#define MyAppName "SCAFA Workforce"
 #define MyAppVersion "1.2.0"
-#define MyAppPublisher "K50 Attendance Manager"
-#define MyAppExeName "K50_Attendance_Manager.exe"
+#define MyAppPublisher "SCAFA Workforce"
+#define MyAppExeName "SCAFA_Workforce.exe"
 
 [Setup]
 AppId={{B4D76C88-5A2E-4A71-9F42-1C6C72A50D10}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\K50 Attendance Manager
+DefaultDirName={autopf}\SCAFA Workforce
 DefaultGroupName={#MyAppName}
 OutputDir=..\..\installer-output
-OutputBaseFilename=K50_Attendance_Manager_Setup
+OutputBaseFilename=SCAFA_Workforce_Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -29,14 +29,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "..\..\dist\K50_Attendance_Manager.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\dist\SCAFA_Workforce.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\K50 Attendance Manager"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\K50 Attendance Manager"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\SCAFA Workforce"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\SCAFA Workforce"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch K50 Attendance Manager"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch SCAFA Workforce"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
 ; Do not delete the user's database in their home folder during uninstall.
