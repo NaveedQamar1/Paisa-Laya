@@ -513,7 +513,7 @@ class App(tk.Tk):
             story.append(Paragraph(f"Employee ID: {uid}  |  Period: {start_date} to {end_date}",styles["BodyText"]))
             story.append(Spacer(1,3*mm))
             story.append(make_stats([("TOTAL PUNCHES",len(employee_rows)),("ACTIVE DAYS",len(entries)),("INCOMPLETE",incomplete),("FIRST PUNCH",first_stamp[:16] if first_stamp!="—" else "—"),("LAST PUNCH",last_stamp[:16] if last_stamp!="—" else "—")]))
-            story.extend([Spacer(1,2*mm),Paragraph("Attendance activity",styles["Heading2"]),make_chart(daily_counts),Spacer(1,1*mm),Paragraph("Daily records",styles["Heading2"]),make_detail(uid),Spacer(1,2*mm),Paragraph("Status uses saved schedules, grace periods, minimum hours, working weekdays and holidays. A single punch is flagged as Incomplete punch.",styles["SmallNote])])
+            story.extend([Spacer(1,2*mm),Paragraph("Attendance activity",styles["Heading2"]),make_chart(daily_counts),Spacer(1,1*mm),Paragraph("Daily records",styles["Heading2"]),make_detail(uid),Spacer(1,2*mm),Paragraph("Status uses saved schedules, grace periods, minimum hours, working weekdays and holidays. A single punch is flagged as Incomplete punch.",styles["SmallNote"])])
 
         if is_collective:
             story.append(Paragraph("K50 Attendance Report — Collective Overview",styles["ReportTitle"]))
