@@ -18,6 +18,8 @@ def init_db():
         c.execute("""CREATE TABLE IF NOT EXISTS punches (
             user_id TEXT NOT NULL, punch_time TEXT NOT NULL, status TEXT DEFAULT '',
             UNIQUE(user_id,punch_time,status))""")
+        c.execute("""CREATE TABLE IF NOT EXISTS staff (
+            user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')""")
 
 class App(tk.Tk):
     def __init__(self):
@@ -105,12 +107,33 @@ class App(tk.Tk):
         ttk.Label(self.dashboard,text="Charts and statistics reflect imported/fetched punch records in the selected date range. Staff are identified by device ID.",style="Sub.TLabel").pack(anchor="w",pady=(10,0))
 
     def _records_ui(self):
-        cols=("uid","time","status")
+        cols=("uid","name","time","status")
         self.tree=ttk.Treeview(self.records,columns=cols,show="headings")
-        for col,title,width in [("uid","Device User ID",180),("time","Attendance date & time",280),("status","Punch status",180)]:
+        for col,title,width in [("uid","Device User ID",140),("name","Staff name",240),("time","Attendance date & time",250),("status","Punch status",140)]:
             self.tree.heading(col,text=title); self.tree.column(col,width=width,anchor="w")
         self.tree.pack(fill="both",expand=True)
         self.tree.tag_configure("odd",background="#f8fafc")
+
+    def _staff_names(self):
+        with sqlite3.connect(DB) as c:
+            return {str(uid): str(name or "").strip() for uid,name in c.execute("SELECT user_id,name FROM staff")}
+
+    def _name(self, uid):
+        name=self._staff_names().get(str(uid), "")
+        return name if name else f"User {uid}"
+
+    def _store_device_users(self, users):
+        saved=0
+        with sqlite3.connect(DB) as c:
+            for user in users:
+                uid=str(getattr(user,"user_id",None) or getattr(user,"uid","")).strip()
+                name=str(getattr(user,"name","") or "").strip()
+                if not uid or not name:
+                    continue
+                c.execute("""INSERT INTO staff(user_id,name) VALUES(?,?)
+                             ON CONFLICT(user_id) DO UPDATE SET name=excluded.name""",(uid,name))
+                saved+=1
+        return saved
 
     def _date_filter(self):
         try:
@@ -135,9 +158,9 @@ class App(tk.Tk):
         if rows is None: return
         for i in self.tree.get_children(): self.tree.delete(i)
         for idx,row in enumerate(reversed(rows[-5000:])):
-            self.tree.insert("","end",values=row,tags=("odd",) if idx%2 else ())
+            self.tree.insert("","end",values=(row[0],self._name(row[0]),row[1],row[2]),tags=("odd",) if idx%2 else ())
         users=sorted(set(str(r[0]) for r in rows),key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
-        choices=["All staff"]+users
+        choices=["All staff"]+[f"{self._name(uid)} ({uid})" for uid in users]
         self.user_combo["values"]=choices
         if self.report_user.get() not in choices: self.report_user.set("All staff")
         days=len(set(r[1][:10] for r in rows))
@@ -154,7 +177,11 @@ class App(tk.Tk):
             daily[stamp[:10]]=daily.get(stamp[:10],0)+1
             staff[str(uid)]=staff.get(str(uid),0)+1
         self._bar_chart(self.daily_canvas,sorted(daily.items())[-14:], "#2563eb", date_labels=True)
-        self._bar_chart(self.staff_canvas,sorted(staff.items(),key=lambda x:x[1],reverse=True)[:10], "#0f766e", date_labels=False)
+        named_staff={}
+        for uid,count in staff.items():
+            label=self._name(uid)
+            named_staff[label]=named_staff.get(label,0)+count
+        self._bar_chart(self.staff_canvas,sorted(named_staff.items(),key=lambda x:x[1],reverse=True)[:10], "#0f766e", date_labels=False)
 
     def _bar_chart(self,canvas,items,color,date_labels=False):
         canvas.delete("all")
@@ -193,6 +220,8 @@ class App(tk.Tk):
             from zk import ZK
             conn=ZK(ip,port=port,timeout=12,password=key,force_udp=False, ommit_ping=False).connect()
             conn.disable_device()
+            device_users=conn.get_users()
+            saved_users=self._store_device_users(device_users)
             rows=conn.get_attendance()
             inserted=0
             with sqlite3.connect(DB) as c:
@@ -200,7 +229,7 @@ class App(tk.Tk):
                     stamp=row.timestamp.strftime("%Y-%m-%d %H:%M:%S")
                     cur=c.execute("INSERT OR IGNORE INTO punches(user_id,punch_time,status) VALUES(?,?,?)",(str(row.user_id),stamp,str(getattr(row,"status",""))))
                     inserted+=cur.rowcount
-            self.after(0,lambda:self._fetch_done(len(rows),inserted))
+            self.after(0,lambda:self._fetch_done(len(rows),inserted,saved_users))
         except Exception as e:
             msg=str(e); self.after(0,lambda m=msg:self._fetch_error(m))
         finally:
@@ -210,10 +239,10 @@ class App(tk.Tk):
                 try: conn.disconnect()
                 except Exception: pass
 
-    def _fetch_done(self,total,inserted):
+    def _fetch_done(self,total,inserted,saved_users=0):
         self.refresh()
-        self.status.set(f"Sync complete • {total} device records read • {inserted} new records saved")
-        messagebox.showinfo("Sync complete",f"Read {total} device records.\nSaved {inserted} new records.")
+        self.status.set(f"Sync complete • {saved_users} staff names synced • {total} punches read • {inserted} new")
+        messagebox.showinfo("Sync complete",f"Staff names fetched: {saved_users}\nAttendance records read: {total}\nNew attendance records saved: {inserted}")
 
     def _fetch_error(self,msg):
         self.status.set("Device connection failed.")
@@ -251,7 +280,8 @@ class App(tk.Tk):
         path=filedialog.asksaveasfilename(title="Save punch report",defaultextension=".csv",filetypes=[("CSV report","*.csv")],initialfile=f"K50_Attendance_{date.today().isoformat()}.csv")
         if not path: return
         with open(path,"w",newline="",encoding="utf-8-sig") as f:
-            w=csv.writer(f); w.writerow(["Device User ID","Attendance date & time","Punch status"]); w.writerows(rows)
+            w=csv.writer(f); w.writerow(["Device User ID","Staff Name","Attendance date & time","Punch status"])
+            w.writerows((uid,self._name(uid),stamp,state) for uid,stamp,state in rows)
         messagebox.showinfo("CSV exported",f"Exported {len(rows)} records.")
 
     def export_pdf(self):
@@ -259,8 +289,11 @@ class App(tk.Tk):
         if rows is None: return
         if not rows:
             messagebox.showwarning("No data","There are no attendance records in the selected date range."); return
-        scope=self.report_user.get()
-        if scope!="All staff": rows=[r for r in rows if str(r[0])==scope]
+        scope_label=self.report_user.get()
+        scope=scope_label
+        if scope_label!="All staff":
+            scope=scope_label.rsplit(" (",1)[-1].rstrip(")")
+            rows=[r for r in rows if str(r[0])==scope]
         if not rows:
             messagebox.showwarning("No data","No records found for the selected staff ID."); return
         suffix="All_Staff" if scope=="All staff" else "Staff_"+scope
@@ -292,7 +325,8 @@ class App(tk.Tk):
             by_user[uid]=by_user.get(uid,0)+1
             by_user_day.setdefault((uid,day),[]).append(stamp)
         days=len(by_day); users=len(by_user)
-        story=[Paragraph("K50 Attendance Report",styles["ReportTitle"]),Paragraph(f"Scope: {scope}  |  Period: {start} to {end}  |  Generated: {datetime.now().strftime('%d %b %Y, %H:%M')}",styles["BodyText"]),Spacer(1,7*mm)]
+        scope_name="All staff" if scope=="All staff" else f"{self._name(scope)} (ID {scope})"
+        story=[Paragraph("K50 Attendance Report",styles["ReportTitle"]),Paragraph(f"Scope: {scope_name}  |  Period: {start} to {end}  |  Generated: {datetime.now().strftime('%d %b %Y, %H:%M')}",styles["BodyText"]),Spacer(1,7*mm)]
         stats=[["TOTAL PUNCHES",str(len(rows)),"STAFF IDs",str(users),"ACTIVE DAYS",str(days)]]
         t=Table(stats,colWidths=[28*mm,18*mm,22*mm,18*mm,23*mm,18*mm])
         t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#eaf1ff")),("TEXTCOLOR",(0,0),(-1,-1),colors.HexColor("#172554")),("FONTNAME",(0,0),(-1,-1),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),8),("BOX",(0,0),(-1,-1),.5,colors.HexColor("#cbd5e1")),("INNERGRID",(0,0),(-1,-1),.4,colors.HexColor("#cbd5e1")),("TOPPADDING",(0,0),(-1,-1),9),("BOTTOMPADDING",(0,0),(-1,-1),9)]))
@@ -310,21 +344,21 @@ class App(tk.Tk):
         chart.add(bc); story.extend([chart,Spacer(1,4*mm)])
         if scope=="All staff":
             story.append(Paragraph("Summary by staff ID",styles["Heading2"]))
-            user_data=[["Device User ID","Total punches","Active days","First punch","Last punch"]]
+            user_data=[["Staff name","Device User ID","Total punches","Active days","First punch","Last punch"]]
             for uid,count in sorted(by_user.items(),key=lambda x:(-x[1],x[0])):
                 u_days=sorted(d for (u,d) in by_user_day if u==uid)
                 stamps=[r[1] for r in rows if str(r[0])==uid]
-                user_data.append([uid,str(count),str(len(u_days)),min(stamps)[0:16],max(stamps)[0:16]])
-            tab=Table(user_data,repeatRows=1,colWidths=[30*mm,25*mm,25*mm,42*mm,42*mm])
+                user_data.append([self._name(uid),uid,str(count),str(len(u_days)),min(stamps)[0:16],max(stamps)[0:16]])
+            tab=Table(user_data,repeatRows=1,colWidths=[42*mm,22*mm,22*mm,20*mm,35*mm,35*mm])
             tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#172554")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#cbd5e1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f8fafc")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
             story.extend([tab,Spacer(1,4*mm)])
         story.append(Paragraph("Detailed daily records",styles["Heading2"]))
-        detail=[["Staff ID","Date","Punch count","First punch","Last punch"]]
+        detail=[["Staff name","Staff ID","Date","Punch count","First punch","Last punch"]]
         for (uid,day),stamps in sorted(by_user_day.items(),key=lambda x:(x[0][1],x[0][0])):
             if scope!="All staff" and uid!=scope: continue
             stamps.sort()
-            detail.append([uid,day,str(len(stamps)),stamps[0][11:16],stamps[-1][11:16]])
-        tab=Table(detail,repeatRows=1,colWidths=[25*mm,30*mm,25*mm,25*mm,25*mm])
+            detail.append([self._name(uid),uid,day,str(len(stamps)),stamps[0][11:16],stamps[-1][11:16]])
+        tab=Table(detail,repeatRows=1,colWidths=[40*mm,20*mm,25*mm,22*mm,22*mm,22*mm])
         tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#172554")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#cbd5e1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f8fafc")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
         story.extend([tab,Spacer(1,4*mm),Paragraph("Methodology: This report summarizes recorded device punches only. First/last punch is not necessarily official shift start/end. Late arrivals, absences, overtime, and paid hours require confirmed employee names, work schedules, holidays, and punch rules.",styles["SmallNote"])])
         def footer(canvas,doc):
