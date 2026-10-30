@@ -1,4 +1,4 @@
-import csv, sqlite3, threading, shutil
+import csv, sqlite3, threading
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import tkinter as tk
@@ -523,10 +523,10 @@ class App(tk.Tk):
         try:
             with sqlite3.connect(DB) as source, sqlite3.connect(path) as target:
                 source.backup(target)
-            messagebox.showinfo("Backup complete",f"Database backup saved to:\\n{path}")
+            messagebox.showinfo("Backup complete",f"Database backup saved to:\n{path}")
             self.status.set(f"Database backup saved • {path}")
         except Exception as e:
-            messagebox.showerror("Backup failed",f"Could not back up the database:\\n{e}")
+            messagebox.showerror("Backup failed",f"Could not back up the database:\n{e}")
 
     def restore_database(self):
         """Validate a backup, preserve the current database, then restore safely."""
@@ -559,10 +559,10 @@ class App(tk.Tk):
             self._names_cache=None
             init_db()
             self.refresh()
-            messagebox.showinfo("Restore complete",f"Database restored successfully.\\nSafety backup: {safety}")
+            messagebox.showinfo("Restore complete",f"Database restored successfully.\nSafety backup: {safety}")
             self.status.set("Database restored • current database safety backup retained")
         except Exception as e:
-            messagebox.showerror("Restore failed",f"Could not restore this database:\\n{e}")
+            messagebox.showerror("Restore failed",f"Could not restore this database:\n{e}")
 
     def export_csv(self):
         rows=self._rows()
