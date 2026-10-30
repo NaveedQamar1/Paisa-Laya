@@ -153,7 +153,7 @@ class App(tk.Tk):
         ttk.Label(outer,text="Set defaults, then override schedules for individual staff. Rules apply to attendance reports.",style="Sub.TLabel").pack(anchor="w",pady=(2,12))
         defaults=ttk.LabelFrame(outer,text="Default schedule and thresholds",padding=10); defaults.pack(fill="x")
         vars={}
-        fields=[("default_start","Shift start (HH:MM)"),("default_end","Shift end (HH:MM)"),("default_grace","Late grace (minutes)"),("half_day_after","Half-day cutoff (HH:MM)"),("min_hours","Minimum hours for full day"),("workdays","Working weekdays (0=Mon, 6=Sun; comma-separated)")]
+        fields=[("default_start","Default shift start (HH:MM)"),("default_end","Default shift end (HH:MM)"),("default_grace","Default grace (minutes)"),("half_day_after","Half-day cutoff (HH:MM)"),("min_hours","Minimum hours for full day"),("workdays","Working weekdays (0=Mon, 6=Sun)"),("weekday_window_start","Weekday punch window start"),("weekday_window_end","Weekday punch window end"),("saturday_window_start","Saturday punch window start"),("saturday_window_end","Saturday punch window end")]
         for i,(key,label) in enumerate(fields):
             row=i//3; col=(i%3)*2
             ttk.Label(defaults,text=label).grid(row=row,column=col,sticky="w",padx=(0,5),pady=5)
