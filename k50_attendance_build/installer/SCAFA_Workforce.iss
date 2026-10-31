@@ -29,7 +29,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "..\..\dist\SCAFA_Workforce.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\dist\SCAFA_Workforce\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\SCAFA Workforce"; Filename: "{app}\{#MyAppExeName}"
