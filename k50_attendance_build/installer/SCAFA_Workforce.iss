@@ -1,5 +1,5 @@
 #define MyAppName "SCAFA Workforce"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.2.1"
 #define MyAppPublisher "SCAFA Workforce"
 #define MyAppExeName "SCAFA_Workforce.exe"
 
@@ -8,7 +8,7 @@ AppId={{B4D76C88-5A2E-4A71-9F42-1C6C72A50D10}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\SCAFA Workforce
+DefaultDirName={localappdata}\Programs\SCAFA Workforce
 DefaultGroupName={#MyAppName}
 OutputDir=..\..\installer-output
 OutputBaseFilename=SCAFA_Workforce_Setup
@@ -16,7 +16,7 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 UninstallDisplayIcon={app}\{#MyAppExeName}
 SetupLogging=yes
 CloseApplications=yes
