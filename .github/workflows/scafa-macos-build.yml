@@ -1,0 +1,55 @@
+name: SCAFA Workforce macOS portable build
+on:
+  push:
+    branches:
+      - temporary-k50-attendance-build
+    paths:
+      - 'k50_attendance_build/**'
+      - '.github/workflows/scafa-macos-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build macOS app (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: apple-silicon
+          - runner: macos-15-intel
+            arch: intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r k50_attendance_build/requirements.txt
+
+      - name: Run attendance logic tests
+        run: python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
+
+      - name: Build macOS application bundle
+        run: |
+          python -m PyInstaller --noconfirm --clean --windowed --name SCAFA_Workforce k50_attendance_build/app.py
+          test -d dist/SCAFA_Workforce.app
+          ditto -c -k --sequesterRsrc --keepParent dist/SCAFA_Workforce.app dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
+
+      - name: Upload portable macOS app
+        uses: actions/upload-artifact@v4
+        with:
+          name: SCAFA_Workforce_macOS_${{ matrix.arch }}
+          path: dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
+          if-no-files-found: error
+          retention-days: 14
