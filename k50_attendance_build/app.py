@@ -141,10 +141,16 @@ class App(tk.Tk):
     def _records_ui(self):
         cols=("uid","name","time","status")
         self.tree=ttk.Treeview(self.records,columns=cols,show="headings")
-        for col,title,width in [("uid","Device User ID",130),("name","Staff name",280),("time","Attendance date & time",250),("status","Punch status",180)]:
-            self.tree.heading(col,text=title); self.tree.column(col,width=width,anchor="w")
-        self.tree.pack(fill="both",expand=True)
-        self.tree.tag_configure("odd",background="#f8fafc")
+        # Keep the data columns compact and predictable instead of spreading
+        # every field across the full monitor width.
+        specs=[("uid","Device User ID",112),("name","Staff name",230),
+               ("time","Attendance date & time",205),("status","Punch status",112)]
+        for col,title,width in specs:
+            self.tree.heading(col,text=title,anchor="w")
+            self.tree.column(col,width=width,minwidth=90,stretch=False,anchor="w")
+        self.tree.pack(fill="both",expand=True,padx=2,pady=2)
+        self.tree.tag_configure("odd",background="#f4f7f5")
+        self.tree.tag_configure("even",background="#ffffff")
 
     def _rules(self):
         defaults={"default_start":"09:45","default_end":"20:00","default_grace":"15",
@@ -431,22 +437,46 @@ class App(tk.Tk):
         if not items:
             canvas.create_text(w/2,h/2,text="No records in this date range",fill=MUTED,font=("Segoe UI",11))
             return
+        maxv=max(v for _,v in items) or 1
+        if not date_labels:
+            # Horizontal bars give each staff member a dedicated label row.
+            # This prevents long employee names from colliding on the x-axis.
+            left,right,top,bottom=118,34,18,22
+            cw=max(80,w-left-right); ch=max(80,h-top-bottom)
+            row_h=ch/max(1,len(items)); bar_h=min(20,row_h*.56)
+            for n in range(4):
+                x=left+cw*n/3
+                canvas.create_line(x,top,x,top+ch,fill="#e2e8f0")
+                canvas.create_text(x,top-7,text=str(round(maxv*n/3)),anchor="s",
+                                   fill=MUTED,font=("Segoe UI",8))
+            for i,(label,val) in enumerate(items):
+                cy=top+row_h*(i+.5)
+                shown=label if len(label)<=17 else label[:16]+"…"
+                canvas.create_text(left-10,cy,text=shown,anchor="e",
+                                   fill=MUTED,font=("Segoe UI",8))
+                bw=cw*val/maxv
+                canvas.create_rectangle(left,cy-bar_h/2,left+bw,cy+bar_h/2,
+                                        fill=color,outline="")
+                canvas.create_text(min(left+bw+7,w-right),cy,text=str(val),
+                                   anchor="w",fill=NAVY,font=("Segoe UI",8,"bold"))
+            return
         left,right,top,bottom=42,16,18,48
         cw=w-left-right; ch=h-top-bottom
-        maxv=max(v for _,v in items) or 1
         for n in range(4):
             y=top+ch-(ch*n/3)
             canvas.create_line(left,y,w-right,y,fill="#e2e8f0")
-            canvas.create_text(left-8,y,text=str(round(maxv*n/3)),anchor="e",fill=MUTED,font=("Segoe UI",8))
-        gap=cw/len(items); bw=max(8,gap*.58)
+            canvas.create_text(left-8,y,text=str(round(maxv*n/3)),anchor="e",
+                               fill=MUTED,font=("Segoe UI",8))
+        gap=cw/len(items); bw=max(8,min(34,gap*.58))
         for i,(label,val) in enumerate(items):
             x=left+gap*i+(gap-bw)/2
             bh=ch*val/maxv
             canvas.create_rectangle(x,top+ch-bh,x+bw,top+ch,fill=color,outline="")
-            short=label[5:] if date_labels and len(label)>5 else label
-            if len(short)>8: short=short[:8]
-            canvas.create_text(x+bw/2,top+ch+9,text=short,anchor="n",fill=MUTED,font=("Segoe UI",8))
-            canvas.create_text(x+bw/2,top+ch-bh-9,text=str(val),fill=NAVY,font=("Segoe UI",8,"bold"))
+            short=label[5:] if len(label)>5 else label
+            canvas.create_text(x+bw/2,top+ch+9,text=short,anchor="n",
+                               fill=MUTED,font=("Segoe UI",8))
+            canvas.create_text(x+bw/2,top+ch-bh-9,text=str(val),
+                               fill=NAVY,font=("Segoe UI",8,"bold"))
 
     def fetch(self):
         ip=self.ip.get().strip()
