@@ -303,7 +303,8 @@ class App(tk.Tk):
 
     def open_staff_schedules(self):
         """Set individual schedules for each employee and weekday."""
-        with sqlite3.connect(DB) as c:            staff = dict(c.execute("SELECT user_id,name FROM staff"))
+        with sqlite3.connect(DB) as c:
+            staff = dict(c.execute("SELECT user_id,name FROM staff"))
             existing = {(str(uid),int(wd)):(st,en,int(gr),typ) for uid,wd,st,en,gr,typ in
                 c.execute("SELECT user_id,weekday,start_time,end_time,grace_minutes,shift_type FROM staff_day_rules")}
         staff.update({uid:self._name(uid) for uid in self._staff_names()})
