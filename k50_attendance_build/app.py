@@ -711,12 +711,18 @@ class App(tk.Tk):
             last=datetime.strptime(self.end_date.get(),"%Y-%m-%d").date()
             if last<first: raise ValueError("End date must not precede start date.")
             users=known if scope=="All staff" else [str(scope)]
+            status_values=[]
+            punch_totals={uid:0 for uid in users}
+            active_days={uid:0 for uid in users}
             for uid in users:
                 cursor=first
                 while cursor<=last:
                     day=cursor.isoformat(); stamps=sorted(by_user_day.get((uid,day),[]))
                     status,first_p,last_p,hours=self._attendance_day_status(uid,day,stamps)
                     summary.append([uid,self._name(uid),day,len(stamps),first_p or "",last_p or "",round(hours,2),status])
+                    status_values.append(status)
+                    punch_totals[uid]+=len(stamps)
+                    if stamps: active_days[uid]+=1
                     cursor+=timedelta(days=1)
             overview.merge_cells("A1:F1")
             overview["A1"]="SCAFA WORKFORCE | ATTENDANCE OVERVIEW"
@@ -730,17 +736,26 @@ class App(tk.Tk):
             overview.append([])
             overview.append(["KEY METRICS","Value",None,None,"ATTENDANCE STATUS","Days"])
             endrow=summary.max_row
-            for label,formula in [
-                ("Total punches",f"=SUM('Attendance Summary'!D5:D{endrow})"),
-                ("Staff included",f'=SUMPRODUCT((\'Attendance Summary\'!A5:A{endrow}<>"")/COUNTIF(\'Attendance Summary\'!A5:A{endrow},\'Attendance Summary\'!A5:A{endrow}))'),
-                ("Active attendance days",f'=COUNTIF(\'Attendance Summary\'!D5:D{endrow},">0")'),
-                ("Present / late days",f'=COUNTIF(\'Attendance Summary\'!H5:H{endrow},"Present")+COUNTIF(\'Attendance Summary\'!H5:H{endrow},"Late")')]:
-                overview.append([label,formula])
+            # Store calculated values rather than formulas so the dashboard is populated
+            # immediately in Excel, LibreOffice, and macOS preview applications.
+            overview.append(["Total punches",sum(punch_totals.values())])
+            overview.append(["Staff included",len(users)])
+            overview.append(["Active attendance days",sum(active_days.values())])
+            overview.append(["Present / late days",sum(1 for s in status_values if "present" in s.casefold() or "late" in s.casefold())])
             status_start=7
-            for offset,status_name in enumerate(["Present","Late","Half Day","Absent","Day off","Holiday","Incomplete punch"]):
+            status_counts={
+                "Present":sum(1 for s in status_values if s.casefold().startswith("present")),
+                "Late":sum(1 for s in status_values if "late" in s.casefold()),
+                "Half Day":sum(1 for s in status_values if s.casefold().startswith(("half-day","half day"))),
+                "Absent":sum(1 for s in status_values if s.casefold()=="absent"),
+                "Day off":sum(1 for s in status_values if s.casefold()=="day off"),
+                "Holiday":sum(1 for s in status_values if s.casefold()=="holiday"),
+                "Incomplete punch":sum(1 for s in status_values if s.casefold().startswith("incomplete punch"))
+            }
+            for offset,(status_name,count) in enumerate(status_counts.items()):
                 rr=status_start+offset
                 overview.cell(rr,5,status_name)
-                overview.cell(rr,6,f'=COUNTIF(\'Attendance Summary\'!H5:H{endrow},E{rr})')
+                overview.cell(rr,6,count)
             staff_start=14
             overview.cell(staff_start,1,"STAFF PUNCH TOTALS")
             for j,h in enumerate(["Device User ID","Staff Name","Punches","Active Days"],1):
@@ -748,8 +763,14 @@ class App(tk.Tk):
             for idx,uid in enumerate(users,staff_start+2):
                 overview.cell(idx,1,uid)
                 overview.cell(idx,2,self._name(uid))
-                overview.cell(idx,3,f'=SUMIF(\'Attendance Summary\'!A$5:A${endrow},A{idx},\'Attendance Summary\'!D$5:D${endrow})')
-                overview.cell(idx,4,f'=COUNTIFS(\'Attendance Summary\'!A$5:A${endrow},A{idx},\'Attendance Summary\'!D$5:D${endrow},">0")')
+                overview.cell(idx,3,punch_totals[uid])
+                overview.cell(idx,4,active_days[uid])
+            note_row=staff_start+2+len(users)
+            overview.merge_cells(start_row=note_row,start_column=1,end_row=note_row,end_column=6)
+            overview.cell(note_row,1,"Note: Status indicators can overlap for combined statuses (for example, Half-day — Late or Incomplete punch — Late).")
+            overview.cell(note_row,1).font=Font(italic=True,color="64748B",size=9)
+            overview.cell(note_row,1).alignment=Alignment(wrap_text=True,vertical="center")
+            overview.row_dimensions[note_row].height=28
             overview.sheet_view.showGridLines=False
             for col,width in {"A":24,"B":25,"C":16,"D":16,"E":23,"F":14}.items():
                 overview.column_dimensions[col].width=width
@@ -797,11 +818,11 @@ class App(tk.Tk):
                 tab.tableStyleInfo=TableStyleInfo(name="TableStyleMedium4",showRowStripes=True,showColumnStripes=False)
                 raw.add_table(tab)
             from openpyxl.formatting.rule import FormulaRule
-            for label,fill in [("Present","E2F0E7"),("Late","FFF2CC"),("Half Day","FCE4D6"),
-                               ("Absent","F4CCCC"),("Day off","E7E6E6"),("Holiday","DDEBF7"),
-                               ("Incomplete punch","FCE4D6")]:
+            for prefix,fill in [("Present","E2F0E7"),("Late","FFF2CC"),("Half-day","FCE4D6"),
+                                ("Absent","F4CCCC"),("Day off","E7E6E6"),("Holiday","DDEBF7"),
+                                ("Incomplete punch","FCE4D6")]:
                 summary.conditional_formatting.add(f"H5:H{summary.max_row}",
-                    FormulaRule(formula=[f'$H5="{label}"'],fill=PatternFill("solid",fgColor=fill)))
+                    FormulaRule(formula=[f'LEFT($H5,{len(prefix)})="{prefix}"'],fill=PatternFill("solid",fgColor=fill)))
             summary.sheet_properties.pageSetUpPr.fitToPage=True
             summary.page_setup.orientation="landscape"; summary.page_setup.paperSize=summary.PAPERSIZE_A4
             summary.page_setup.fitToWidth=1; summary.page_setup.fitToHeight=0
