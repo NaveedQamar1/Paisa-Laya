@@ -860,8 +860,8 @@ class App(tk.Tk):
         styles.add(ParagraphStyle(name="ReportTitle",parent=styles["Title"],textColor=colors.HexColor("#173D2B"),fontName="Helvetica-Bold",fontSize=18,leading=22,alignment=TA_LEFT,spaceAfter=4))
         styles.add(ParagraphStyle(name="EmployeeTitle",parent=styles["Title"],textColor=colors.HexColor("#173D2B"),fontName="Helvetica-Bold",fontSize=16,leading=20,alignment=TA_LEFT,spaceAfter=4,wordWrap="CJK"))
         styles.add(ParagraphStyle(name="SmallNote",parent=styles["BodyText"],fontSize=7,textColor=colors.HexColor("#64748b"),leading=9))
-        styles.add(ParagraphStyle(name="Cell",parent=styles["BodyText"],fontSize=6.7,leading=8,wordWrap="CJK"))
-        styles.add(ParagraphStyle(name="CellHead",parent=styles["BodyText"],fontName="Helvetica-Bold",fontSize=6.5,leading=7.5,textColor=colors.white,wordWrap="CJK"))
+        styles.add(ParagraphStyle(name="Cell",parent=styles["BodyText"],fontSize=6.2,leading=6.8,wordWrap="CJK"))
+        styles.add(ParagraphStyle(name="CellHead",parent=styles["BodyText"],fontName="Helvetica-Bold",fontSize=6.0,leading=6.5,textColor=colors.white,wordWrap="CJK"))
         styles.add(ParagraphStyle(name="Metric",parent=styles["BodyText"],fontSize=8,leading=11,textColor=colors.HexColor("#173D2B")))
         start_date=self.start_date.get(); end_date=self.end_date.get()
         by_user_day={}; all_by_day={}
@@ -887,13 +887,13 @@ class App(tk.Tk):
             while len(cells)%2: cells.append(Paragraph("",styles["Metric"]))
             data=[cells[i:i+2] for i in range(0,len(cells),2)]
             tab=Table(data,colWidths=[89*mm,89*mm],hAlign="LEFT")
-            tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#EDF4EF")),("BOX",(0,0),(-1,-1),.6,colors.HexColor("#C9D8CD")),("INNERGRID",(0,0),(-1,-1),.4,colors.HexColor("#D7E2DA")),("LEFTPADDING",(0,0),(-1,-1),8),("RIGHTPADDING",(0,0),(-1,-1),8),("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+            tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#EDF4EF")),("BOX",(0,0),(-1,-1),.6,colors.HexColor("#C9D8CD")),("INNERGRID",(0,0),(-1,-1),.4,colors.HexColor("#D7E2DA")),("LEFTPADDING",(0,0),(-1,-1),8),("RIGHTPADDING",(0,0),(-1,-1),8),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
             return tab
 
         def make_chart(day_counts):
             ordered=sorted(day_counts.items())[-24:]
-            chart=Drawing(180*mm,38*mm)
-            bc=VerticalBarChart(); bc.x=18; bc.y=12; bc.height=27*mm; bc.width=158*mm
+            chart=Drawing(180*mm,24*mm)
+            bc=VerticalBarChart(); bc.x=18; bc.y=8; bc.height=16*mm; bc.width=158*mm
             if ordered:
                 bc.data=[tuple(v for _,v in ordered)]
                 bc.categoryAxis.categoryNames=[d[5:] for d,_ in ordered]
@@ -915,7 +915,7 @@ class App(tk.Tk):
                 vals=[day,str(len(stamps)),first or "—",last or "—",f"{worked:.2f}",status]
                 detail.append([Paragraph(escape(str(v)),styles["Cell"]) for v in vals])
             tab=Table(detail,repeatRows=1,colWidths=widths,hAlign="LEFT")
-            tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#24563B")),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#CFD9D1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F4F7F5")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
+            tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#24563B")),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#CFD9D1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F4F7F5")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),1.5),("BOTTOMPADDING",(0,0),(-1,-1),1.5)]))
             return tab
 
         def employee_page(uid):
@@ -928,9 +928,9 @@ class App(tk.Tk):
             last_stamp=max((r[1] for r in employee_rows),default="—")
             story.append(Paragraph(escape(self._name(uid)),styles["EmployeeTitle"]))
             story.append(Paragraph(f"Employee ID: {escape(uid)} &nbsp; | &nbsp; Period: {start_date} to {end_date}",styles["BodyText"]))
-            story.append(Spacer(1,3*mm))
+            story.append(Spacer(1,2*mm))
             story.append(make_stats([("TOTAL PUNCHES",len(employee_rows)),("ACTIVE DAYS",active_days),("INCOMPLETE DAYS",incomplete),("FIRST PUNCH",first_stamp[:16] if first_stamp!="—" else "—"),("LAST PUNCH",last_stamp[:16] if last_stamp!="—" else "—")]))
-            story.extend([Spacer(1,2*mm),Paragraph("Attendance activity",styles["Heading2"]),make_chart(daily_counts),Spacer(1,1*mm),Paragraph("Daily attendance records",styles["Heading2"]),make_detail(uid),Spacer(1,2*mm),Paragraph("Status is calculated using saved schedules, grace periods, minimum hours, working weekdays and holidays.",styles["SmallNote"])])
+            story.extend([Spacer(1,1.5*mm),Paragraph("Attendance activity",styles["Heading2"]),make_chart(daily_counts),Spacer(1,0.5*mm),Paragraph("Daily attendance records",styles["Heading2"]),make_detail(uid),Spacer(1,1*mm),Paragraph("Status is calculated using saved schedules, grace periods, minimum hours, working weekdays and holidays.",styles["SmallNote"])])
 
         if is_collective:
             story.append(Paragraph("SCAFA Workforce — Collective Attendance Report",styles["ReportTitle"]))
@@ -949,7 +949,7 @@ class App(tk.Tk):
             canvas.drawString(15*mm,7*mm,"SCAFA Workforce • Confidential attendance record")
             canvas.drawRightString(width-15*mm,7*mm,f"Page {doc.page}")
             canvas.restoreState()
-        doc=Doc(path,pagesize=pagesize,rightMargin=15*mm,leftMargin=15*mm,topMargin=13*mm,bottomMargin=17*mm,title="SCAFA Workforce Attendance Report")
+        doc=Doc(path,pagesize=pagesize,rightMargin=15*mm,leftMargin=15*mm,topMargin=10*mm,bottomMargin=14*mm,title="SCAFA Workforce Attendance Report")
         doc.build(story,onFirstPage=footer,onLaterPages=footer)
 
 if __name__=="__main__":
