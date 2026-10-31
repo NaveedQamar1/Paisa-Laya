@@ -1,4 +1,4 @@
-import csv, sqlite3, threading
+import csv, sqlite3, threading, calendar, ipaddress
 from html import escape
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -64,6 +64,48 @@ class App(tk.Tk):
         self._ui()
         self.refresh()
 
+    def _date_field(self, parent, variable, width=12):
+        wrap=ttk.Frame(parent)
+        ttk.Entry(wrap,textvariable=variable,width=width).pack(side="left")
+        ttk.Button(wrap,text="▦",width=3,command=lambda:self._open_calendar(variable)).pack(side="left",padx=(3,0))
+        return wrap
+
+    def _open_calendar(self, variable):
+        try:
+            selected=datetime.strptime(variable.get().strip(),"%Y-%m-%d").date()
+        except ValueError:
+            selected=date.today()
+        popup=tk.Toplevel(self); popup.title("Select date"); popup.resizable(False,False); popup.transient(self); popup.grab_set()
+        state={"year":selected.year,"month":selected.month}
+        head=ttk.Frame(popup,padding=8); head.pack(fill="x")
+        grid=ttk.Frame(popup,padding=(8,0,8,8)); grid.pack()
+        def draw():
+            for child in grid.winfo_children(): child.destroy()
+            for child in head.winfo_children(): child.destroy()
+            ttk.Button(head,text="‹",width=3,command=lambda:move(-1)).pack(side="left")
+            ttk.Label(head,text=f"{calendar.month_name[state['month']]} {state['year']}",font=("Segoe UI",11,"bold")).pack(side="left",expand=True,padx=12)
+            ttk.Button(head,text="›",width=3,command=lambda:move(1)).pack(side="right")
+            for col,name in enumerate(("Mo","Tu","We","Th","Fr","Sa","Su")):
+                ttk.Label(grid,text=name,width=4,anchor="center").grid(row=0,column=col,padx=1,pady=3)
+            for row,week in enumerate(calendar.monthcalendar(state["year"],state["month"]),1):
+                for col,daynum in enumerate(week):
+                    if daynum:
+                        ttk.Button(grid,text=str(daynum),width=4,command=lambda d=daynum:choose(d)).grid(row=row,column=col,padx=1,pady=1)
+            ttk.Button(popup,text="Today",command=choose_today).pack(pady=(0,8))
+        def move(delta):
+            month=state["month"]+delta
+            if month<1: state["year"]-=1; month=12
+            elif month>12: state["year"]+=1; month=1
+            state["month"]=month; draw()
+        def choose(daynum):
+            variable.set(date(state["year"],state["month"],daynum).isoformat()); popup.destroy()
+        def choose_today():
+            variable.set(date.today().isoformat()); popup.destroy()
+        draw()
+
+    def _valid_ip_edit(self, proposed):
+        return len(proposed)<=15 and all(ch in "0123456789." for ch in proposed)
+
     def _style(self):
         s=ttk.Style(self)
         try: s.theme_use("clam")
@@ -94,7 +136,11 @@ class App(tk.Tk):
         ttk.Label(conn,text="DEVICE CONNECTION",font=("Segoe UI",9,"bold")).grid(row=0,column=0,columnspan=8,sticky="w",pady=(0,6))
         for col,label,var,width in [(0,"Device IP",self.ip,17),(2,"Port",self.port,7),(4,"Comm key",self.key,7)]:
             ttk.Label(conn,text=label).grid(row=1,column=col,sticky="w",padx=(0,5))
-            ttk.Entry(conn,textvariable=var,width=width).grid(row=1,column=col+1,sticky="w",padx=(0,16))
+            if label=="Device IP":
+                vcmd=(self.register(self._valid_ip_edit),"%P")
+                ttk.Entry(conn,textvariable=var,width=18,validate="key",validatecommand=vcmd).grid(row=1,column=col+1,sticky="w",padx=(0,16))
+            else:
+                ttk.Entry(conn,textvariable=var,width=width).grid(row=1,column=col+1,sticky="w",padx=(0,16))
         ttk.Button(conn,text="⟳  Fetch from K50",style="Accent.TButton",command=self.fetch).grid(row=1,column=6,padx=(0,8))
         ttk.Button(conn,text="＋  Import CSV",command=self.import_csv).grid(row=1,column=7)
         ttk.Button(conn,text="⚙  Custom Rules",command=self.open_rules).grid(row=1,column=8,padx=(8,0))
@@ -103,9 +149,9 @@ class App(tk.Tk):
         ttk.Button(conn,text="Restore Database",command=self.restore_database).grid(row=2,column=7,sticky="w",pady=(8,0))
         filters=ttk.Frame(self,padding=(18,0,18,10)); filters.pack(fill="x")
         ttk.Label(filters,text="From").pack(side="left")
-        ttk.Entry(filters,textvariable=self.start_date,width=12).pack(side="left",padx=(6,14))
+        self._date_field(filters,self.start_date).pack(side="left",padx=(6,14))
         ttk.Label(filters,text="To").pack(side="left")
-        ttk.Entry(filters,textvariable=self.end_date,width=12).pack(side="left",padx=(6,14))
+        self._date_field(filters,self.end_date).pack(side="left",padx=(6,14))
         ttk.Button(filters,text="Apply dates",command=self.refresh).pack(side="left")
         ttk.Label(filters,text="PDF scope").pack(side="left",padx=(22,6))
         self.user_combo=ttk.Combobox(filters,textvariable=self.report_user,width=18,state="readonly",values=["All staff"])
@@ -215,7 +261,7 @@ class App(tk.Tk):
         holidaysbox=ttk.LabelFrame(outer,text="Public holidays / closed dates",padding=8); holidaysbox.pack(fill="x",pady=(12,0))
         hrow=ttk.Frame(holidaysbox); hrow.pack(fill="x")
         hdate=tk.StringVar(); hlabel=tk.StringVar()
-        ttk.Label(hrow,text="Date (YYYY-MM-DD)").pack(side="left"); ttk.Entry(hrow,textvariable=hdate,width=14).pack(side="left",padx=5)
+        ttk.Label(hrow,text="Date").pack(side="left"); self._date_field(hrow,hdate,width=12).pack(side="left",padx=5)
         ttk.Label(hrow,text="Label").pack(side="left"); ttk.Entry(hrow,textvariable=hlabel,width=24).pack(side="left",padx=5)
         holiday_list=tk.Listbox(holidaysbox,height=4); holiday_list.pack(fill="x",pady=6)
         def refresh_holidays():
@@ -257,8 +303,7 @@ class App(tk.Tk):
 
     def open_staff_schedules(self):
         """Set individual schedules for each employee and weekday."""
-        with sqlite3.connect(DB) as c:
-            staff = dict(c.execute("SELECT user_id,name FROM staff"))
+        with sqlite3.connect(DB) as c:            staff = dict(c.execute("SELECT user_id,name FROM staff"))
             existing = {(str(uid),int(wd)):(st,en,int(gr),typ) for uid,wd,st,en,gr,typ in
                 c.execute("SELECT user_id,weekday,start_time,end_time,grace_minutes,shift_type FROM staff_day_rules")}
         staff.update({uid:self._name(uid) for uid in self._staff_names()})
@@ -480,6 +525,12 @@ class App(tk.Tk):
 
     def fetch(self):
         ip=self.ip.get().strip()
+        try:
+            parsed_ip=ipaddress.ip_address(ip)
+            if parsed_ip.version != 4: raise ValueError()
+        except ValueError:
+            messagebox.showerror("Invalid device IP","Enter a valid IPv4 address, for example 192.168.1.201.")
+            return
         try: port=int(self.port.get()); key=int(self.key.get() or "0")
         except ValueError:
             messagebox.showerror("Invalid settings","Port and communication key must be numbers."); return
@@ -517,8 +568,7 @@ class App(tk.Tk):
         messagebox.showinfo("Sync complete",f"Staff names fetched: {saved_users}\nAttendance records read: {total}\nNew attendance records saved: {inserted}")
 
     def _fetch_error(self,msg):
-        self.status.set("Device connection failed.")
-        messagebox.showerror("Could not fetch attendance",f"{msg}\n\nCheck the K50 IP, LAN connection, port, and communication key.")
+        self.status.set("Device connection failed.")        messagebox.showerror("Could not fetch attendance",f"{msg}\n\nCheck the K50 IP, LAN connection, port, and communication key.")
 
     def import_csv(self):
         path=filedialog.askopenfilename(title="Import attendance CSV",filetypes=[("CSV files","*.csv"),("All files","*.*")])
@@ -777,8 +827,7 @@ class App(tk.Tk):
             from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
             from reportlab.graphics.shapes import Drawing
             from reportlab.graphics.charts.barcharts import VerticalBarChart
-            self._make_pdf(path,rows,scope,colors,A4,getSampleStyleSheet,ParagraphStyle,TA_LEFT,mm,SimpleDocTemplate,Paragraph,Spacer,Table,TableStyle,PageBreak,Drawing,VerticalBarChart)
-            messagebox.showinfo("PDF report created",f"Saved report to:\n{path}")
+            self._make_pdf(path,rows,scope,colors,A4,getSampleStyleSheet,ParagraphStyle,TA_LEFT,mm,SimpleDocTemplate,Paragraph,Spacer,Table,TableStyle,PageBreak,Drawing,VerticalBarChart)            messagebox.showinfo("PDF report created",f"Saved report to:\n{path}")
         except Exception as e:
             messagebox.showerror("PDF export failed",f"{e}\n\nIf this persists, reinstall/update the app build.")
 
