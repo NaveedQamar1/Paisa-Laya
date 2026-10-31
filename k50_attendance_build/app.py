@@ -829,7 +829,8 @@ class App(tk.Tk):
             from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
             from reportlab.graphics.shapes import Drawing
             from reportlab.graphics.charts.barcharts import VerticalBarChart
-            self._make_pdf(path,rows,scope,colors,A4,getSampleStyleSheet,ParagraphStyle,TA_LEFT,mm,SimpleDocTemplate,Paragraph,Spacer,Table,TableStyle,PageBreak,Drawing,VerticalBarChart)            messagebox.showinfo("PDF report created",f"Saved report to:\n{path}")
+            self._make_pdf(path,rows,scope,colors,A4,getSampleStyleSheet,ParagraphStyle,TA_LEFT,mm,SimpleDocTemplate,Paragraph,Spacer,Table,TableStyle,PageBreak,Drawing,VerticalBarChart)
+            messagebox.showinfo("PDF report created",f"Saved report to:\n{path}")
         except Exception as e:
             messagebox.showerror("PDF export failed",f"{e}\n\nIf this persists, reinstall/update the app build.")
 
