@@ -1,4 +1,5 @@
 import csv, sqlite3, threading
+from html import escape
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import tkinter as tk
@@ -48,8 +49,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("SCAFA Workforce")
-        self.geometry("1180x780")
-        self.minsize(960, 650)
+        self.geometry("1280x840")
+        self.minsize(1040, 700)
         self.configure(bg=BG)
         init_db()
         self.ip=tk.StringVar(value="192.168.1.201")
@@ -76,10 +77,13 @@ class App(tk.Tk):
         s.configure("CardValue.TLabel", background="white", foreground=NAVY, font=("Segoe UI",22,"bold"))
         s.configure("Accent.TButton", font=("Segoe UI",10,"bold"), padding=(12,8), background=BLUE, foreground="white")
         s.map("Accent.TButton", background=[("active","#1d4ed8")])
-        s.configure("Treeview", rowheight=28, font=("Segoe UI",9), background="white", fieldbackground="white")
-        s.configure("Treeview.Heading", font=("Segoe UI",9,"bold"), background="#e8eef8", foreground=NAVY)
+        s.configure("Treeview", rowheight=34, font=("Segoe UI",9), background="white", fieldbackground="white", borderwidth=0)
+        s.configure("Treeview.Heading", font=("Segoe UI",9,"bold"), background="#e5eee7", foreground=NAVY, padding=(8,9))
         s.configure("TNotebook", background=BG, borderwidth=0)
-        s.configure("TNotebook.Tab", padding=(18,9), font=("Segoe UI",10,"bold"))
+        s.configure("TNotebook.Tab", padding=(20,11), font=("Segoe UI",10,"bold"))
+        s.configure("TEntry", padding=6)
+        s.configure("TCombobox", padding=6)
+        s.configure("TButton", padding=(10,7), font=("Segoe UI",9))
 
     def _ui(self):
         header=tk.Frame(self,bg=NAVY,height=94); header.pack(fill="x")
@@ -107,6 +111,7 @@ class App(tk.Tk):
         self.user_combo=ttk.Combobox(filters,textvariable=self.report_user,width=18,state="readonly",values=["All staff"])
         self.user_combo.pack(side="left")
         ttk.Button(filters,text="Export PDF report",style="Accent.TButton",command=self.export_pdf).pack(side="right")
+        ttk.Button(filters,text="Export Excel",command=self.export_excel).pack(side="right",padx=8)
         ttk.Button(filters,text="Export CSV",command=self.export_csv).pack(side="right",padx=8)
         self.tabs=ttk.Notebook(self); self.tabs.pack(fill="both",expand=True,padx=18,pady=(0,8))
         self.dashboard=ttk.Frame(self.tabs,padding=12); self.records=ttk.Frame(self.tabs,padding=12)
@@ -136,7 +141,7 @@ class App(tk.Tk):
     def _records_ui(self):
         cols=("uid","name","time","status")
         self.tree=ttk.Treeview(self.records,columns=cols,show="headings")
-        for col,title,width in [("uid","Device User ID",140),("name","Staff name",240),("time","Attendance date & time",250),("status","Punch status",140)]:
+        for col,title,width in [("uid","Device User ID",130),("name","Staff name",280),("time","Attendance date & time",250),("status","Punch status",180)]:
             self.tree.heading(col,text=title); self.tree.column(col,width=width,anchor="w")
         self.tree.pack(fill="both",expand=True)
         self.tree.tag_configure("odd",background="#f8fafc")
@@ -567,106 +572,178 @@ class App(tk.Tk):
     def export_csv(self):
         rows=self._rows()
         if rows is None: return
-        path=filedialog.asksaveasfilename(title="Save punch report",defaultextension=".csv",filetypes=[("CSV report","*.csv")],initialfile=f"K50_Attendance_{date.today().isoformat()}.csv")
+        path=filedialog.asksaveasfilename(title="Save punch report",defaultextension=".csv",filetypes=[("CSV report","*.csv")],initialfile=f"SCAFA_Workforce_Punches_{date.today().isoformat()}.csv")
         if not path: return
         with open(path,"w",newline="",encoding="utf-8-sig") as f:
             w=csv.writer(f); w.writerow(["Device User ID","Staff Name","Attendance date & time","Punch status"])
             w.writerows((uid,self._name(uid),stamp,state) for uid,stamp,state in rows)
         messagebox.showinfo("CSV exported",f"Exported {len(rows)} records.")
 
-    def export_pdf(self):
+    def _report_scope_rows(self):
         rows=self._rows()
-        if rows is None: return
-        scope_label=self.report_user.get()
-        scope=scope_label
-        if scope_label!="All staff":
-            scope=scope_label.rsplit(" (",1)[-1].rstrip(")")
-            rows=[r for r in rows if str(r[0])==scope]
-        # A report may legitimately contain only absences, provided staff are registered.
+        if rows is None: return None,None
+        label=self.report_user.get()
+        scope="All staff" if label=="All staff" else label.rsplit(" (",1)[-1].rstrip(")")
+        if scope!="All staff": rows=[r for r in rows if str(r[0])==scope]
         with sqlite3.connect(DB) as c:
             registered={str(r[0]) for r in c.execute("SELECT user_id FROM staff")}
         if scope=="All staff" and not (rows or registered):
-            messagebox.showwarning("No staff","No attendance punches or registered staff were found. Fetch staff from the K50 first."); return
+            messagebox.showwarning("No staff","No attendance punches or registered staff were found. Fetch staff from the K50 first."); return None,None
         if scope!="All staff" and scope not in (registered | {str(r[0]) for r in rows}):
-            messagebox.showwarning("Unknown staff","This staff ID is not registered and has no punches in the selected period."); return
+            messagebox.showwarning("Unknown staff","This staff ID is not registered and has no punches in the selected period."); return None,None
+        return rows,scope
+
+    def export_excel(self):
+        rows,scope=self._report_scope_rows()
+        if rows is None: return
+        suffix="All_Staff" if scope=="All staff" else f"Staff_{scope}"
+        path=filedialog.asksaveasfilename(title="Export editable Excel attendance report",defaultextension=".xlsx",
+            filetypes=[("Excel workbook","*.xlsx")],initialfile=f"SCAFA_Workforce_Attendance_{suffix}_{date.today().isoformat()}.xlsx")
+        if not path: return
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment
+            from openpyxl.utils import get_column_letter
+            from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
+            wb=Workbook()
+            summary=wb.active; summary.title="Attendance Summary"
+            raw=wb.create_sheet("Raw Punches")
+            summary.append(["SCAFA WORKFORCE | ATTENDANCE REPORT"])
+            summary.merge_cells("A1:H1")
+            summary["A1"].font=Font(name="Aptos Display",size=18,bold=True,color="FFFFFF")
+            summary["A1"].fill=PatternFill("solid",fgColor="173D2B")
+            summary["A1"].alignment=Alignment(vertical="center")
+            summary.row_dimensions[1].height=34
+            summary.append(["Report scope",scope,"From",self.start_date.get(),"To",self.end_date.get(),"Generated",datetime.now().strftime("%d %b %Y %H:%M")])
+            summary.append([])
+            summary.append(["Device User ID","Staff Name","Date","Punches","First Punch","Last Punch","Hours","Attendance Status"])
+            raw.append(["Device User ID","Staff Name","Attendance Date & Time","Punch Status"])
+            for uid,stamp,state in rows: raw.append([str(uid),self._name(uid),stamp,state or ""])
+            by_user_day={}
+            for uid,stamp,state in rows: by_user_day.setdefault((str(uid),stamp[:10]),[]).append(stamp)
+            with sqlite3.connect(DB) as c:
+                known=sorted({str(r[0]) for r in c.execute("SELECT user_id FROM staff")} | {str(r[0]) for r in rows},
+                    key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
+            first=datetime.strptime(self.start_date.get(),"%Y-%m-%d").date()
+            last=datetime.strptime(self.end_date.get(),"%Y-%m-%d").date()
+            if last<first: raise ValueError("End date must not precede start date.")
+            users=known if scope=="All staff" else [str(scope)]
+            for uid in users:
+                cursor=first
+                while cursor<=last:
+                    day=cursor.isoformat(); stamps=sorted(by_user_day.get((uid,day),[]))
+                    status,first_p,last_p,hours=self._attendance_day_status(uid,day,stamps)
+                    summary.append([uid,self._name(uid),day,len(stamps),first_p or "",last_p or "",round(hours,2),status])
+                    cursor+=timedelta(days=1)
+            for ws,widths,header_row in [(summary,[16,28,14,11,21,21,12,28],4),(raw,[18,30,24,20],1)]:
+                ws.freeze_panes="A5" if ws is summary else "A2"
+                ws.sheet_view.showGridLines=False
+                for i,width in enumerate(widths,1): ws.column_dimensions[get_column_letter(i)].width=width
+                for cell in ws[header_row]:
+                    cell.font=Font(bold=True,color="FFFFFF")
+                    cell.fill=PatternFill("solid",fgColor="24563B")
+                    cell.alignment=Alignment(horizontal="center",vertical="center",wrap_text=True)
+                ws.row_dimensions[header_row].height=30
+                ws.auto_filter.ref=ws.dimensions
+                for row in ws.iter_rows():
+                    for cell in row: cell.alignment=Alignment(vertical="center",wrap_text=True)
+            if summary.max_row>=5:
+                tab=ExcelTable(displayName="AttendanceDetails",ref=f"A4:H{summary.max_row}")
+                tab.tableStyleInfo=TableStyleInfo(name="TableStyleMedium4",showRowStripes=True,showColumnStripes=False)
+                summary.add_table(tab)
+            if raw.max_row>=2:
+                tab=ExcelTable(displayName="RawPunchRecords",ref=f"A1:D{raw.max_row}")
+                tab.tableStyleInfo=TableStyleInfo(name="TableStyleMedium4",showRowStripes=True,showColumnStripes=False)
+                raw.add_table(tab)
+            summary.sheet_properties.pageSetUpPr.fitToPage=True
+            summary.page_setup.orientation="landscape"; summary.page_setup.paperSize=summary.PAPERSIZE_A4
+            summary.page_setup.fitToWidth=1; summary.page_setup.fitToHeight=0
+            wb.save(path)
+            messagebox.showinfo("Excel exported",f"Editable Excel workbook saved to:\n{path}\n\nIncludes daily attendance summary and raw punch records.")
+        except Exception as e:
+            messagebox.showerror("Excel export failed",f"{e}\n\nPlease reinstall/update the app build.")
+
+    def export_pdf(self):
+        rows,scope=self._report_scope_rows()
+        if rows is None: return
         suffix="All_Staff" if scope=="All staff" else "Staff_"+scope
         path=filedialog.asksaveasfilename(title="Save PDF attendance report",defaultextension=".pdf",filetypes=[("PDF report","*.pdf")],initialfile=f"SCAFA_Workforce_Attendance_{suffix}_{date.today().isoformat()}.pdf")
         if not path: return
         try:
             from reportlab.lib import colors
-            from reportlab.lib.pagesizes import A4, landscape
+            from reportlab.lib.pagesizes import A4
             from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.lib.enums import TA_CENTER
+            from reportlab.lib.enums import TA_LEFT
             from reportlab.lib.units import mm
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
-            from reportlab.graphics.shapes import Drawing, String
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+            from reportlab.graphics.shapes import Drawing
             from reportlab.graphics.charts.barcharts import VerticalBarChart
-            self._make_pdf(path,rows,scope,colors,A4,landscape,getSampleStyleSheet,ParagraphStyle,TA_CENTER,mm,SimpleDocTemplate,Paragraph,Spacer,Table,TableStyle,PageBreak,Image,Drawing,String,VerticalBarChart)
+            self._make_pdf(path,rows,scope,colors,A4,getSampleStyleSheet,ParagraphStyle,TA_LEFT,mm,SimpleDocTemplate,Paragraph,Spacer,Table,TableStyle,PageBreak,Drawing,VerticalBarChart)
             messagebox.showinfo("PDF report created",f"Saved report to:\n{path}")
         except Exception as e:
             messagebox.showerror("PDF export failed",f"{e}\n\nIf this persists, reinstall/update the app build.")
 
-    def _make_pdf(self,path,rows,scope,colors,A4,landscape,getStyles,ParagraphStyle,TA_CENTER,mm,Doc,Paragraph,Spacer,Table,TableStyle,PageBreak,Image,Drawing,String,VerticalBarChart):
+    def _make_pdf(self,path,rows,scope,colors,A4,getStyles,ParagraphStyle,TA_LEFT,mm,Doc,Paragraph,Spacer,Table,TableStyle,PageBreak,Drawing,VerticalBarChart):
         styles=getStyles()
-        styles.add(ParagraphStyle(name="ReportTitle",parent=styles["Title"],textColor=colors.HexColor("#172554"),fontSize=20,leading=23,alignment=0,spaceAfter=4))
-        styles.add(ParagraphStyle(name="EmployeeTitle",parent=styles["Title"],textColor=colors.HexColor("#172554"),fontSize=18,leading=21,alignment=0,spaceAfter=4))
+        styles.add(ParagraphStyle(name="ReportTitle",parent=styles["Title"],textColor=colors.HexColor("#173D2B"),fontName="Helvetica-Bold",fontSize=18,leading=22,alignment=TA_LEFT,spaceAfter=4))
+        styles.add(ParagraphStyle(name="EmployeeTitle",parent=styles["Title"],textColor=colors.HexColor("#173D2B"),fontName="Helvetica-Bold",fontSize=16,leading=20,alignment=TA_LEFT,spaceAfter=4,wordWrap="CJK"))
         styles.add(ParagraphStyle(name="SmallNote",parent=styles["BodyText"],fontSize=7,textColor=colors.HexColor("#64748b"),leading=9))
+        styles.add(ParagraphStyle(name="Cell",parent=styles["BodyText"],fontSize=6.7,leading=8,wordWrap="CJK"))
+        styles.add(ParagraphStyle(name="CellHead",parent=styles["BodyText"],fontName="Helvetica-Bold",fontSize=6.5,leading=7.5,textColor=colors.white,wordWrap="CJK"))
+        styles.add(ParagraphStyle(name="Metric",parent=styles["BodyText"],fontSize=8,leading=11,textColor=colors.HexColor("#173D2B")))
         start_date=self.start_date.get(); end_date=self.end_date.get()
         by_user_day={}; all_by_day={}
         for uid,stamp,state in rows:
             uid=str(uid); day=stamp[:10]
             by_user_day.setdefault((uid,day),[]).append(stamp)
             all_by_day[day]=all_by_day.get(day,0)+1
-        try:
-            first_day=datetime.strptime(start_date,"%Y-%m-%d").date()
-            last_day=datetime.strptime(end_date,"%Y-%m-%d").date()
-            report_dates=[]
-            cursor=first_day
-            while cursor<=last_day:
-                report_dates.append(cursor.isoformat())
-                cursor+=timedelta(days=1)
-        except ValueError:
-            raise ValueError("Report dates must use YYYY-MM-DD and the end date must not precede the start date.")
-        with sqlite3.connect(DB) as c:
-            known_ids={str(r[0]) for r in c.execute("SELECT user_id FROM staff")}
+        first_day=datetime.strptime(start_date,"%Y-%m-%d").date()
+        last_day=datetime.strptime(end_date,"%Y-%m-%d").date()
+        if last_day<first_day: raise ValueError("End date must not precede start date.")
+        report_dates=[]; cursor=first_day
+        while cursor<=last_day:
+            report_dates.append(cursor.isoformat()); cursor+=timedelta(days=1)
+        with sqlite3.connect(DB) as c: known_ids={str(r[0]) for r in c.execute("SELECT user_id FROM staff")}
         punch_ids={uid for uid,_ in by_user_day}
         staff_ids=sorted(known_ids|punch_ids,key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
-        is_collective=(scope=="All staff"); pagesize=landscape(A4); story=[]
+        is_collective=(scope=="All staff"); pagesize=A4; story=[]
 
-        def make_stats(stat_items):
-            data=[[]]
-            for label,value in stat_items: data[0].extend([label,str(value)])
-            widths=[]
-            for _ in stat_items: widths.extend([25*mm,17*mm])
-            table=Table(data,colWidths=widths)
-            table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#eaf1ff")),("TEXTCOLOR",(0,0),(-1,-1),colors.HexColor("#172554")),("FONTNAME",(0,0),(-1,-1),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),8),("BOX",(0,0),(-1,-1),.5,colors.HexColor("#cbd5e1")),("INNERGRID",(0,0),(-1,-1),.4,colors.HexColor("#cbd5e1")),("TOPPADDING",(0,0),(-1,-1),7),("BOTTOMPADDING",(0,0),(-1,-1),7),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
-            return table
+        def make_stats(items):
+            cells=[]
+            for label,value in items:
+                cells.append(Paragraph(f"<b>{escape(str(label))}</b><br/>{escape(str(value))}",styles["Metric"]))
+            while len(cells)%2: cells.append(Paragraph("",styles["Metric"]))
+            data=[cells[i:i+2] for i in range(0,len(cells),2)]
+            tab=Table(data,colWidths=[89*mm,89*mm],hAlign="LEFT")
+            tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#EDF4EF")),("BOX",(0,0),(-1,-1),.6,colors.HexColor("#C9D8CD")),("INNERGRID",(0,0),(-1,-1),.4,colors.HexColor("#D7E2DA")),("LEFTPADDING",(0,0),(-1,-1),8),("RIGHTPADDING",(0,0),(-1,-1),8),("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+            return tab
 
         def make_chart(day_counts):
-            ordered=sorted(day_counts.items())[-31:]
-            chart=Drawing(245*mm,43*mm)
-            bc=VerticalBarChart(); bc.x=22; bc.y=13; bc.height=28*mm; bc.width=225*mm
+            ordered=sorted(day_counts.items())[-24:]
+            chart=Drawing(180*mm,38*mm)
+            bc=VerticalBarChart(); bc.x=18; bc.y=12; bc.height=27*mm; bc.width=158*mm
             if ordered:
                 bc.data=[tuple(v for _,v in ordered)]
                 bc.categoryAxis.categoryNames=[d[5:] for d,_ in ordered]
                 maxv=max(v for _,v in ordered) or 1
                 bc.valueAxis.valueMin=0; bc.valueAxis.valueMax=maxv*1.15; bc.valueAxis.valueStep=max(1,int(maxv/4))
-                bc.bars[0].fillColor=colors.HexColor("#2563eb")
+                bc.bars[0].fillColor=colors.HexColor("#477C57")
             else:
                 bc.data=[(0,)]; bc.categoryAxis.categoryNames=["No records"]
                 bc.valueAxis.valueMin=0; bc.valueAxis.valueMax=1; bc.valueAxis.valueStep=1
-            bc.categoryAxis.labels.fontSize=6; bc.categoryAxis.labels.angle=45; bc.categoryAxis.labels.boxAnchor="ne"; bc.valueAxis.labels.fontSize=7
-            chart.add(bc)
-            return chart
+            bc.categoryAxis.labels.fontSize=5.5; bc.categoryAxis.labels.angle=45; bc.categoryAxis.labels.boxAnchor="ne"; bc.valueAxis.labels.fontSize=6
+            chart.add(bc); return chart
 
         def make_detail(uid):
-            detail=[["Date","Punches","First punch","Last punch","Hours","Attendance status"]]
+            widths=[22*mm,13*mm,28*mm,28*mm,15*mm,74*mm]
+            detail=[[Paragraph(x,styles["CellHead"]) for x in ["Date","Punches","First punch","Last punch","Hours","Attendance status"]]]
             for day in report_dates:
                 stamps=sorted(by_user_day.get((uid,day),[]))
                 status,first,last,worked=self._attendance_day_status(uid,day,stamps)
-                detail.append([day,str(len(stamps)),first or "—",last or "—",f"{worked:.2f}",status])
-            tab=Table(detail,repeatRows=1,colWidths=[35*mm,23*mm,32*mm,32*mm,25*mm,65*mm])
-            tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#172554")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),7.5),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#cbd5e1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f8fafc")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
+                vals=[day,str(len(stamps)),first or "—",last or "—",f"{worked:.2f}",status]
+                detail.append([Paragraph(escape(str(v)),styles["Cell"]) for v in vals])
+            tab=Table(detail,repeatRows=1,colWidths=widths,hAlign="LEFT")
+            tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#24563B")),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#CFD9D1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F4F7F5")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
             return tab
 
         def employee_page(uid):
@@ -677,32 +754,30 @@ class App(tk.Tk):
             active_days=sum(1 for day,stamps in entries if stamps)
             first_stamp=min((r[1] for r in employee_rows),default="—")
             last_stamp=max((r[1] for r in employee_rows),default="—")
-            story.append(Paragraph(self._name(uid),styles["EmployeeTitle"]))
-            story.append(Paragraph(f"Employee ID: {uid}  |  Period: {start_date} to {end_date}",styles["BodyText"]))
+            story.append(Paragraph(escape(self._name(uid)),styles["EmployeeTitle"]))
+            story.append(Paragraph(f"Employee ID: {escape(uid)} &nbsp; | &nbsp; Period: {start_date} to {end_date}",styles["BodyText"]))
             story.append(Spacer(1,3*mm))
-            story.append(make_stats([("TOTAL PUNCHES",len(employee_rows)),("ACTIVE DAYS",active_days),("INCOMPLETE",incomplete),("FIRST PUNCH",first_stamp[:16] if first_stamp!="—" else "—"),("LAST PUNCH",last_stamp[:16] if last_stamp!="—" else "—")]))
-            story.extend([Spacer(1,2*mm),Paragraph("Attendance activity",styles["Heading2"]),make_chart(daily_counts),Spacer(1,1*mm),Paragraph("Daily records",styles["Heading2"]),make_detail(uid),Spacer(1,2*mm),Paragraph("Status uses saved schedules, grace periods, minimum hours, working weekdays and holidays. A single punch is flagged as Incomplete punch.",styles["SmallNote"])])
+            story.append(make_stats([("TOTAL PUNCHES",len(employee_rows)),("ACTIVE DAYS",active_days),("INCOMPLETE DAYS",incomplete),("FIRST PUNCH",first_stamp[:16] if first_stamp!="—" else "—"),("LAST PUNCH",last_stamp[:16] if last_stamp!="—" else "—")]))
+            story.extend([Spacer(1,2*mm),Paragraph("Attendance activity",styles["Heading2"]),make_chart(daily_counts),Spacer(1,1*mm),Paragraph("Daily attendance records",styles["Heading2"]),make_detail(uid),Spacer(1,2*mm),Paragraph("Status is calculated using saved schedules, grace periods, minimum hours, working weekdays and holidays.",styles["SmallNote"])])
 
         if is_collective:
-            story.append(Paragraph("K50 Attendance Report — Collective Overview",styles["ReportTitle"]))
-            story.append(Paragraph(f"All staff  |  Period: {start_date} to {end_date}  |  Generated: {datetime.now().strftime('%d %b %Y, %H:%M')}",styles["BodyText"]))
+            story.append(Paragraph("SCAFA Workforce — Collective Attendance Report",styles["ReportTitle"]))
+            story.append(Paragraph(f"All staff &nbsp; | &nbsp; Period: {start_date} to {end_date} &nbsp; | &nbsp; Generated: {datetime.now().strftime('%d %b %Y, %H:%M')}",styles["BodyText"]))
             story.append(Spacer(1,4*mm))
-            story.append(make_stats([("TOTAL PUNCHES",len(rows)),("STAFF IDs",len(staff_ids)),("ACTIVE DAYS",len(all_by_day)),("AVG PUNCHES/DAY",f"{len(rows)/max(1,len(all_by_day)):.1f}")]))
+            story.append(make_stats([("TOTAL PUNCHES",len(rows)),("STAFF",len(staff_ids)),("ACTIVE DAYS",len(all_by_day)),("AVERAGE PUNCHES / DAY",f"{len(rows)/max(1,len(all_by_day)):.1f}")]))
             story.extend([Spacer(1,3*mm),Paragraph("Collective attendance activity",styles["Heading2"]),make_chart(all_by_day)])
             for uid in staff_ids:
-                story.append(PageBreak())
-                employee_page(uid)
-        else:
-            employee_page(str(scope))
+                story.append(PageBreak()); employee_page(uid)
+        else: employee_page(str(scope))
 
         def footer(canvas,doc):
             canvas.saveState(); width=pagesize[0]
-            canvas.setStrokeColor(colors.HexColor("#cbd5e1")); canvas.line(15*mm,12*mm,width-15*mm,12*mm)
-            canvas.setFont("Helvetica",7.5); canvas.setFillColor(colors.HexColor("#64748b"))
-            canvas.drawString(15*mm,7*mm,"K50 Attendance Manager • Generated from local attendance database")
+            canvas.setStrokeColor(colors.HexColor("#C9D8CD")); canvas.line(15*mm,12*mm,width-15*mm,12*mm)
+            canvas.setFont("Helvetica",7); canvas.setFillColor(colors.HexColor("#64748b"))
+            canvas.drawString(15*mm,7*mm,"SCAFA Workforce • Confidential attendance record")
             canvas.drawRightString(width-15*mm,7*mm,f"Page {doc.page}")
             canvas.restoreState()
-        doc=Doc(path,pagesize=pagesize,rightMargin=15*mm,leftMargin=15*mm,topMargin=12*mm,bottomMargin=16*mm,title="K50 Attendance Report")
+        doc=Doc(path,pagesize=pagesize,rightMargin=15*mm,leftMargin=15*mm,topMargin=13*mm,bottomMargin=17*mm,title="SCAFA Workforce Attendance Report")
         doc.build(story,onFirstPage=footer,onLaterPages=footer)
 
 if __name__=="__main__":
