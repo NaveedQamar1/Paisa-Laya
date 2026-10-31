@@ -636,7 +636,8 @@ class App(tk.Tk):
             from openpyxl.utils import get_column_letter
             from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
             wb=Workbook()
-            summary=wb.active; summary.title="Attendance Summary"
+            overview=wb.active; overview.title="Overview"
+            summary=wb.create_sheet("Attendance Summary")
             raw=wb.create_sheet("Raw Punches")
             summary.append(["SCAFA WORKFORCE | ATTENDANCE REPORT"])
             summary.merge_cells("A1:H1")
@@ -665,6 +666,54 @@ class App(tk.Tk):
                     status,first_p,last_p,hours=self._attendance_day_status(uid,day,stamps)
                     summary.append([uid,self._name(uid),day,len(stamps),first_p or "",last_p or "",round(hours,2),status])
                     cursor+=timedelta(days=1)
+            overview.merge_cells("A1:F1")
+            overview["A1"]="SCAFA WORKFORCE | ATTENDANCE OVERVIEW"
+            overview["A1"].font=Font(name="Aptos Display",size=18,bold=True,color="FFFFFF")
+            overview["A1"].fill=PatternFill("solid",fgColor="173D2B")
+            overview["A1"].alignment=Alignment(vertical="center")
+            overview.row_dimensions[1].height=36
+            overview.append([])
+            overview.append(["Report scope",scope,"From",self.start_date.get(),"To",self.end_date.get()])
+            overview.append(["Generated",datetime.now().strftime("%d %b %Y %H:%M")])
+            overview.append([])
+            overview.append(["KEY METRICS","Value",None,None,"ATTENDANCE STATUS","Days"])
+            endrow=summary.max_row
+            for label,formula in [
+                ("Total punches",f"=SUM('Attendance Summary'!D5:D{endrow})"),
+                ("Staff included",f'=SUMPRODUCT((\'Attendance Summary\'!A5:A{endrow}<>"")/COUNTIF(\'Attendance Summary\'!A5:A{endrow},\'Attendance Summary\'!A5:A{endrow}))'),
+                ("Active attendance days",f'=COUNTIF(\'Attendance Summary\'!D5:D{endrow},">0")'),
+                ("Present / late days",f'=COUNTIF(\'Attendance Summary\'!H5:H{endrow},"Present")+COUNTIF(\'Attendance Summary\'!H5:H{endrow},"Late")')]:
+                overview.append([label,formula])
+            status_start=7
+            for offset,status_name in enumerate(["Present","Late","Half Day","Absent","Day off","Holiday","Incomplete punch"]):
+                rr=status_start+offset
+                overview.cell(rr,5,status_name)
+                overview.cell(rr,6,f'=COUNTIF(\'Attendance Summary\'!H5:H{endrow},E{rr})')
+            staff_start=14
+            overview.cell(staff_start,1,"STAFF PUNCH TOTALS")
+            for j,h in enumerate(["Device User ID","Staff Name","Punches","Active Days"],1):
+                overview.cell(staff_start+1,j,h)
+            for idx,uid in enumerate(users,staff_start+2):
+                overview.cell(idx,1,uid)
+                overview.cell(idx,2,self._name(uid))
+                overview.cell(idx,3,f'=SUMIF(\'Attendance Summary\'!A$5:A${endrow},A{idx},\'Attendance Summary\'!D$5:D${endrow})')
+                overview.cell(idx,4,f'=COUNTIFS(\'Attendance Summary\'!A$5:A${endrow},A{idx},\'Attendance Summary\'!D$5:D${endrow},">0")')
+            overview.sheet_view.showGridLines=False
+            for col,width in {"A":24,"B":25,"C":16,"D":16,"E":23,"F":14}.items():
+                overview.column_dimensions[col].width=width
+            for row in overview.iter_rows():
+                for cell in row: cell.alignment=Alignment(vertical="center",horizontal="left")
+            for rowno in (6,15):
+                for cell in overview[rowno]:
+                    cell.font=Font(bold=True,color="FFFFFF")
+                    cell.fill=PatternFill("solid",fgColor="24563B")
+                    cell.alignment=Alignment(horizontal="center",vertical="center")
+            overview.freeze_panes="A7"
+            overview.sheet_properties.pageSetUpPr.fitToPage=True
+            overview.page_setup.orientation="portrait"
+            overview.page_setup.paperSize=overview.PAPERSIZE_A4
+            overview.page_setup.fitToWidth=1
+            overview.page_setup.fitToHeight=1
             for ws,widths,header_row in [(summary,[16,28,14,11,21,21,12,28],4),(raw,[18,30,24,20],1)]:
                 ws.freeze_panes="A5" if ws is summary else "A2"
                 ws.sheet_view.showGridLines=False
@@ -676,7 +725,17 @@ class App(tk.Tk):
                 ws.row_dimensions[header_row].height=30
                 ws.auto_filter.ref=ws.dimensions
                 for row in ws.iter_rows():
-                    for cell in row: cell.alignment=Alignment(vertical="center",wrap_text=True)
+                    for cell in row:
+                        cell.alignment=Alignment(vertical="center",horizontal="left",
+                                                  wrap_text=(cell.row==header_row))
+                for rr in range(header_row+1,ws.max_row+1):
+                    ws.row_dimensions[rr].height=21
+                if ws is summary:
+                    for rr in range(5,ws.max_row+1):
+                        ws.cell(rr,7).number_format="0.00"
+                else:
+                    for rr in range(2,ws.max_row+1):
+                        ws.cell(rr,3).number_format="yyyy-mm-dd hh:mm:ss"
             if summary.max_row>=5:
                 tab=ExcelTable(displayName="AttendanceDetails",ref=f"A4:H{summary.max_row}")
                 tab.tableStyleInfo=TableStyleInfo(name="TableStyleMedium4",showRowStripes=True,showColumnStripes=False)
@@ -685,9 +744,19 @@ class App(tk.Tk):
                 tab=ExcelTable(displayName="RawPunchRecords",ref=f"A1:D{raw.max_row}")
                 tab.tableStyleInfo=TableStyleInfo(name="TableStyleMedium4",showRowStripes=True,showColumnStripes=False)
                 raw.add_table(tab)
+            from openpyxl.formatting.rule import FormulaRule
+            for label,fill in [("Present","E2F0E7"),("Late","FFF2CC"),("Half Day","FCE4D6"),
+                               ("Absent","F4CCCC"),("Day off","E7E6E6"),("Holiday","DDEBF7"),
+                               ("Incomplete punch","FCE4D6")]:
+                summary.conditional_formatting.add(f"H5:H{summary.max_row}",
+                    FormulaRule(formula=[f'$H5="{label}"'],fill=PatternFill("solid",fgColor=fill)))
             summary.sheet_properties.pageSetUpPr.fitToPage=True
             summary.page_setup.orientation="landscape"; summary.page_setup.paperSize=summary.PAPERSIZE_A4
             summary.page_setup.fitToWidth=1; summary.page_setup.fitToHeight=0
+            raw.sheet_properties.pageSetUpPr.fitToPage=True
+            raw.page_setup.orientation="landscape"; raw.page_setup.paperSize=raw.PAPERSIZE_A4
+            raw.page_setup.fitToWidth=1; raw.page_setup.fitToHeight=0
+            wb.active=0
             wb.save(path)
             messagebox.showinfo("Excel exported",f"Editable Excel workbook saved to:\n{path}\n\nIncludes daily attendance summary and raw punch records.")
         except Exception as e:
