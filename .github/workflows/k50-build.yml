@@ -23,11 +23,49 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -r k50_attendance_build/requirements.txt
       - name: Run attendance logic tests
         run: python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
-      - name: Build portable Windows application bundle
+      - name: Build Windows application
         shell: pwsh
         run: |
           python -m PyInstaller --noconfirm --clean --onedir --windowed --name SCAFA_Workforce k50_attendance_build/app.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Optional Authenticode signing. Add both repository Actions secrets:
+      # WINDOWS_SIGNING_CERTIFICATE_BASE64 (base64-encoded PFX)
+      # WINDOWS_SIGNING_CERTIFICATE_PASSWORD (PFX password)
+      - name: Sign application executable when certificate is configured
+        id: signing
+        shell: pwsh
+        env:
+          CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CERT_BASE64) -or [string]::IsNullOrWhiteSpace($env:CERT_PASSWORD)) {
+            "signed=false" >> $env:GITHUB_OUTPUT
+            Write-Host "Signing certificate not configured; continuing with an unsigned build."
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP "scafa-signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_BASE64))
+          try {
+            $sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+            $signtool = Get-ChildItem $sdkRoot -Filter signtool.exe -Recurse -ErrorAction Stop |
+              Where-Object { $_.FullName -match '\\x64\\signtool.exe$' } |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (-not $signtool) { throw "SignTool x64 not found in Windows SDK." }
+            $exe = Join-Path $PWD "dist\SCAFA_Workforce\SCAFA_Workforce.exe"
+            & $signtool.FullName sign /f $pfx /p $env:CERT_PASSWORD /fd SHA256 /tr https://timestamp.digicert.com /td SHA256 /d "SCAFA Workforce" $exe
+            if ($LASTEXITCODE -ne 0) { throw "Application signing failed." }
+            & $signtool.FullName verify /pa /v $exe
+            if ($LASTEXITCODE -ne 0) { throw "Application signature verification failed." }
+            "signed=true" >> $env:GITHUB_OUTPUT
+          }
+          finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Build portable application archive
+        shell: pwsh
+        run: |
           Compress-Archive -Path dist/SCAFA_Workforce/* -DestinationPath dist/SCAFA_Workforce_Portable.zip -Force
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
@@ -38,17 +76,55 @@ jobs:
           if (!(Test-Path $iscc)) { throw "Inno Setup compiler not found at $iscc" }
           & $iscc "k50_attendance_build\installer\SCAFA_Workforce.iss"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Sign installer when certificate is configured
+        if: steps.signing.outputs.signed == 'true'
+        shell: pwsh
+        env:
+          CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "scafa-signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_BASE64))
+          try {
+            $sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+            $signtool = Get-ChildItem $sdkRoot -Filter signtool.exe -Recurse -ErrorAction Stop |
+              Where-Object { $_.FullName -match '\\x64\\signtool.exe$' } |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (-not $signtool) { throw "SignTool x64 not found in Windows SDK." }
+            $setup = Join-Path $PWD "installer-output\SCAFA_Workforce_Setup.exe"
+            & $signtool.FullName sign /f $pfx /p $env:CERT_PASSWORD /fd SHA256 /tr https://timestamp.digicert.com /td SHA256 /d "SCAFA Workforce Setup" $setup
+            if ($LASTEXITCODE -ne 0) { throw "Installer signing failed." }
+            & $signtool.FullName verify /pa /v $setup
+            if ($LASTEXITCODE -ne 0) { throw "Installer signature verification failed." }
+          }
+          finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Record signing status
+        shell: pwsh
+        run: |
+          if ("${{ steps.signing.outputs.signed }}" -eq "true") {
+            "Authenticode-signed; SignTool verification passed for application and installer." | Out-File signing-status.txt
+          } else {
+            "UNSIGNED BUILD: no trusted signing certificate was configured." | Out-File signing-status.txt
+          }
       - name: Upload installable setup EXE
         uses: actions/upload-artifact@v4
         with:
           name: SCAFA_Workforce_Installer
-          path: installer-output/SCAFA_Workforce_Setup.exe
+          path: |
+            installer-output/SCAFA_Workforce_Setup.exe
+            signing-status.txt
           if-no-files-found: error
           retention-days: 14
-      - name: Upload standalone portable EXE
+      - name: Upload standalone portable application
         uses: actions/upload-artifact@v4
         with:
           name: SCAFA_Workforce_Portable_EXE
-          path: dist/SCAFA_Workforce_Portable.zip
+          path: |
+            dist/SCAFA_Workforce_Portable.zip
+            signing-status.txt
           if-no-files-found: error
           retention-days: 14
