@@ -24,7 +24,8 @@ jobs:
       - name: Run attendance logic tests
         run: python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
       - name: Build standalone Windows executable
-        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name SCAFA_Workforce k50_attendance_build/app.py
+        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name SCAFA_Workforce k50_attendance_build/app.py
+          Compress-Archive -Path dist/SCAFA_Workforce/* -DestinationPath dist/SCAFA_Workforce_Portable.zip -Force
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
       - name: Build Windows installer
@@ -45,6 +46,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SCAFA_Workforce_Portable_EXE
-          path: dist/SCAFA_Workforce.exe
+          path: dist/SCAFA_Workforce_Portable.zip
           if-no-files-found: error
           retention-days: 14
