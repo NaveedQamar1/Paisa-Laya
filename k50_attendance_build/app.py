@@ -1,4 +1,4 @@
-import csv, sqlite3, threading, calendar, ipaddress
+import csv, sqlite3, threading, calendar, ipaddress, socket
 from html import escape
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -153,6 +153,7 @@ class App(tk.Tk):
         ttk.Button(conn,text="Staff Schedules",command=self.open_staff_schedules).grid(row=1,column=9,padx=(8,0))
         ttk.Button(conn,text="Backup Database",command=self.backup_database).grid(row=2,column=6,sticky="w",pady=(8,0))
         ttk.Button(conn,text="Restore Database",command=self.restore_database).grid(row=2,column=7,sticky="w",pady=(8,0))
+        ttk.Button(conn,text="Find K50 automatically",command=self.discover_device).grid(row=2,column=8,sticky="w",padx=(8,0),pady=(8,0))
         filters=ttk.Frame(self,padding=(18,0,18,10)); filters.pack(fill="x")
         ttk.Label(filters,text="From").pack(side="left")
         self._date_field(filters,self.start_date).pack(side="left",padx=(6,14))
@@ -547,6 +548,72 @@ class App(tk.Tk):
                                fill=MUTED,font=("Segoe UI",8))
             canvas.create_text(x+bw/2,top+ch-bh-9,text=str(val),
                                fill=NAVY,font=("Segoe UI",8,"bold"))
+
+    def discover_device(self):
+        """Find a K50 on the local IPv4 /24 subnet and verify its ZK handshake."""
+        try:
+            port=int(self.port.get()); key=int(self.key.get() or "0")
+            if not 1<=port<=65535: raise ValueError()
+        except ValueError:
+            messagebox.showerror("Invalid settings","Port must be between 1 and 65535 and communication key must be numeric.")
+            return
+        current=self.ip.get().strip()
+        try:
+            with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as route:
+                route.connect(("192.0.2.1",80))
+                local_ip=route.getsockname()[0]
+            if not local_ip or local_ip.startswith("127."): raise OSError()
+        except OSError:
+            try: local_ip=str(ipaddress.ip_address(current))
+            except ValueError:
+                messagebox.showerror("Network unavailable","Could not determine this computer's local network. Enter the K50 IP manually and try again.")
+                return
+        network=ipaddress.ip_network(f"{local_ip}/24",strict=False)
+        self.status.set(f"Searching {network} for a K50 device on port {port}…")
+        threading.Thread(target=self._discover_worker,args=(network,port,key),daemon=True).start()
+
+    def _discover_worker(self,network,port,key):
+        candidates=[]
+        def port_open(address):
+            try:
+                with socket.create_connection((str(address),port),timeout=0.25): return str(address)
+            except OSError: return None
+        try:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            with ThreadPoolExecutor(max_workers=48) as pool:
+                futures=[pool.submit(port_open,address) for address in network.hosts()]
+                for future in as_completed(futures):
+                    found=future.result()
+                    if found: candidates.append(found)
+            from zk import ZK
+            for address in sorted(candidates,key=lambda x:(x.rsplit(".",1)[0],int(x.rsplit(".",1)[1]))):
+                conn=None
+                try:
+                    conn=ZK(address,port=port,timeout=4,password=key,force_udp=False,ommit_ping=False).connect()
+                    conn.disconnect(); conn=None
+                    self.after(0,lambda ip=address:self._discovery_done(ip,len(candidates)))
+                    return
+                except Exception:
+                    if conn:
+                        try: conn.disconnect()
+                        except Exception: pass
+            self.after(0,lambda n=len(candidates):self._discovery_failed(n))
+        except Exception as e:
+            msg=str(e); self.after(0,lambda m=msg:self._discovery_error(m))
+
+    def _discovery_done(self,address,open_ports):
+        self.ip.set(address)
+        self.status.set(f"K50 found at {address} • {open_ports} responsive device port(s) checked")
+        messagebox.showinfo("K50 found",f"A ZKTeco-compatible device responded at {address}.\n\nThe IP has been filled in. Click Fetch from K50 to synchronise attendance.")
+
+    def _discovery_failed(self,open_ports):
+        self.status.set("No K50 device found on the local network.")
+        detail=f"\n\n{open_ports} device(s) had the selected port open but did not complete the K50 handshake." if open_ports else ""
+        messagebox.showwarning("K50 not found","No K50 was detected on this computer's local /24 network."+detail+"\n\nCheck that the computer and K50 are on the same LAN/VLAN, or enter the IP manually.")
+
+    def _discovery_error(self,msg):
+        self.status.set("Automatic discovery failed.")
+        messagebox.showerror("Discovery failed",msg)
 
     def fetch(self):
         ip=self.ip.get().strip()
