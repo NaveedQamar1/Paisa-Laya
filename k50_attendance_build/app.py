@@ -20,6 +20,12 @@ NAVY = "#17251d"
 BLUE = "#2f6b45"
 TEAL = "#477c57"
 MUTED = "#68756b"
+TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
+
+def format_worked_time(hours):
+    total_minutes=max(0,int(round(float(hours)*60)))
+    whole_hours,minutes=divmod(total_minutes,60)
+    return f"{whole_hours} hours {minutes} minutes"
 
 def init_db():
     with sqlite3.connect(DB) as c:
@@ -219,12 +225,17 @@ class App(tk.Tk):
         ttk.Label(outer,text="Set defaults, then override schedules for individual staff. Rules apply to attendance reports.",style="Sub.TLabel").pack(anchor="w",pady=(2,12))
         defaults=ttk.LabelFrame(outer,text="Default schedule and thresholds",padding=10); defaults.pack(fill="x")
         vars={}
-        fields=[("default_start","Default shift start (HH:MM)"),("default_end","Default shift end (HH:MM)"),("default_grace","Default grace (minutes)"),("half_day_after","Half-day cutoff (HH:MM)"),("min_hours","Minimum hours for full day"),("workdays","Working weekdays (0=Mon, 6=Sun)"),("weekday_window_start","Weekday punch window start"),("weekday_window_end","Weekday punch window end"),("saturday_window_start","Saturday punch window start"),("saturday_window_end","Saturday punch window end")]
+        fields=[("default_start","Default shift start"),("default_end","Default shift end"),("default_grace","Default grace (minutes)"),("half_day_after","Half-day cutoff"),("min_hours","Minimum hours for full day"),("workdays","Working weekdays (0=Mon, 6=Sun)"),("weekday_window_start","Weekday punch window start"),("weekday_window_end","Weekday punch window end"),("saturday_window_start","Saturday punch window start"),("saturday_window_end","Saturday punch window end")]
+        time_keys={"default_start","default_end","half_day_after","weekday_window_start","weekday_window_end","saturday_window_start","saturday_window_end"}
+        def time_values_for(value): return sorted(set(TIME_VALUES+[value]))
         for i,(key,label) in enumerate(fields):
             row=i//3; col=(i%3)*2
             ttk.Label(defaults,text=label).grid(row=row,column=col,sticky="w",padx=(0,5),pady=5)
             vars[key]=tk.StringVar(value=rules[key])
-            ttk.Entry(defaults,textvariable=vars[key],width=20).grid(row=row,column=col+1,sticky="ew",padx=(0,12),pady=5)
+            if key in time_keys:
+                ttk.Combobox(defaults,textvariable=vars[key],values=time_values_for(rules[key]),state="readonly",width=17).grid(row=row,column=col+1,sticky="ew",padx=(0,12),pady=5)
+            else:
+                ttk.Entry(defaults,textvariable=vars[key],width=20).grid(row=row,column=col+1,sticky="ew",padx=(0,12),pady=5)
         for col in range(6): defaults.columnconfigure(col,weight=1)
         staffbox=ttk.LabelFrame(outer,text="Per-staff schedule overrides",padding=8); staffbox.pack(fill="both",expand=True,pady=(12,0))
         ttk.Label(staffbox,text="Select an employee, then set their shift, grace period, half-day cutoff and minimum hours.").pack(anchor="w")
@@ -238,7 +249,10 @@ class App(tk.Tk):
         for i,(key,label) in enumerate([("start","Shift start"),("end","Shift end"),("grace","Grace minutes"),("half","Half-day cutoff"),("min_hours","Minimum hours")]):
             ttk.Label(top,text=label).pack(side="left",padx=(6,2))
             ov[key]=tk.StringVar(value="")
-            ttk.Entry(top,textvariable=ov[key],width=8).pack(side="left",padx=(0,3))
+            if key in ("start","end","half"):
+                ttk.Combobox(top,textvariable=ov[key],values=TIME_VALUES,state="readonly",width=8).pack(side="left",padx=(0,3))
+            else:
+                ttk.Entry(top,textvariable=ov[key],width=8).pack(side="left",padx=(0,3))
         def load_staff(*_):
             uid=selected.get().rsplit(" (",1)[-1].rstrip(")") if selected.get() else ""
             r=staff_rules.get(uid,{})
@@ -260,17 +274,27 @@ class App(tk.Tk):
         ttk.Button(staffbox,text="Save selected staff override",command=save_override).pack(anchor="e",pady=(0,8))
         holidaysbox=ttk.LabelFrame(outer,text="Public holidays / closed dates",padding=8); holidaysbox.pack(fill="x",pady=(12,0))
         hrow=ttk.Frame(holidaysbox); hrow.pack(fill="x")
-        hdate=tk.StringVar(); hlabel=tk.StringVar()
-        ttk.Label(hrow,text="Date").pack(side="left"); self._date_field(hrow,hdate,width=12).pack(side="left",padx=5)
-        ttk.Label(hrow,text="Label").pack(side="left"); ttk.Entry(hrow,textvariable=hlabel,width=24).pack(side="left",padx=5)
+        hstart=tk.StringVar(); hend=tk.StringVar(); hlabel=tk.StringVar()
+        ttk.Label(hrow,text="From").pack(side="left"); self._date_field(hrow,hstart,width=12).pack(side="left",padx=4)
+        ttk.Label(hrow,text="To").pack(side="left"); self._date_field(hrow,hend,width=12).pack(side="left",padx=4)
+        ttk.Label(hrow,text="Label").pack(side="left"); ttk.Entry(hrow,textvariable=hlabel,width=20).pack(side="left",padx=4)
         holiday_list=tk.Listbox(holidaysbox,height=4); holiday_list.pack(fill="x",pady=6)
         def refresh_holidays():
             holiday_list.delete(0,"end")
             for d,l in sorted(holidays.items()): holiday_list.insert("end",f"{d} — {l}")
         def add_holiday():
-            try: datetime.strptime(hdate.get().strip(),"%Y-%m-%d")
-            except ValueError: messagebox.showerror("Invalid date","Use YYYY-MM-DD."); return
-            holidays[hdate.get().strip()]=hlabel.get().strip() or "Holiday"; refresh_holidays()
+            try:
+                first=datetime.strptime(hstart.get().strip(),"%Y-%m-%d").date()
+                last=datetime.strptime(hend.get().strip(),"%Y-%m-%d").date()
+                if last<first: raise ValueError()
+            except ValueError:
+                messagebox.showerror("Invalid date range","Enter valid dates in YYYY-MM-DD format. The To date must not be earlier than the From date."); return
+            label=hlabel.get().strip() or "Holiday"
+            cursor=first
+            while cursor<=last:
+                holidays[cursor.isoformat()]=label
+                cursor+=timedelta(days=1)
+            refresh_holidays()
         def remove_holiday():
             sel=holiday_list.curselection()
             if not sel: return
@@ -329,8 +353,8 @@ class App(tk.Tk):
             vals=existing.get((selected.get().rsplit(" (",1)[-1].rstrip(")"),wd),("09:45","20:00" if wd<5 else "17:00",15,"Off" if wd==6 else "Full day"))
             sv,ev,gv,tv=tk.StringVar(value=vals[0]),tk.StringVar(value=vals[1]),tk.StringVar(value=str(vals[2])),tk.StringVar(value=vals[3])
             cells[wd]=(sv,ev,gv,tv)
-            ttk.Entry(grid,textvariable=sv,width=14).grid(row=wd+1,column=1,padx=5,pady=3)
-            ttk.Entry(grid,textvariable=ev,width=14).grid(row=wd+1,column=2,padx=5,pady=3)
+            ttk.Combobox(grid,textvariable=sv,values=sorted(set(TIME_VALUES+[vals[0]])),state="readonly",width=12).grid(row=wd+1,column=1,padx=5,pady=3)
+            ttk.Combobox(grid,textvariable=ev,values=sorted(set(TIME_VALUES+[vals[1]])),state="readonly",width=12).grid(row=wd+1,column=2,padx=5,pady=3)
             ttk.Entry(grid,textvariable=gv,width=14).grid(row=wd+1,column=3,padx=5,pady=3)
             ttk.Combobox(grid,textvariable=tv,values=("Full day","Half day","Custom","Off"),state="readonly",width=13).grid(row=wd+1,column=4,padx=5,pady=3)
         def load_employee(*_):
@@ -699,7 +723,7 @@ class App(tk.Tk):
             summary.row_dimensions[1].height=34
             summary.append(["Report scope",scope,"From",self.start_date.get(),"To",self.end_date.get(),"Generated",datetime.now().strftime("%d %b %Y %H:%M")])
             summary.append([])
-            summary.append(["Device User ID","Staff Name","Date","Punches","First Punch","Last Punch","Hours","Attendance Status"])
+            summary.append(["Device User ID","Staff Name","Date / Day","Punches","First Punch","Last Punch","Worked Time","Attendance Status"])
             raw.append(["Device User ID","Staff Name","Attendance Date & Time","Punch Status"])
             for uid,stamp,state in rows: raw.append([str(uid),self._name(uid),stamp,state or ""])
             by_user_day={}
@@ -719,7 +743,8 @@ class App(tk.Tk):
                 while cursor<=last:
                     day=cursor.isoformat(); stamps=sorted(by_user_day.get((uid,day),[]))
                     status,first_p,last_p,hours=self._attendance_day_status(uid,day,stamps)
-                    summary.append([uid,self._name(uid),day,len(stamps),first_p or "",last_p or "",round(hours,2),status])
+                    weekday=datetime.strptime(day,"%Y-%m-%d").strftime("%A")
+                    summary.append([uid,self._name(uid),f"{day} ({weekday})",len(stamps),first_p or "",last_p or "",format_worked_time(hours),status])
                     status_values.append(status)
                     punch_totals[uid]+=len(stamps)
                     if stamps: active_days[uid]+=1
@@ -787,7 +812,7 @@ class App(tk.Tk):
             overview.page_setup.paperSize=overview.PAPERSIZE_A4
             overview.page_setup.fitToWidth=1
             overview.page_setup.fitToHeight=1
-            for ws,widths,header_row in [(summary,[16,28,14,11,21,21,12,28],4),(raw,[18,30,24,20],1)]:
+            for ws,widths,header_row in [(summary,[16,28,25,11,21,21,24,28],4),(raw,[18,30,24,20],1)]:
                 ws.freeze_panes="A5" if ws is summary else "A2"
                 ws.sheet_view.showGridLines=False
                 for i,width in enumerate(widths,1): ws.column_dimensions[get_column_letter(i)].width=width
@@ -804,8 +829,7 @@ class App(tk.Tk):
                 for rr in range(header_row+1,ws.max_row+1):
                     ws.row_dimensions[rr].height=21
                 if ws is summary:
-                    for rr in range(5,ws.max_row+1):
-                        ws.cell(rr,7).number_format="0.00"
+                    pass
                 else:
                     for rr in range(2,ws.max_row+1):
                         ws.cell(rr,3).number_format="yyyy-mm-dd hh:mm:ss"
@@ -907,12 +931,13 @@ class App(tk.Tk):
             chart.add(bc); return chart
 
         def make_detail(uid):
-            widths=[22*mm,13*mm,28*mm,28*mm,15*mm,74*mm]
-            detail=[[Paragraph(x,styles["CellHead"]) for x in ["Date","Punches","First punch","Last punch","Hours","Attendance status"]]]
+            widths=[34*mm,13*mm,25*mm,25*mm,28*mm,55*mm]
+            detail=[[Paragraph(x,styles["CellHead"]) for x in ["Date / Day","Punches","First punch","Last punch","Worked time","Attendance status"]]]
             for day in report_dates:
                 stamps=sorted(by_user_day.get((uid,day),[]))
                 status,first,last,worked=self._attendance_day_status(uid,day,stamps)
-                vals=[day,str(len(stamps)),first or "—",last or "—",f"{worked:.2f}",status]
+                weekday=datetime.strptime(day,"%Y-%m-%d").strftime("%A")
+                vals=[f"{day} ({weekday})",str(len(stamps)),first or "—",last or "—",format_worked_time(worked),status]
                 detail.append([Paragraph(escape(str(v)),styles["Cell"]) for v in vals])
             tab=Table(detail,repeatRows=1,colWidths=widths,hAlign="LEFT")
             tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#24563B")),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#CFD9D1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F4F7F5")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),1.5),("BOTTOMPADDING",(0,0),(-1,-1),1.5)]))
