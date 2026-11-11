@@ -44,7 +44,11 @@ def load_state(device_key):
     try:
         state = json.loads(STATE.read_text(encoding="utf-8"))
         if state.get("device") == device_key and isinstance(state.get("seen"), list):
-            return set(str(x) for x in state["seen"])
+            return {
+                tuple(str(part) for part in item)
+                for item in state["seen"]
+                if isinstance(item, (list, tuple)) and len(item) == 3
+            }
     except (OSError, ValueError, TypeError):
         pass
     return None
