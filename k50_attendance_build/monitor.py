@@ -72,7 +72,7 @@ def main():
                             name_row = db.execute(
                                 "SELECT name FROM staff WHERE user_id=?", (uid,)
                             ).fetchone()
-                            name = name_row[0] if name_row and name_row[0] else f"Staff ID {uid}"
+                            name = name_row[0] if name_row and name_row[0] else f"User {uid}"
                             inserted.append((uid, name, stamp))
                 # Ignore old records on first startup to avoid a burst of historical alerts.
                 recent_cutoff = datetime.now().timestamp() - 180
