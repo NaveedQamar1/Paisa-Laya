@@ -105,7 +105,7 @@ jobs:
           while IFS= read -r -d '' file; do
             name="$(basename "$file")"
             digest="$(sha256sum "$file" | cut -d ' ' -f 1)"
-            printf '%s  %s\\n' "$digest" "$name" >> release-assets/checksums.txt
+            printf '%s  %s\n' "$digest" "$name" >> release-assets/checksums.txt
           done < <(find release-assets -type f ! -name checksums.txt -print0)
           mapfile -d '' assets < <(find release-assets -type f -print0)
           gh release create "$RELEASE_TAG" "${assets[@]}" --repo "${{ github.repository }}" --title "SCAFA Workforce $RELEASE_TAG" --generate-notes
