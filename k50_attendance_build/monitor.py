@@ -43,19 +43,20 @@ def record_key(row):
 def load_state(device_key):
     try:
         state = json.loads(STATE.read_text(encoding="utf-8"))
-        if state.get("device") == device_key and isinstance(state.get("last_seen"), list):
-            return tuple(str(x) for x in state["last_seen"])
+        if state.get("device") == device_key and isinstance(state.get("seen"), list):
+            return set(str(x) for x in state["seen"])
     except (OSError, ValueError, TypeError):
         pass
     return None
 
 
-def save_state(device_key, last_seen):
+def save_state(device_key, seen):
     temporary = STATE.with_suffix(".tmp")
-    temporary.write_text(json.dumps({"device": device_key, "last_seen": list(last_seen)}),
-                         encoding="utf-8")
+    # Keep a bounded rolling set: catches out-of-order device timestamps without
+    # allowing the monitor state file to grow forever.
+    payload = {"device": device_key, "seen": list(sorted(seen))[-5000:]}
+    temporary.write_text(json.dumps(payload), encoding="utf-8")
     temporary.replace(STATE)
-
 
 def log_error(message):
     try:
@@ -109,15 +110,17 @@ def main():
                     name = name_row[0] if name_row and name_row[0] else f"User {uid}"
                     inserted.append((stamp, uid, status, name))
             if records:
-                newest = record_key(records[-1])
-                # First run for a device establishes a baseline. It does not alert
-                # for the device's historical attendance backlog.
+                current_keys = {(stamp, uid, status) for stamp, uid, status, name in inserted}
+                # First run establishes a baseline; afterwards compare exact punch
+                # identities, not a timestamp watermark. This catches late-arriving
+                # and out-of-order device records and records already inserted by app.py.
                 if last_seen is None:
-                    last_seen = newest
+                    last_seen = current_keys
                     save_state(device_key, last_seen)
                 else:
                     new_events = [item for item in inserted
-                                  if (item[0], item[1], item[2]) > last_seen]
+                                  if (item[0], item[1], item[2]) not in last_seen]
+                    new_events.sort(key=lambda item: item[0])
                     for stamp, uid, status, name in new_events:
                         punch_dt = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
                         when = punch_dt.strftime("%I:%M:%S %p")
@@ -136,9 +139,8 @@ def main():
                             notify(title, detail)
                         except Exception as exc:
                             log_error(f"Notification failed for {name} ({uid}) at {stamp}: {exc}")
-                    if newest > last_seen:
-                        last_seen = newest
-                        save_state(device_key, last_seen)
+                    last_seen.update(current_keys)
+                    save_state(device_key, last_seen)
         except Exception as exc:
             log_error(exc)
         finally:
