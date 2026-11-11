@@ -37,6 +37,19 @@ class AttendanceStatusTests(unittest.TestCase):
         status = self.status("1", "2026-10-26", ["2026-10-26 09:55:00"])
         self.assertEqual(status, "Incomplete punch")
 
+
+    def test_single_punch_has_no_calculated_duration_or_times(self):
+        result = app.App._attendance_day_status(
+            self.ctx, "1", "2026-10-26", ["2026-10-26 09:55:00"]
+        )
+        self.assertEqual(result, ("Incomplete punch", "", "", 0.0))
+
+    def test_late_single_punch_still_has_incomplete_status(self):
+        result = app.App._attendance_day_status(
+            self.ctx, "1", "2026-10-26", ["2026-10-26 10:10:00"]
+        )
+        self.assertEqual(result, ("Incomplete punch — Late", "", "", 0.0))
+
     def test_holiday_takes_precedence_over_missing_punches(self):
         c = sqlite3.connect(app.DB)
         c.execute("INSERT INTO holidays(holiday_date,label) VALUES(?,?)", ("2026-10-26", "Test holiday"))
