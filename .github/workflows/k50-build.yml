@@ -28,6 +28,9 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --clean --onedir --windowed --name SCAFA_Workforce k50_attendance_build/app.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor --collect-all winotify k50_attendance_build/monitor.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item dist/scafa-monitor.exe dist/SCAFA_Workforce/scafa-monitor.exe -Force
 
       # Optional Authenticode signing. Add both repository Actions secrets:
       # WINDOWS_SIGNING_CERTIFICATE_BASE64 (base64-encoded PFX)
