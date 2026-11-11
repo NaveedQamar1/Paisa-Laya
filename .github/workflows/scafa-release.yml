@@ -1,0 +1,98 @@
+name: SCAFA Workforce versioned release
+
+on:
+  push:
+    tags:
+      - "scafa-v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing tag to publish (for example scafa-v1.2.2)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.inputs.release_tag || github.ref_name }}" -replace '^scafa-v',''
+          python -m pip install --upgrade pip
+          python -m pip install -r k50_attendance_build/requirements.txt
+          python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --name SCAFA_Workforce k50_attendance_build/app.py
+          python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor --collect-all winotify k50_attendance_build/monitor.py
+          Copy-Item dist/scafa-monitor.exe dist/SCAFA_Workforce/scafa-monitor.exe -Force
+          choco install innosetup --yes --no-progress
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc "/DMyAppVersion=$version" "k50_attendance_build\installer\SCAFA_Workforce.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: installer-output/SCAFA_Workforce_Setup.exe
+          if-no-files-found: error
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: apple-silicon
+          - runner: macos-15-intel
+            arch: intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build macOS app
+        run: |
+          VERSION="${{ github.event.inputs.release_tag || github.ref_name }}"
+          VERSION="${VERSION#scafa-v}"
+          python -m pip install --upgrade pip
+          python -m pip install -r k50_attendance_build/requirements.txt
+          python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
+          python -m PyInstaller --noconfirm --clean --windowed --name SCAFA_Workforce k50_attendance_build/app.py
+          python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor k50_attendance_build/monitor.py
+          install -m 755 dist/scafa-monitor dist/SCAFA_Workforce.app/Contents/MacOS/scafa-monitor
+          ditto -c -k --sequesterRsrc --keepParent dist/SCAFA_Workforce.app dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
+          if [ "${{ matrix.arch }}" = "intel" ]; then
+            pkgbuild --component dist/SCAFA_Workforce.app --install-location /Applications --identifier pk.scafa.workforce --version "$VERSION" dist/SCAFA_Workforce_Installer_Intel.pkg
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: |
+            dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
+            dist/SCAFA_Workforce_Installer_Intel.pkg
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release-assets/**/* --repo "${{ github.repository }}" --title "SCAFA Workforce $RELEASE_TAG" --generate-notes
