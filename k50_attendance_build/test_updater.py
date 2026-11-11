@@ -8,7 +8,21 @@ import updater
 
 class UpdaterHelperTests(unittest.TestCase):
     def test_wait_for_already_exited_process_returns(self):
-        updater.wait_for_process(99999999, timeout=0.1)
+        with patch.object(updater.os, "kill", side_effect=ProcessLookupError):
+            updater.wait_for_process(99999999, timeout=0.1)
+
+    def test_windows_update_runs_installer_and_relaunches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            installer=root/"setup.exe"
+            installer.write_text("installer")
+            executable=root/"SCAFA_Workforce.exe"
+            executable.write_text("application")
+            with patch.object(updater.subprocess,"run",return_value=unittest.mock.Mock(returncode=0)) as run, \
+                 patch.object(updater.subprocess,"Popen") as launch:
+                updater.apply_windows(installer,root)
+            run.assert_called_once()
+            launch.assert_called_once_with([str(executable)],cwd=str(root))
 
     def test_macos_update_replaces_bundle_and_relaunches(self):
         with tempfile.TemporaryDirectory() as tmp:
