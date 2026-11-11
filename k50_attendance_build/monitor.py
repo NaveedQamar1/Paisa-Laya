@@ -76,14 +76,14 @@ def main():
                             inserted.append((uid, name, stamp))
                 # Ignore old records on first startup to avoid a burst of historical alerts.
                 recent_cutoff = datetime.now().timestamp() - 180
-                for uid, name, stamp in inserted:
+                for uid, name, stamp in sorted(inserted, key=lambda item: item[2]):
                     punch_dt = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
                     if punch_dt.timestamp() < recent_cutoff:
                         continue
                     with sqlite3.connect(DB, timeout=20) as db:
                         count = db.execute(
-                            "SELECT COUNT(*) FROM punches WHERE user_id=? AND substr(punch_time,1,10)=?",
-                            (uid, punch_dt.strftime("%Y-%m-%d"))
+                            "SELECT COUNT(*) FROM punches WHERE user_id=? AND substr(punch_time,1,10)=? AND punch_time<=?",
+                            (uid, punch_dt.strftime("%Y-%m-%d"), stamp)
                         ).fetchone()[0]
                     when = punch_dt.strftime("%I:%M %p")
                     if count == 1:
