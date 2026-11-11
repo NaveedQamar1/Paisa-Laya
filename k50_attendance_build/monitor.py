@@ -6,7 +6,9 @@ from pathlib import Path
 from datetime import datetime
 
 BASE = Path.home() / "SCAFAWorkforce"
-DB = BASE / "attendance.db"
+LEGACY_BASE = Path.home() / "K50AttendanceManager"
+DB_BASE = BASE if (BASE / "attendance.db").exists() or not (LEGACY_BASE / "attendance.db").exists() else LEGACY_BASE
+DB = DB_BASE / "attendance.db"
 CONFIG = BASE / "device.json"
 
 
