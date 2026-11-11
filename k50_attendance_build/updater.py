@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import zipfile
+from pathlib import PurePosixPath
 from pathlib import Path
 
 
@@ -49,10 +50,11 @@ def safe_extract_zip(archive, destination):
     destination=Path(destination).resolve()
     with zipfile.ZipFile(archive) as zf:
         for member in zf.infolist():
-            member_path=Path(member.filename)
+            normalized=member.filename.replace("\\","/")
+            member_path=PurePosixPath(normalized)
             if member_path.is_absolute() or ".." in member_path.parts:
                 raise RuntimeError("The update archive contains an unsafe file path.")
-            resolved=(destination/member.filename).resolve()
+            resolved=(destination/normalized).resolve()
             if resolved!=destination and destination not in resolved.parents:
                 raise RuntimeError("The update archive attempts to write outside its extraction folder.")
         zf.extractall(destination)
