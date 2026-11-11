@@ -45,6 +45,19 @@ def apply_windows(package,target):
     subprocess.Popen([str(installed_app)],cwd=str(Path(target)))
 
 
+def safe_extract_zip(archive, destination):
+    destination=Path(destination).resolve()
+    with zipfile.ZipFile(archive) as zf:
+        for member in zf.infolist():
+            member_path=Path(member.filename)
+            if member_path.is_absolute() or ".." in member_path.parts:
+                raise RuntimeError("The update archive contains an unsafe file path.")
+            resolved=(destination/member.filename).resolve()
+            if resolved!=destination and destination not in resolved.parents:
+                raise RuntimeError("The update archive attempts to write outside its extraction folder.")
+        zf.extractall(destination)
+
+
 def apply_macos(package,target):
     archive=Path(package); app_target=Path(target)
     if not archive.is_file() or app_target.suffix!=".app":
@@ -52,8 +65,7 @@ def apply_macos(package,target):
     work=Path(tempfile.mkdtemp(prefix="scafa-update-"))
     backup=app_target.with_name(app_target.name+".previous")
     try:
-        with zipfile.ZipFile(archive) as zf:
-            zf.extractall(work)
+        safe_extract_zip(archive,work)
         candidates=list(work.rglob("SCAFA_Workforce.app"))
         if not candidates:
             raise RuntimeError("The downloaded archive does not contain SCAFA_Workforce.app.")
