@@ -16,7 +16,14 @@ def wait_for_process(pid, timeout=180):
     deadline=time.time()+timeout
     if os.name == "nt":
         import ctypes
+        from ctypes import wintypes
         kernel32=ctypes.WinDLL("kernel32",use_last_error=True)
+        kernel32.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD]
+        kernel32.OpenProcess.restype=wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes=[wintypes.HANDLE,wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype=wintypes.DWORD
+        kernel32.CloseHandle.argtypes=[wintypes.HANDLE]
+        kernel32.CloseHandle.restype=wintypes.BOOL
         SYNCHRONIZE=0x00100000
         handle=kernel32.OpenProcess(SYNCHRONIZE,False,pid)
         if not handle:
