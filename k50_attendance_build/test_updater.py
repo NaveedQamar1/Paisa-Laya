@@ -55,6 +55,27 @@ class UpdaterHelperTests(unittest.TestCase):
             self.assertEqual((installed/"Contents"/"MacOS"/"SCAFA_Workforce").read_text(),"new")
             launch.assert_called_once_with(["/usr/bin/open",str(installed)],check=True)
 
+    def test_macos_launch_failure_restores_previous_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            installed=root/"SCAFA_Workforce.app"
+            (installed/"Contents"/"MacOS").mkdir(parents=True)
+            old_exe=installed/"Contents"/"MacOS"/"SCAFA_Workforce"
+            old_exe.write_text("old")
+            source=root/"package"/"SCAFA_Workforce.app"
+            (source/"Contents"/"MacOS").mkdir(parents=True)
+            (source/"Contents"/"MacOS"/"SCAFA_Workforce").write_text("new")
+            archive=root/"update.zip"
+            import zipfile
+            with zipfile.ZipFile(archive,"w") as zf:
+                for path in source.rglob("*"):
+                    if path.is_file():
+                        zf.write(path,path.relative_to(source.parent))
+            with patch.object(updater.subprocess,"run",side_effect=OSError("launch failed")):
+                with self.assertRaises(OSError):
+                    updater.apply_macos(archive,installed)
+            self.assertEqual(old_exe.read_text(),"old")
+
 
 if __name__=="__main__":
     unittest.main()
