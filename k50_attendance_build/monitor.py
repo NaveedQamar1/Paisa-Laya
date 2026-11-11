@@ -41,7 +41,7 @@ def main():
             ip = str(cfg["ip"]).strip()
             port = int(cfg.get("port", 4370))
             key = int(cfg.get("key", 0))
-            interval = max(30, min(300, int(cfg.get("interval", 60))))
+            interval = max(10, min(300, int(cfg.get("interval", 10))))
             from zk import ZK
             conn = None
             try:
@@ -73,10 +73,25 @@ def main():
                                 "SELECT name FROM staff WHERE user_id=?", (uid,)
                             ).fetchone()
                             name = name_row[0] if name_row and name_row[0] else f"Staff ID {uid}"
-                            inserted.append((name, stamp))
-                for name, stamp in inserted[-10:]:
-                    when = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S").strftime("%I:%M %p")
-                    notify("New SCAFA attendance punch", f"{name} • {when}")
+                            inserted.append((uid, name, stamp))
+                # Ignore old records on first startup to avoid a burst of historical alerts.
+                recent_cutoff = datetime.now().timestamp() - 180
+                for uid, name, stamp in inserted:
+                    punch_dt = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
+                    if punch_dt.timestamp() < recent_cutoff:
+                        continue
+                    with sqlite3.connect(DB, timeout=20) as db:
+                        count = db.execute(
+                            "SELECT COUNT(*) FROM punches WHERE user_id=? AND substr(punch_time,1,10)=?",
+                            (uid, punch_dt.strftime("%Y-%m-%d"))
+                        ).fetchone()[0]
+                    when = punch_dt.strftime("%I:%M %p")
+                    if count == 1:
+                        notify("Employee arrived", f"{name} Arrived • {when}")
+                    elif count == 2:
+                        notify("Employee checked out", f"{name} Departed • {when}")
+                    else:
+                        notify("Additional attendance punch", f"{name} • {when}")
             finally:
                 if conn:
                     try:
