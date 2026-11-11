@@ -52,9 +52,9 @@ def load_state(device_key):
 
 def save_state(device_key, seen):
     temporary = STATE.with_suffix(".tmp")
-    # Keep a bounded rolling set: catches out-of-order device timestamps without
-    # allowing the monitor state file to grow forever.
-    payload = {"device": device_key, "seen": list(sorted(seen))[-5000:]}
+    # Persist all known punch identities so older delayed device timestamps
+    # cannot be mistaken for new punches after a monitor restart.
+    payload = {"device": device_key, "seen": sorted(seen)}
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     temporary.replace(STATE)
 
