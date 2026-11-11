@@ -2,6 +2,7 @@
 import argparse
 import os
 import shlex
+import stat
 import shutil
 import subprocess
 import sys
@@ -91,7 +92,16 @@ def safe_extract_zip(archive, destination):
             resolved=(destination/normalized).resolve()
             if resolved!=destination and destination not in resolved.parents:
                 raise RuntimeError("The update archive attempts to write outside its extraction folder.")
+            mode=(member.external_attr >> 16) & 0xFFFF
+            if stat.S_IFMT(mode)==stat.S_IFLNK:
+                raise RuntimeError("The update archive contains a symbolic link.")
         zf.extractall(destination)
+        # ZipFile.extractall does not restore Unix executable permissions.
+        for member in zf.infolist():
+            mode=(member.external_attr >> 16) & 0o777
+            if mode and not member.is_dir():
+                extracted=destination/member.filename.replace(chr(92),"/")
+                extracted.chmod(mode)
 
 
 def apply_macos(package,target,user_uid=None):
