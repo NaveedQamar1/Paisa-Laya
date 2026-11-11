@@ -550,7 +550,9 @@ class App(tk.Tk):
         if len(stamps)<2:
             status="Incomplete punch"
             if late>grace: status+=" — Late"
-            return status,first.strftime("%H:%M"),last.strftime("%H:%M"),worked
+            # A single punch cannot establish a worked duration or a valid
+            # checkout time. Keep the day explicitly incomplete.
+            return status,"","",0.0
         if shift_type=="Half day":
             status="Half-day"
         elif shift_type=="Custom":
@@ -629,10 +631,18 @@ class App(tk.Tk):
             first,last=punches[0],punches[-1]
             checked_out=len(punches)>1
             check_out=last.strftime("%H:%M:%S") if checked_out else "—"
-            end_point=last if checked_out else now
-            elapsed=max(0,int((end_point-first).total_seconds()//60))
-            hours,minutes=divmod(elapsed,60)
-            active=f"{hours} hours {minutes} minutes"
+            historical_incomplete=(not checked_out and day < now.date())
+            if historical_incomplete:
+                # Do not turn a forgotten checkout into hundreds of hours by
+                # measuring from the old punch until the current date.
+                first_display="—"
+                active="—"
+            else:
+                first_display=first.strftime("%H:%M:%S")
+                end_point=last if checked_out else now
+                elapsed=max(0,int((end_point-first).total_seconds()//60))
+                hours,minutes=divmod(elapsed,60)
+                active=f"{hours} hours {minutes} minutes"
             weekday=day.weekday()
             start=general.get("default_start","09:45")
             end=general.get("default_end","20:00")
@@ -662,7 +672,7 @@ class App(tk.Tk):
                     labels.append("In progress")
             status=" • ".join(labels)
             tag="early" if early else ("late" if late else ("open" if not checked_out else ""))
-            output.append((uid,day.isoformat(),first.strftime("%H:%M:%S"),check_out,active,status,tag))
+            output.append((uid,day.isoformat(),first_display,("—" if historical_incomplete else check_out),active,status,tag))
         # Assigned device IDs ascend numerically; dates descend within each ID.
         output.sort(key=lambda r:r[1],reverse=True)
         output.sort(key=lambda r:(0,int(r[0])) if r[0].isdigit() else (1,r[0].lower()))
@@ -1236,7 +1246,8 @@ class App(tk.Tk):
                 stamps=sorted(by_user_day.get((uid,day),[]))
                 status,first,last,worked=self._attendance_day_status(uid,day,stamps)
                 weekday=datetime.strptime(day,"%Y-%m-%d").strftime("%A")
-                vals=[f"{day} ({weekday})",str(len(stamps)),first or "—",last or "—",format_worked_time(worked),status]
+                worked_display="—" if status.startswith("Incomplete punch") else format_worked_time(worked)
+                vals=[f"{day} ({weekday})",str(len(stamps)),first or "—",last or "—",worked_display,status]
                 detail.append([Paragraph(escape(str(v)),styles["Cell"]) for v in vals])
             tab=Table(detail,repeatRows=1,colWidths=widths,hAlign="LEFT")
             tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#24563B")),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#CFD9D1")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F4F7F5")]),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),1.5),("BOTTOMPADDING",(0,0),(-1,-1),1.5)]))
