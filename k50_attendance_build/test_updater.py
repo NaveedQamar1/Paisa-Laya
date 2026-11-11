@@ -24,6 +24,16 @@ class UpdaterHelperTests(unittest.TestCase):
             run.assert_called_once()
             launch.assert_called_once_with([str(executable)],cwd=str(root))
 
+    def test_zip_extraction_rejects_parent_directory_paths(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            archive=root/"unsafe.zip"
+            with zipfile.ZipFile(archive,"w") as zf:
+                zf.writestr("../outside.txt","unsafe")
+            with self.assertRaises(RuntimeError):
+                updater.safe_extract_zip(archive,root/"extract")
+
     def test_macos_update_replaces_bundle_and_relaunches(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
