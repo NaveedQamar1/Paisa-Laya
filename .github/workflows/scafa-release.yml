@@ -7,7 +7,13 @@ on:
     branches:
       - "main"
     paths:
-      - "k50_attendance_build/app.py"
+      - "k50_attendance_build/**"
+      - ".github/workflows/scafa-release.yml"
+  pull_request:
+    branches:
+      - "main"
+    paths:
+      - "k50_attendance_build/**"
       - ".github/workflows/scafa-release.yml"
   workflow_dispatch:
     inputs:
@@ -109,6 +115,7 @@ jobs:
           if-no-files-found: error
 
   publish:
+    if: github.event_name != 'pull_request'
     needs: [windows, macos]
     runs-on: ubuntu-latest
     steps:
