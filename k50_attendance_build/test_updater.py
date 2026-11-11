@@ -35,6 +35,36 @@ class UpdaterHelperTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 updater.safe_extract_zip(archive,root/"extract")
 
+    def test_zip_extraction_preserves_executable_permissions(self):
+        import os
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            archive=root/"app.zip"
+            info=zipfile.ZipInfo("SCAFA_Workforce.app/Contents/MacOS/SCAFA_Workforce")
+            info.create_system=3
+            info.external_attr=(0o100755 << 16)
+            with zipfile.ZipFile(archive,"w") as zf:
+                zf.writestr(info,b"executable")
+            destination=root/"extracted"
+            updater.safe_extract_zip(archive,destination)
+            extracted=destination/info.filename
+            if os.name!="nt":
+                self.assertTrue(extracted.stat().st_mode & 0o111)
+
+    def test_zip_extraction_rejects_symlinks(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            archive=root/"symlink.zip"
+            info=zipfile.ZipInfo("SCAFA_Workforce.app/link")
+            info.create_system=3
+            info.external_attr=(0o120777 << 16)
+            with zipfile.ZipFile(archive,"w") as zf:
+                zf.writestr(info,"/tmp/outside")
+            with self.assertRaises(RuntimeError):
+                updater.safe_extract_zip(archive,root/"extracted")
+
     def test_macos_update_replaces_bundle_and_relaunches(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
@@ -50,10 +80,31 @@ class UpdaterHelperTests(unittest.TestCase):
                 for path in source.rglob("*"):
                     if path.is_file():
                         zf.write(path,path.relative_to(source.parent))
-            with patch.object(updater.subprocess,"Popen") as launch:
+            with patch.object(updater.subprocess,"run",return_value=unittest.mock.Mock(returncode=0)) as launch:
                 updater.apply_macos(archive,installed)
             self.assertEqual((installed/"Contents"/"MacOS"/"SCAFA_Workforce").read_text(),"new")
-            launch.assert_called_once()
+            launch.assert_called_once_with(["/usr/bin/open",str(installed)],check=True)
+
+    def test_macos_launch_failure_restores_previous_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            installed=root/"SCAFA_Workforce.app"
+            (installed/"Contents"/"MacOS").mkdir(parents=True)
+            old_exe=installed/"Contents"/"MacOS"/"SCAFA_Workforce"
+            old_exe.write_text("old")
+            source=root/"package"/"SCAFA_Workforce.app"
+            (source/"Contents"/"MacOS").mkdir(parents=True)
+            (source/"Contents"/"MacOS"/"SCAFA_Workforce").write_text("new")
+            archive=root/"update.zip"
+            import zipfile
+            with zipfile.ZipFile(archive,"w") as zf:
+                for path in source.rglob("*"):
+                    if path.is_file():
+                        zf.write(path,path.relative_to(source.parent))
+            with patch.object(updater.subprocess,"run",side_effect=OSError("launch failed")):
+                with self.assertRaises(OSError):
+                    updater.apply_macos(archive,installed)
+            self.assertEqual(old_exe.read_text(),"old")
 
 
 if __name__=="__main__":
