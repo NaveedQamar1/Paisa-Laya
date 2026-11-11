@@ -40,16 +40,26 @@ jobs:
       - name: Run attendance logic tests
         run: python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
 
-      - name: Build macOS application bundle
+      - name: Build macOS application and background helper
         run: |
           python -m PyInstaller --noconfirm --clean --windowed --name SCAFA_Workforce k50_attendance_build/app.py
+          python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor k50_attendance_build/monitor.py
           test -d dist/SCAFA_Workforce.app
+          install -m 755 dist/scafa-monitor dist/SCAFA_Workforce.app/Contents/MacOS/scafa-monitor
           ditto -c -k --sequesterRsrc --keepParent dist/SCAFA_Workforce.app dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
 
-      - name: Upload portable macOS app
+      - name: Build Intel macOS installer package
+        if: matrix.arch == 'intel'
+        run: |
+          pkgbuild --component dist/SCAFA_Workforce.app --install-location /Applications --identifier pk.scafa.workforce --version 1.0.0 dist/SCAFA_Workforce_Installer_Intel.pkg
+          test -f dist/SCAFA_Workforce_Installer_Intel.pkg
+
+      - name: Upload macOS app and installer
         uses: actions/upload-artifact@v4
         with:
           name: SCAFA_Workforce_macOS_${{ matrix.arch }}
-          path: dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
+          path: |
+            dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
+            ${{ matrix.arch == 'intel' && 'dist/SCAFA_Workforce_Installer_Intel.pkg' || '' }}
           if-no-files-found: error
           retention-days: 14
