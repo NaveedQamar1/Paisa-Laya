@@ -1,4 +1,4 @@
-import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, subprocess, sys
+import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, subprocess, sys, urllib.request, webbrowser
 from html import escape
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -63,6 +63,7 @@ class App(tk.Tk):
         self.port=tk.StringVar(value="4370")
         self.key=tk.StringVar(value="0")
         self.status=tk.StringVar(value="Ready")
+        self.sort_by=tk.StringVar(value="Date (newest first)")
         self.start_date=tk.StringVar(value=date.today().replace(day=1).isoformat())
         self.end_date=tk.StringVar(value=date.today().isoformat())
         self.report_user=tk.StringVar(value="All staff")
@@ -70,6 +71,38 @@ class App(tk.Tk):
         self._ui()
         self.refresh()
         self.after(30000,self._live_refresh)
+
+    def check_for_updates(self):
+        """Check the public release feed for a newer SCAFA Workforce build."""
+        self.status.set("Checking for updates…")
+        def worker():
+            try:
+                request=urllib.request.Request(
+                    "https://api.github.com/repos/NaveedQamar1/Paisa-Laya/releases/latest",
+                    headers={"Accept":"application/vnd.github+json","User-Agent":"SCAFA-Workforce-Updater"})
+                with urllib.request.urlopen(request,timeout=15) as response:
+                    release=json.loads(response.read().decode("utf-8"))
+                tag=str(release.get("tag_name") or "Unknown")
+                url=str(release.get("html_url") or "https://github.com/NaveedQamar1/Paisa-Laya/releases")
+                assets=release.get("assets") or []
+                self.after(0,lambda:self._update_check_result(tag,url,assets))
+            except Exception as exc:
+                message=str(exc)
+                self.after(0,lambda m=message:self._update_check_failed(m))
+        threading.Thread(target=worker,daemon=True).start()
+
+    def _update_check_result(self,tag,url,assets):
+        self.status.set(f"Latest published release: {tag}")
+        if not assets:
+            messagebox.showinfo("SCAFA Workforce updates",f"Release {tag} has no downloadable installer assets yet.")
+            return
+        messagebox.showinfo("SCAFA Workforce updates",f"Latest published version: {tag}\n\nThe update service found a release. Automatic installation is not yet enabled in this build.\n\nRelease page:\n{url}")
+        try: webbrowser.open(url)
+        except Exception: pass
+
+    def _update_check_failed(self,message):
+        self.status.set("Could not check for updates.")
+        messagebox.showwarning("Update check unavailable",f"Could not contact the update service. Check your internet connection.\n\n{message}")
 
     def configure_background_monitoring(self):
         """Enable or disable the per-user K50 background monitor on macOS or Windows."""
@@ -86,7 +119,7 @@ class App(tk.Tk):
         base = Path.home() / "SCAFAWorkforce"
         base.mkdir(parents=True, exist_ok=True)
         config = base / "device.json"
-        config.write_text(json.dumps({"ip": ip, "port": port, "key": key, "interval": 60}), encoding="utf-8")
+        config.write_text(json.dumps({"ip": ip, "port": port, "key": key, "interval": 10}), encoding="utf-8")
 
         if sys.platform == "win32":
             task_name = "SCAFA Workforce Attendance Monitor"
@@ -96,7 +129,7 @@ class App(tk.Tk):
                 return
             if messagebox.askyesno(
                 "Background monitoring",
-                "Enable K50 monitoring every 60 seconds and start automatically whenever you sign in to Windows?\n\nWindows notifications will appear when new punches are detected. Your PC must be awake and connected to the same network as the K50."
+                "Enable K50 monitoring every 10 seconds and start automatically whenever you sign in to Windows?\n\nWindows notifications will appear when new punches are detected. Your PC must be awake and connected to the same network as the K50."
             ):
                 command = f'"{executable}"'
                 result = subprocess.run(
@@ -108,7 +141,7 @@ class App(tk.Tk):
                     messagebox.showerror("Could not enable monitoring", result.stderr or result.stdout or "Task Scheduler failed.")
                     return
                 subprocess.run(["schtasks", "/Run", "/TN", task_name], capture_output=True, text=True)
-                self.status.set("Background K50 monitoring enabled • checks every 60 seconds")
+                self.status.set("Background K50 monitoring enabled • checks every 10 seconds")
                 messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now monitor the K50 in the background and start automatically when you sign in.")
             else:
                 subprocess.run(["schtasks", "/End", "/TN", task_name], capture_output=True, text=True)
@@ -244,6 +277,7 @@ class App(tk.Tk):
         ttk.Button(conn,text="Restore Database",command=self.restore_database).grid(row=2,column=7,sticky="w",pady=(8,0))
         ttk.Button(conn,text="Find K50 automatically",command=self.discover_device).grid(row=2,column=8,sticky="w",padx=(8,0),pady=(8,0))
         ttk.Button(conn,text="Background Monitoring",command=self.configure_background_monitoring).grid(row=2,column=9,sticky="w",padx=(8,0),pady=(8,0))
+        ttk.Button(conn,text="Check for Updates",command=self.check_for_updates).grid(row=2,column=10,sticky="w",padx=(8,0),pady=(8,0))
         filters=ttk.Frame(self,padding=(18,0,18,10)); filters.pack(fill="x")
         ttk.Label(filters,text="From").pack(side="left")
         self._date_field(filters,self.start_date).pack(side="left",padx=(6,14))
@@ -282,6 +316,16 @@ class App(tk.Tk):
         ttk.Label(self.dashboard,text="Charts and statistics reflect imported/fetched punch records in the selected date range. Staff are identified by device ID.",style="Sub.TLabel").pack(anchor="w",pady=(10,0))
 
     def _records_ui(self):
+        toolbar=ttk.Frame(self.records); toolbar.pack(fill="x",pady=(0,8))
+        ttk.Label(toolbar,text="Sort by").pack(side="left",padx=(2,6))
+        self.sort_by=tk.StringVar(value="Date (newest first)")
+        self.sort_combo=ttk.Combobox(toolbar,textvariable=self.sort_by,state="readonly",width=27,values=[
+            "Date (newest first)","Date (oldest first)","Employee (A–Z)","Employee (Z–A)",
+            "Punch time (earliest first)","Punch time (latest first)","Punch count (highest first)",
+            "Punch count (lowest first)","Active hours (highest first)","Active hours (lowest first)",
+            "Attendance status (A–Z)","Employee ID (ascending)","Employee ID (descending)"])
+        self.sort_combo.pack(side="left")
+        ttk.Button(toolbar,text="Apply sort",command=self.refresh).pack(side="left",padx=8)
         cols=("uid","name","date","checkin","checkout","active","attendance")
         self.tree=ttk.Treeview(self.records,columns=cols,show="headings")
         specs=[("uid","Assigned ID",82),("name","Staff name",175),
@@ -629,6 +673,28 @@ class App(tk.Tk):
         if rows is None: return
         for i in self.tree.get_children(): self.tree.delete(i)
         daily=self._daily_attendance_rows(rows)
+        punch_counts={}
+        for uid0,stamp0,state0 in rows:
+            key=(str(uid0),str(stamp0)[:10]); punch_counts[key]=punch_counts.get(key,0)+1
+        mode=self.sort_by.get() if hasattr(self,"sort_by") else "Date (newest first)"
+        names=self._staff_names()
+        def sort_key(r):
+            uid0,day0,ci,co,active0,status0,tag0=r
+            name0=names.get(str(uid0),"").lower()
+            count0=punch_counts.get((str(uid0),day0),0)
+            try: mins0=int(active0.split(" hours ")[0])*60+int(active0.split(" hours ")[1].split(" minutes")[0])
+            except Exception: mins0=0
+            if mode.startswith("Date"): return (day0,uid0)
+            if mode.startswith("Employee ("): return (name0,day0)
+            if mode.startswith("Punch time"): return (ci,day0,uid0)
+            if mode.startswith("Punch count"): return (count0,day0,uid0)
+            if mode.startswith("Active hours"): return (mins0,day0,uid0)
+            if mode.startswith("Attendance status"): return (status0.lower(),day0,uid0)
+            if mode=="Employee ID (ascending)" or mode=="Employee ID (descending)":
+                return ((0,int(uid0)) if str(uid0).isdigit() else (1,str(uid0).lower()),day0)
+            return (day0,uid0)
+        reverse=mode in ("Date (newest first)","Employee (Z–A)","Punch time (latest first)","Punch count (highest first)","Active hours (highest first)","Employee ID (descending)")
+        daily.sort(key=sort_key,reverse=reverse)
         for idx,row in enumerate(daily):
             uid,day,checkin,checkout,active,status,tag=row
             tags=["odd" if idx%2 else "even"]
@@ -645,7 +711,7 @@ class App(tk.Tk):
         avg=(len(rows)/days) if days else 0
         for label,value in zip(self.card_values,[f"{len(rows):,}",f"{staff:,}",f"{days:,}",f"{avg:.1f}"]): label.configure(text=value)
         self._draw_charts(rows)
-        self.status.set(f"{len(daily):,} staff/day records • {len(rows):,} punches • assigned ID order")
+        self.status.set(f"{len(daily):,} staff/day records • {len(rows):,} punches • sorted by {mode}")
 
     def _live_refresh(self):
         try:
