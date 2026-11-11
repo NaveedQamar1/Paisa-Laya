@@ -39,7 +39,10 @@ def apply_windows(package,target):
     result=subprocess.run([str(installer),"/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CLOSEAPPLICATIONS"],check=False)
     if result.returncode:
         raise RuntimeError(f"The Windows installer returned exit code {result.returncode}.")
-    # Inno Setup launches the new app through its [Run] entry, including silent updates.
+    installed_app=Path(target)/"SCAFA_Workforce.exe"
+    if not installed_app.is_file():
+        raise RuntimeError("The installer completed, but SCAFA_Workforce.exe was not found at the expected installation path.")
+    subprocess.Popen([str(installed_app)],cwd=str(Path(target)))
 
 
 def apply_macos(package,target):
