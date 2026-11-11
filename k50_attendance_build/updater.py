@@ -1,0 +1,110 @@
+"""Small external helper that applies a verified SCAFA Workforce update after the app exits."""
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import zipfile
+from pathlib import PurePosixPath
+from pathlib import Path
+
+
+def wait_for_process(pid, timeout=180):
+    deadline=time.time()+timeout
+    while time.time()<deadline:
+        try:
+            os.kill(pid,0)
+        except OSError:
+            return
+        time.sleep(0.5)
+    raise TimeoutError("SCAFA Workforce did not close in time. No files were replaced.")
+
+
+def show_error(message):
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root=tk.Tk(); root.withdraw()
+        messagebox.showerror("SCAFA Workforce update failed",message)
+        root.destroy()
+    except Exception:
+        pass
+
+
+def apply_windows(package,target):
+    installer=Path(package)
+    if not installer.is_file():
+        raise FileNotFoundError("The downloaded Windows installer is missing.")
+    result=subprocess.run([str(installer),"/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CLOSEAPPLICATIONS"],check=False)
+    if result.returncode:
+        raise RuntimeError(f"The Windows installer returned exit code {result.returncode}.")
+    installed_app=Path(target)/"SCAFA_Workforce.exe"
+    if not installed_app.is_file():
+        raise RuntimeError("The installer completed, but SCAFA_Workforce.exe was not found at the expected installation path.")
+    subprocess.Popen([str(installed_app)],cwd=str(Path(target)))
+
+
+def safe_extract_zip(archive, destination):
+    destination=Path(destination).resolve()
+    with zipfile.ZipFile(archive) as zf:
+        for member in zf.infolist():
+            normalized=member.filename.replace("\\","/")
+            member_path=PurePosixPath(normalized)
+            if member_path.is_absolute() or ".." in member_path.parts:
+                raise RuntimeError("The update archive contains an unsafe file path.")
+            resolved=(destination/normalized).resolve()
+            if resolved!=destination and destination not in resolved.parents:
+                raise RuntimeError("The update archive attempts to write outside its extraction folder.")
+        zf.extractall(destination)
+
+
+def apply_macos(package,target):
+    archive=Path(package); app_target=Path(target)
+    if not archive.is_file() or app_target.suffix!=".app":
+        raise RuntimeError("The macOS update package or installed application path is invalid.")
+    work=Path(tempfile.mkdtemp(prefix="scafa-update-"))
+    backup=app_target.with_name(app_target.name+".previous")
+    try:
+        safe_extract_zip(archive,work)
+        candidates=list(work.rglob("SCAFA_Workforce.app"))
+        if not candidates:
+            raise RuntimeError("The downloaded archive does not contain SCAFA_Workforce.app.")
+        new_app=candidates[0]
+        executable=new_app/"Contents"/"MacOS"/"SCAFA_Workforce"
+        if not executable.exists():
+            raise RuntimeError("The downloaded macOS app is missing its executable.")
+        if backup.exists():
+            shutil.rmtree(backup)
+        app_target.rename(backup)
+        try:
+            shutil.copytree(new_app,app_target,symlinks=True)
+        except Exception:
+            if app_target.exists(): shutil.rmtree(app_target)
+            backup.rename(app_target)
+            raise
+        subprocess.Popen(["/usr/bin/open",str(app_target)])
+        shutil.rmtree(backup,ignore_errors=True)
+    finally:
+        shutil.rmtree(work,ignore_errors=True)
+
+
+def main():
+    parser=argparse.ArgumentParser()
+    parser.add_argument("--pid",type=int,required=True)
+    parser.add_argument("--package",required=True)
+    parser.add_argument("--target",required=True)
+    parser.add_argument("--platform",choices=("windows","macos"),required=True)
+    args=parser.parse_args()
+    try:
+        wait_for_process(args.pid)
+        if args.platform=="windows": apply_windows(args.package,args.target)
+        else: apply_macos(args.package,args.target)
+    except Exception as exc:
+        show_error(str(exc))
+        raise
+
+
+if __name__=="__main__":
+    main()
