@@ -36,7 +36,7 @@ Name: "{group}\SCAFA Workforce"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\SCAFA Workforce"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch SCAFA Workforce"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch SCAFA Workforce"; Flags: postinstall nowait
 
 [UninstallDelete]
 ; Do not delete the user's database in their home folder during uninstall.
