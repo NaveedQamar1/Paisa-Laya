@@ -35,6 +35,36 @@ class UpdaterHelperTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 updater.safe_extract_zip(archive,root/"extract")
 
+    def test_zip_extraction_preserves_executable_permissions(self):
+        import os
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            archive=root/"app.zip"
+            info=zipfile.ZipInfo("SCAFA_Workforce.app/Contents/MacOS/SCAFA_Workforce")
+            info.create_system=3
+            info.external_attr=(0o100755 << 16)
+            with zipfile.ZipFile(archive,"w") as zf:
+                zf.writestr(info,b"executable")
+            destination=root/"extracted"
+            updater.safe_extract_zip(archive,destination)
+            extracted=destination/info.filename
+            if os.name!="nt":
+                self.assertTrue(extracted.stat().st_mode & 0o111)
+
+    def test_zip_extraction_rejects_symlinks(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            archive=root/"symlink.zip"
+            info=zipfile.ZipInfo("SCAFA_Workforce.app/link")
+            info.create_system=3
+            info.external_attr=(0o120777 << 16)
+            with zipfile.ZipFile(archive,"w") as zf:
+                zf.writestr(info,"/tmp/outside")
+            with self.assertRaises(RuntimeError):
+                updater.safe_extract_zip(archive,root/"extracted")
+
     def test_macos_update_replaces_bundle_and_relaunches(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
