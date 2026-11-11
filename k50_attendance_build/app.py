@@ -608,7 +608,14 @@ class App(tk.Tk):
             labels=[]
             if late: labels.append("Late")
             if early: labels.append("Early departure")
-            if not labels: labels.append("Completed" if checked_out else "In progress")
+            if not labels:
+                if checked_out:
+                    labels.append("Completed")
+                elif day < now.date():
+                    # A lone punch on a past date cannot still be an active shift.
+                    labels.append("Incomplete punch")
+                else:
+                    labels.append("In progress")
             status=" • ".join(labels)
             tag="early" if early else ("late" if late else ("open" if not checked_out else ""))
             output.append((uid,day.isoformat(),first.strftime("%H:%M:%S"),check_out,active,status,tag))
