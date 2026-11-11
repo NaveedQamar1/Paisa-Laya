@@ -1211,6 +1211,8 @@ class App(tk.Tk):
             overview=wb.active; overview.title="Overview"
             summary=wb.create_sheet("Attendance Summary")
             raw=wb.create_sheet("Raw Punches")
+            performance=wb.create_sheet("Employee Comparison")
+            performance.append(["Employee","Device User ID","Expected Days","Present Days","Late Arrivals","Early Departures","Absences","Incomplete Punches","On-time Days","On-time Rate","Average Arrival"])
             summary.append(["SCAFA WORKFORCE | ATTENDANCE REPORT"])
             summary.merge_cells("A1:H1")
             summary["A1"].font=Font(name="Aptos Display",size=18,bold=True,color="FFFFFF")
@@ -1232,9 +1234,11 @@ class App(tk.Tk):
             if last<first: raise ValueError("End date must not precede start date.")
             users=known if scope=="All staff" else [str(scope)]
             status_values=[]
+            employee_performance=[]
             punch_totals={uid:0 for uid in users}
             active_days={uid:0 for uid in users}
             for uid in users:
+                perf={"expected":0,"present":0,"late":0,"early":0,"absent":0,"incomplete":0,"ontime":0,"arrivals":[]}
                 cursor=first
                 while cursor<=last:
                     day=cursor.isoformat(); stamps=sorted(by_user_day.get((uid,day),[]))
@@ -1243,9 +1247,29 @@ class App(tk.Tk):
                     worked_display="—" if status.startswith("Incomplete punch") else format_worked_time(hours)
                     summary.append([uid,self._name(uid),f"{day} ({weekday})",len(stamps),first_p or "—",last_p or "—",worked_display,status])
                     status_values.append(status)
+                    if status not in ("Day off","Holiday"): perf["expected"]+=1
+                    if status=="Absent": perf["absent"]+=1
+                    elif status.startswith("Incomplete punch"):
+                        perf["incomplete"]+=1; perf["present"]+=1
+                        if "Late" in status: perf["late"]+=1
+                    elif stamps:
+                        perf["present"]+=1
+                        if "Late" in status: perf["late"]+=1
+                        else: perf["ontime"]+=1
+                        if "early departure" in status: perf["early"]+=1
+                        try:
+                            arrival=datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S")
+                            perf["arrivals"].append(arrival.hour*60+arrival.minute)
+                        except ValueError: pass
                     punch_totals[uid]+=len(stamps)
                     if stamps: active_days[uid]+=1
                     cursor+=timedelta(days=1)
+                rate=(perf["ontime"]/perf["expected"]) if perf["expected"] else 0
+                avg_minutes=round(sum(perf["arrivals"])/len(perf["arrivals"])) if perf["arrivals"] else None
+                avg_arrival=f"{avg_minutes//60:02d}:{avg_minutes%60:02d}" if avg_minutes is not None else "—"
+                performance.append([self._name(uid),uid,perf["expected"],perf["present"],perf["late"],
+                    perf["early"],perf["absent"],perf["incomplete"],perf["ontime"],rate,avg_arrival])
+                employee_performance.append((uid,perf))
             overview.merge_cells("A1:F1")
             overview["A1"]="SCAFA WORKFORCE | ATTENDANCE OVERVIEW"
             overview["A1"].font=Font(name="Aptos Display",size=18,bold=True,color="FFFFFF")
@@ -1264,6 +1288,10 @@ class App(tk.Tk):
             overview.append(["Staff included",len(users)])
             overview.append(["Active attendance days",sum(active_days.values())])
             overview.append(["Present / late days",sum(1 for s in status_values if "present" in s.casefold() or "late" in s.casefold())])
+            overview.append(["Late arrivals",sum(p["late"] for _,p in employee_performance)])
+            overview.append(["Early departures",sum(p["early"] for _,p in employee_performance)])
+            overview.append(["Absences",sum(p["absent"] for _,p in employee_performance)])
+            overview.append(["Incomplete punches",sum(p["incomplete"] for _,p in employee_performance)])
             status_start=7
             status_counts={
                 "Present":sum(1 for s in status_values if s.casefold().startswith("present")),
@@ -1309,7 +1337,7 @@ class App(tk.Tk):
             overview.page_setup.paperSize=overview.PAPERSIZE_A4
             overview.page_setup.fitToWidth=1
             overview.page_setup.fitToHeight=1
-            for ws,widths,header_row in [(summary,[16,28,25,11,21,21,24,28],4),(raw,[18,30,24,20],1)]:
+            for ws,widths,header_row in [(summary,[16,28,25,11,21,21,24,28],4),(raw,[18,30,24,20],1),(performance,[28,16,15,14,15,17,12,18,14,14,18],1)]:
                 ws.freeze_panes="A5" if ws is summary else "A2"
                 ws.sheet_view.showGridLines=False
                 for i,width in enumerate(widths,1): ws.column_dimensions[get_column_letter(i)].width=width
@@ -1330,6 +1358,19 @@ class App(tk.Tk):
                 else:
                     for rr in range(2,ws.max_row+1):
                         ws.cell(rr,3).number_format="yyyy-mm-dd hh:mm:ss"
+            if performance.max_row>=2:
+                perf_table=ExcelTable(displayName="EmployeeComparison",ref=f"A1:K{performance.max_row}")
+                perf_table.tableStyleInfo=TableStyleInfo(name="TableStyleMedium4",showRowStripes=True,showColumnStripes=False)
+                performance.add_table(perf_table)
+                for rr in range(2,performance.max_row+1): performance.cell(rr,10).number_format="0.0%"
+                from openpyxl.chart import BarChart, Reference
+                chart=BarChart(); chart.type="bar"; chart.style=10; chart.title="Late arrivals and early departures"
+                chart.y_axis.title="Employee"; chart.x_axis.title="Days"
+                chart.add_data(Reference(performance,min_col=5,max_col=6,min_row=1,max_row=performance.max_row),titles_from_data=True)
+                chart.set_categories(Reference(performance,min_col=1,min_row=2,max_row=performance.max_row))
+                chart.height=8; chart.width=18
+                performance.add_chart(chart,"M2")
+                performance.freeze_panes="A2"; performance.sheet_view.showGridLines=False
             if summary.max_row>=5:
                 tab=ExcelTable(displayName="AttendanceDetails",ref=f"A4:H{summary.max_row}")
                 tab.tableStyleInfo=TableStyleInfo(name="TableStyleMedium4",showRowStripes=True,showColumnStripes=False)
