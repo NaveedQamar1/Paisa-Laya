@@ -33,7 +33,9 @@ jobs:
           python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
           python -m PyInstaller --noconfirm --clean --onedir --windowed --name SCAFA_Workforce k50_attendance_build/app.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor --collect-all winotify k50_attendance_build/monitor.py
+          python -m PyInstaller --noconfirm --clean --onefile --name scafa-updater k50_attendance_build/updater.py
           Copy-Item dist/scafa-monitor.exe dist/SCAFA_Workforce/scafa-monitor.exe -Force
+          Copy-Item dist/scafa-updater.exe dist/SCAFA_Workforce/scafa-updater.exe -Force
           choco install innosetup --yes --no-progress
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           & $iscc "/DMyAppVersion=$version" "k50_attendance_build\installer\SCAFA_Workforce.iss"
@@ -70,7 +72,9 @@ jobs:
           python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
           python -m PyInstaller --noconfirm --clean --windowed --name SCAFA_Workforce k50_attendance_build/app.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor k50_attendance_build/monitor.py
+          python -m PyInstaller --noconfirm --clean --onefile --name scafa-updater k50_attendance_build/updater.py
           install -m 755 dist/scafa-monitor dist/SCAFA_Workforce.app/Contents/MacOS/scafa-monitor
+          install -m 755 dist/scafa-updater dist/SCAFA_Workforce.app/Contents/MacOS/scafa-updater
           ditto -c -k --sequesterRsrc --keepParent dist/SCAFA_Workforce.app dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
           if [ "${{ matrix.arch }}" = "intel" ]; then
             pkgbuild --component dist/SCAFA_Workforce.app --install-location /Applications --identifier pk.scafa.workforce --version "$VERSION" dist/SCAFA_Workforce_Installer_Intel.pkg
@@ -90,9 +94,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
-      - name: Publish GitHub Release
+      - name: Generate checksums and publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
+        shell: bash
         run: |
-          gh release create "$RELEASE_TAG" release-assets/**/* --repo "${{ github.repository }}" --title "SCAFA Workforce $RELEASE_TAG" --generate-notes
+          set -euo pipefail
+          : > release-assets/checksums.txt
+          while IFS= read -r -d '' file; do
+            name="$(basename "$file")"
+            digest="$(sha256sum "$file" | cut -d ' ' -f 1)"
+            printf '%s  %s\\n' "$digest" "$name" >> release-assets/checksums.txt
+          done < <(find release-assets -type f -print0)
+          mapfile -d '' assets < <(find release-assets -type f -print0)
+          gh release create "$RELEASE_TAG" "${assets[@]}" --repo "${{ github.repository }}" --title "SCAFA Workforce $RELEASE_TAG" --generate-notes
