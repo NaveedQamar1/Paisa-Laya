@@ -1,6 +1,7 @@
 """Small external helper that applies a verified SCAFA Workforce update after the app exits."""
 import argparse
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -60,7 +61,7 @@ def safe_extract_zip(archive, destination):
         zf.extractall(destination)
 
 
-def apply_macos(package,target):
+def apply_macos(package,target,user_uid=None):
     archive=Path(package); app_target=Path(target)
     if not archive.is_file() or app_target.suffix!=".app":
         raise RuntimeError("The macOS update package or installed application path is invalid.")
@@ -84,7 +85,11 @@ def apply_macos(package,target):
             if app_target.exists(): shutil.rmtree(app_target)
             backup.rename(app_target)
             raise
-        subprocess.Popen(["/usr/bin/open",str(app_target)])
+        if user_uid is not None and hasattr(os, "geteuid") and os.geteuid() == 0:
+            subprocess.Popen(["/bin/launchctl", "asuser", str(user_uid),
+                              "/usr/bin/open", str(app_target)])
+        else:
+            subprocess.Popen(["/usr/bin/open", str(app_target)])
         shutil.rmtree(backup,ignore_errors=True)
     finally:
         shutil.rmtree(work,ignore_errors=True)
@@ -96,11 +101,24 @@ def main():
     parser.add_argument("--package",required=True)
     parser.add_argument("--target",required=True)
     parser.add_argument("--platform",choices=("windows","macos"),required=True)
+    parser.add_argument("--user-uid",type=int,default=None)
     args=parser.parse_args()
     try:
         wait_for_process(args.pid)
-        if args.platform=="windows": apply_windows(args.package,args.target)
-        else: apply_macos(args.package,args.target)
+        if args.platform=="windows":
+            apply_windows(args.package,args.target)
+        else:
+            target=Path(args.target)
+            # /Applications is commonly administrator-owned. Request macOS authorization
+            # before replacing anything, then run the helper with the user's GUI identity.
+            if os.access(target.parent, os.W_OK):
+                apply_macos(args.package,args.target,args.user_uid)
+            else:
+                command=[sys.executable,*sys.argv[1:]]
+                shell_command=shlex.join(command)
+                escaped=shell_command.replace("\\","\\\\").replace('"','\\"')
+                apple_script='do shell script "'+escaped+'" with administrator privileges'
+                subprocess.run(["/usr/bin/osascript","-e",apple_script],check=True)
     except Exception as exc:
         show_error(str(exc))
         raise
