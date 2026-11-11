@@ -4,12 +4,17 @@ on:
   push:
     tags:
       - "scafa-v*"
+    branches:
+      - "main"
+    paths:
+      - "k50_attendance_build/app.py"
+      - ".github/workflows/scafa-release.yml"
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag to create from this branch (for example scafa-v1.2.3)"
-        required: true
-        default: "scafa-v1.2.3"
+        description: "Optional release tag; when blank, use APP_VERSION from the app"
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -28,7 +33,13 @@ jobs:
       - name: Build Windows installer
         shell: pwsh
         run: |
-          $version = "${{ github.event.inputs.release_tag || github.ref_name }}" -replace '^scafa-v',''
+          $releaseTag = "${{ github.event.inputs.release_tag }}"
+          if ([string]::IsNullOrWhiteSpace($releaseTag)) {
+            $versionLine = Select-String -Path "k50_attendance_build/app.py" -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
+            if (-not $versionLine) { throw "APP_VERSION was not found in app.py" }
+            $releaseTag = "scafa-v$($versionLine.Matches[0].Groups[1].Value)"
+          }
+          $version = $releaseTag -replace '^scafa-v',''
           python -m pip install --upgrade pip
           python -m pip install -r k50_attendance_build/requirements.txt
           python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
@@ -66,8 +77,13 @@ jobs:
           python-version: "3.12"
       - name: Build macOS app
         run: |
-          VERSION="${{ github.event.inputs.release_tag || github.ref_name }}"
-          VERSION="${VERSION#scafa-v}"
+          RELEASE_TAG="${{ github.event.inputs.release_tag }}"
+          if [ -z "$RELEASE_TAG" ]; then
+            APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
+            if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
+            RELEASE_TAG="scafa-v$APP_VERSION"
+          fi
+          VERSION="${RELEASE_TAG#scafa-v}"
           python -m pip install --upgrade pip
           python -m pip install -r k50_attendance_build/requirements.txt
           python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
@@ -102,10 +118,19 @@ jobs:
       - name: Generate checksums and publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
         shell: bash
         run: |
           set -euo pipefail
+          if [ -z "$RELEASE_TAG" ]; then
+            APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
+            if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
+            RELEASE_TAG="scafa-v$APP_VERSION"
+          fi
+          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; skipping duplicate publication."
+            exit 0
+          fi
           : > release-assets/checksums.txt
           while IFS= read -r -d '' file; do
             name="$(basename "$file")"
