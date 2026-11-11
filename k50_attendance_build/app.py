@@ -660,14 +660,13 @@ class App(tk.Tk):
             late=first>scheduled_start+timedelta(minutes=grace)
             early=checked_out and last<scheduled_end
             labels=[]
+            if historical_incomplete:
+                labels.append("Incomplete punch")
             if late: labels.append("Late")
             if early: labels.append("Early departure")
             if not labels:
                 if checked_out:
                     labels.append("Completed")
-                elif day < now.date():
-                    # A lone punch on a past date cannot still be an active shift.
-                    labels.append("Incomplete punch")
                 else:
                     labels.append("In progress")
             status=" • ".join(labels)
