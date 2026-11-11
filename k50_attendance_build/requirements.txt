@@ -3,3 +3,4 @@ pyinstaller==6.16.0
 reportlab==4.4.4
 openpyxl==3.1.5
 winotify==1.1.0
+certifi==2025.11.12

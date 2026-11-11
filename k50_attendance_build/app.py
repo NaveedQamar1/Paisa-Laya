@@ -1,4 +1,5 @@
-import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, subprocess, sys, urllib.request, webbrowser
+import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, subprocess, sys, urllib.request, webbrowser, ssl
+import certifi
 from html import escape
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -21,6 +22,7 @@ BLUE = "#2f6b45"
 TEAL = "#477c57"
 MUTED = "#68756b"
 APP_VERSION = "1.2.3"
+SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
 
@@ -82,7 +84,7 @@ class App(tk.Tk):
                 request=urllib.request.Request(
                     "https://api.github.com/repos/NaveedQamar1/Paisa-Laya/releases/latest",
                     headers={"Accept":"application/vnd.github+json","User-Agent":"SCAFA-Workforce-Updater"})
-                with urllib.request.urlopen(request,timeout=20) as response:
+                with urllib.request.urlopen(request,timeout=20,context=SSL_CONTEXT) as response:
                     release=json.loads(response.read().decode("utf-8"))
                 tag=str(release.get("tag_name") or "")
                 latest=tag.removeprefix(RELEASE_PREFIX).lstrip("v")
@@ -137,7 +139,7 @@ class App(tk.Tk):
                 url=assets[name].get("browser_download_url")
                 if not url: raise RuntimeError(f"Release asset {name} has no download URL.")
                 req=urllib.request.Request(url,headers={"User-Agent":"SCAFA-Workforce-Updater"})
-                with urllib.request.urlopen(req,timeout=90) as response, open(destination,"wb") as out:
+                with urllib.request.urlopen(req,timeout=90,context=SSL_CONTEXT) as response, open(destination,"wb") as out:
                     while True:
                         chunk=response.read(1024*1024)
                         if not chunk: break
@@ -387,22 +389,43 @@ class App(tk.Tk):
         tk.Label(footer,textvariable=self.status,bg="#e8eef8",fg=MUTED,font=("Segoe UI",9),anchor="w").pack(fill="x",padx=18,pady=6)
 
     def _dashboard_ui(self):
-        self.cards=ttk.Frame(self.dashboard); self.cards.pack(fill="x",pady=(0,12))
+        toolbar=ttk.Frame(self.dashboard)
+        toolbar.pack(fill="x",pady=(0,8))
+        ttk.Label(toolbar,text="Dashboard view").pack(side="left")
+        self.dashboard_employee=tk.StringVar(value="All staff")
+        self.dashboard_employee_combo=ttk.Combobox(toolbar,textvariable=self.dashboard_employee,
+            state="readonly",width=28,values=["All staff"])
+        self.dashboard_employee_combo.pack(side="left",padx=8)
+        self.dashboard_employee_combo.bind("<<ComboboxSelected>>",lambda _e:self._update_dashboard(self._rows()))
+        self.latest_punch_label=ttk.Label(self.dashboard,text="LATEST PUNCH  •  No punch records in this date range",
+            font=("Segoe UI",11,"bold"),background="#e8f1eb",foreground=NAVY,padding=12)
+        self.latest_punch_label.pack(fill="x",pady=(0,10))
+        self.cards=ttk.Frame(self.dashboard); self.cards.pack(fill="x",pady=(0,10))
         self.card_values=[]
-        for i,(title,icon) in enumerate([("TOTAL PUNCHES","↗"),("UNIQUE STAFF","♙"),("ACTIVE DAYS","▦"),("AVG. PUNCHES / DAY","◷")]):
-            card=ttk.Frame(self.cards,style="Card.TFrame",padding=14); card.grid(row=0,column=i,sticky="nsew",padx=5)
+        labels=["ON-TIME RATE","LATE ARRIVALS","EARLY DEPARTURES","ABSENCES","INCOMPLETE PUNCHES","AVG. ARRIVAL"]
+        for i,title in enumerate(labels):
+            card=ttk.Frame(self.cards,style="Card.TFrame",padding=11); card.grid(row=0,column=i,sticky="nsew",padx=3)
             self.cards.columnconfigure(i,weight=1)
-            ttk.Label(card,text=icon+"  "+title,style="CardTitle.TLabel").pack(anchor="w")
-            val=ttk.Label(card,text="0",style="CardValue.TLabel"); val.pack(anchor="w",pady=(8,0))
+            ttk.Label(card,text=title,style="CardTitle.TLabel").pack(anchor="w")
+            val=ttk.Label(card,text="—",style="CardValue.TLabel",font=("Segoe UI",17,"bold")); val.pack(anchor="w",pady=(7,0))
             self.card_values.append(val)
-        chartrow=ttk.Frame(self.dashboard); chartrow.pack(fill="both",expand=True)
-        self.daily_box=ttk.Frame(chartrow,style="Card.TFrame",padding=12); self.daily_box.pack(side="left",fill="both",expand=True,padx=5)
-        self.staff_box=ttk.Frame(chartrow,style="Card.TFrame",padding=12); self.staff_box.pack(side="left",fill="both",expand=True,padx=5)
-        ttk.Label(self.daily_box,text="PUNCH ACTIVITY BY DAY",font=("Segoe UI",11,"bold"),background="white").pack(anchor="w")
-        ttk.Label(self.staff_box,text="PUNCHES BY STAFF ID",font=("Segoe UI",11,"bold"),background="white").pack(anchor="w")
-        self.daily_canvas=tk.Canvas(self.daily_box,bg="white",highlightthickness=0,height=310); self.daily_canvas.pack(fill="both",expand=True,pady=(8,0))
-        self.staff_canvas=tk.Canvas(self.staff_box,bg="white",highlightthickness=0,height=310); self.staff_canvas.pack(fill="both",expand=True,pady=(8,0))
-        ttk.Label(self.dashboard,text="Charts and statistics reflect imported/fetched punch records in the selected date range. Staff are identified by device ID.",style="Sub.TLabel").pack(anchor="w",pady=(10,0))
+        comparison=ttk.Frame(self.dashboard,style="Card.TFrame",padding=10)
+        comparison.pack(fill="both",expand=True,pady=(0,8))
+        ttk.Label(comparison,text="EMPLOYEE ATTENDANCE COMPARISON",
+            font=("Segoe UI",11,"bold"),background="white").pack(anchor="w",pady=(0,7))
+        cols=("name","expected","present","late","early","absent","ontime","rate","average")
+        self.comparison_tree=ttk.Treeview(comparison,columns=cols,show="headings",height=8)
+        specs=[("name","Employee",180),("expected","Expected days",95),("present","Present",75),
+               ("late","Late",65),("early","Early leave",85),("absent","Absent",70),
+               ("ontime","On time",75),("rate","On-time %",85),("average","Avg arrival",95)]
+        for col,title,width in specs:
+            self.comparison_tree.heading(col,text=title)
+            self.comparison_tree.column(col,width=width,minwidth=55,anchor="center" if col!="name" else "w")
+        self.comparison_tree.pack(fill="both",expand=True)
+        self.comparison_tree.tag_configure("good",foreground="#166534")
+        self.comparison_tree.tag_configure("attention",foreground="#b45309")
+        ttk.Label(self.dashboard,text="Figures use the selected date range and each employee’s saved schedule, grace period and holiday rules.",
+            style="Sub.TLabel").pack(anchor="w",pady=(3,0))
 
     def _records_ui(self):
         toolbar=ttk.Frame(self.records); toolbar.pack(fill="x",pady=(0,8))
@@ -809,7 +832,83 @@ class App(tk.Tk):
         avg=(len(rows)/days) if days else 0
         for label,value in zip(self.card_values,[f"{len(rows):,}",f"{staff:,}",f"{days:,}",f"{avg:.1f}"]): label.configure(text=value)
         self._draw_charts(rows)
+        if hasattr(self,"dashboard_employee_combo"):
+            selected=self.dashboard_employee.get()
+            dashboard_choices=["All staff"]+[f"{self._name(uid)} ({uid})" for uid in users]
+            self.dashboard_employee_combo["values"]=dashboard_choices
+            if selected not in dashboard_choices: self.dashboard_employee.set("All staff")
+        self._update_dashboard(rows)
         self.status.set(f"{len(daily):,} staff/day records • {len(rows):,} punches • sorted by {mode}")
+
+    def _update_dashboard(self, rows):
+        if rows is None or not hasattr(self,"comparison_tree"):
+            return
+        for item in self.comparison_tree.get_children():
+            self.comparison_tree.delete(item)
+        selected=self.dashboard_employee.get() if hasattr(self,"dashboard_employee") else "All staff"
+        selected_uid=None if selected=="All staff" else selected.rsplit(" (",1)[-1].rstrip(")")
+        latest=max(rows,key=lambda r:str(r[1])) if rows else None
+        if latest:
+            uid,stamp,state=latest
+            self.latest_punch_label.configure(text=f"LATEST PUNCH  •  {self._name(uid)}  (ID {uid})  •  {datetime.strptime(stamp,'%Y-%m-%d %H:%M:%S').strftime('%d %b %Y, %I:%M:%S %p')}")
+        else:
+            self.latest_punch_label.configure(text="LATEST PUNCH  •  No punch records in this date range")
+        grouped={}
+        for uid,stamp,state in rows:
+            grouped.setdefault((str(uid),str(stamp)[:10]),[]).append(str(stamp))
+        first=datetime.strptime(self.start_date.get(),"%Y-%m-%d").date()
+        last=datetime.strptime(self.end_date.get(),"%Y-%m-%d").date()
+        with sqlite3.connect(DB) as c:
+            registered={str(r[0]) for r in c.execute("SELECT user_id FROM staff")}
+        staff_ids=sorted(registered|{uid for uid,day in grouped},
+            key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
+        if selected_uid:
+            staff_ids=[uid for uid in staff_ids if uid==selected_uid]
+        totals={"expected":0,"present":0,"late":0,"early":0,"absent":0,"incomplete":0,"ontime":0}
+        averages=[]
+        for uid in staff_ids:
+            stats={"expected":0,"present":0,"late":0,"early":0,"absent":0,"incomplete":0,"ontime":0}
+            arrivals=[]
+            cursor=first
+            while cursor<=last:
+                day=cursor.isoformat()
+                stamps=sorted(grouped.get((uid,day),[]))
+                status,first_p,last_p,worked=self._attendance_day_status(uid,day,stamps)
+                if status not in ("Day off","Holiday"):
+                    stats["expected"]+=1
+                if status=="Absent":
+                    stats["absent"]+=1
+                elif status.startswith("Incomplete punch"):
+                    stats["incomplete"]+=1
+                    stats["present"]+=1
+                    if "Late" in status: stats["late"]+=1
+                elif stamps:
+                    stats["present"]+=1
+                    if "Late" in status: stats["late"]+=1
+                    else: stats["ontime"]+=1
+                    if "early departure" in status: stats["early"]+=1
+                    try: arrivals.append(datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S").hour*60+datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S").minute)
+                    except ValueError: pass
+                cursor+=timedelta(days=1)
+            rate=(stats["ontime"]/stats["expected"]*100) if stats["expected"] else 0
+            avg=""
+            if arrivals:
+                mean=round(sum(arrivals)/len(arrivals))
+                avg=f"{mean//60:02d}:{mean%60:02d}"
+                averages.extend(arrivals)
+            values=(self._name(uid),stats["expected"],stats["present"],stats["late"],stats["early"],
+                    stats["absent"],stats["ontime"],f"{rate:.1f}%",avg or "—")
+            tag="good" if rate>=90 and stats["late"]==0 and stats["early"]==0 else "attention"
+            self.comparison_tree.insert("","end",values=values,tags=(tag,))
+            for key in totals: totals[key]+=stats[key]
+        rate=(totals["ontime"]/totals["expected"]*100) if totals["expected"] else 0
+        avg_text="—"
+        if averages:
+            mean=round(sum(averages)/len(averages)); avg_text=f"{mean//60:02d}:{mean%60:02d}"
+        values=[f"{rate:.1f}%",f"{totals['late']:,}",f"{totals['early']:,}",
+                f"{totals['absent']:,}",f"{totals['incomplete']:,}",avg_text]
+        for label,value in zip(self.card_values,values):
+            label.configure(text=value)
 
     def _live_refresh(self):
         try:
@@ -1112,6 +1211,8 @@ class App(tk.Tk):
             overview=wb.active; overview.title="Overview"
             summary=wb.create_sheet("Attendance Summary")
             raw=wb.create_sheet("Raw Punches")
+            performance=wb.create_sheet("Employee Comparison")
+            performance.append(["Employee","Device User ID","Expected Days","Present Days","Late Arrivals","Early Departures","Absences","Incomplete Punches","On-time Days","On-time Rate","Average Arrival"])
             summary.append(["SCAFA WORKFORCE | ATTENDANCE REPORT"])
             summary.merge_cells("A1:H1")
             summary["A1"].font=Font(name="Aptos Display",size=18,bold=True,color="FFFFFF")
@@ -1133,9 +1234,11 @@ class App(tk.Tk):
             if last<first: raise ValueError("End date must not precede start date.")
             users=known if scope=="All staff" else [str(scope)]
             status_values=[]
+            employee_performance=[]
             punch_totals={uid:0 for uid in users}
             active_days={uid:0 for uid in users}
             for uid in users:
+                perf={"expected":0,"present":0,"late":0,"early":0,"absent":0,"incomplete":0,"ontime":0,"arrivals":[]}
                 cursor=first
                 while cursor<=last:
                     day=cursor.isoformat(); stamps=sorted(by_user_day.get((uid,day),[]))
@@ -1144,9 +1247,29 @@ class App(tk.Tk):
                     worked_display="—" if status.startswith("Incomplete punch") else format_worked_time(hours)
                     summary.append([uid,self._name(uid),f"{day} ({weekday})",len(stamps),first_p or "—",last_p or "—",worked_display,status])
                     status_values.append(status)
+                    if status not in ("Day off","Holiday"): perf["expected"]+=1
+                    if status=="Absent": perf["absent"]+=1
+                    elif status.startswith("Incomplete punch"):
+                        perf["incomplete"]+=1; perf["present"]+=1
+                        if "Late" in status: perf["late"]+=1
+                    elif stamps:
+                        perf["present"]+=1
+                        if "Late" in status: perf["late"]+=1
+                        else: perf["ontime"]+=1
+                        if "early departure" in status: perf["early"]+=1
+                        try:
+                            arrival=datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S")
+                            perf["arrivals"].append(arrival.hour*60+arrival.minute)
+                        except ValueError: pass
                     punch_totals[uid]+=len(stamps)
                     if stamps: active_days[uid]+=1
                     cursor+=timedelta(days=1)
+                rate=(perf["ontime"]/perf["expected"]) if perf["expected"] else 0
+                avg_minutes=round(sum(perf["arrivals"])/len(perf["arrivals"])) if perf["arrivals"] else None
+                avg_arrival=f"{avg_minutes//60:02d}:{avg_minutes%60:02d}" if avg_minutes is not None else "—"
+                performance.append([self._name(uid),uid,perf["expected"],perf["present"],perf["late"],
+                    perf["early"],perf["absent"],perf["incomplete"],perf["ontime"],rate,avg_arrival])
+                employee_performance.append((uid,perf))
             overview.merge_cells("A1:F1")
             overview["A1"]="SCAFA WORKFORCE | ATTENDANCE OVERVIEW"
             overview["A1"].font=Font(name="Aptos Display",size=18,bold=True,color="FFFFFF")
@@ -1165,6 +1288,13 @@ class App(tk.Tk):
             overview.append(["Staff included",len(users)])
             overview.append(["Active attendance days",sum(active_days.values())])
             overview.append(["Present / late days",sum(1 for s in status_values if "present" in s.casefold() or "late" in s.casefold())])
+            overview.append(["Late arrivals",sum(p["late"] for _,p in employee_performance)])
+            overview.append(["Early departures",sum(p["early"] for _,p in employee_performance)])
+            overview.append(["Absences",sum(p["absent"] for _,p in employee_performance)])
+            overview.append(["Incomplete punches",sum(p["incomplete"] for _,p in employee_performance)])
+            latest_record=max(rows,key=lambda r:str(r[1])) if rows else None
+            latest_text=(f"{self._name(latest_record[0])} • {latest_record[1]}" if latest_record else "No punches")
+            overview.append(["Latest punch",latest_text])
             status_start=7
             status_counts={
                 "Present":sum(1 for s in status_values if s.casefold().startswith("present")),
@@ -1179,7 +1309,7 @@ class App(tk.Tk):
                 rr=status_start+offset
                 overview.cell(rr,5,status_name)
                 overview.cell(rr,6,count)
-            staff_start=14
+            staff_start=17
             overview.cell(staff_start,1,"STAFF PUNCH TOTALS")
             for j,h in enumerate(["Device User ID","Staff Name","Punches","Active Days"],1):
                 overview.cell(staff_start+1,j,h)
@@ -1199,7 +1329,7 @@ class App(tk.Tk):
                 overview.column_dimensions[col].width=width
             for row in overview.iter_rows():
                 for cell in row: cell.alignment=Alignment(vertical="center",horizontal="left")
-            for rowno in (6,15):
+            for rowno in (6,18):
                 for cell in overview[rowno]:
                     cell.font=Font(bold=True,color="FFFFFF")
                     cell.fill=PatternFill("solid",fgColor="24563B")
@@ -1210,7 +1340,7 @@ class App(tk.Tk):
             overview.page_setup.paperSize=overview.PAPERSIZE_A4
             overview.page_setup.fitToWidth=1
             overview.page_setup.fitToHeight=1
-            for ws,widths,header_row in [(summary,[16,28,25,11,21,21,24,28],4),(raw,[18,30,24,20],1)]:
+            for ws,widths,header_row in [(summary,[16,28,25,11,21,21,24,28],4),(raw,[18,30,24,20],1),(performance,[28,16,15,14,15,17,12,18,14,14,18],1)]:
                 ws.freeze_panes="A5" if ws is summary else "A2"
                 ws.sheet_view.showGridLines=False
                 for i,width in enumerate(widths,1): ws.column_dimensions[get_column_letter(i)].width=width
@@ -1231,6 +1361,19 @@ class App(tk.Tk):
                 else:
                     for rr in range(2,ws.max_row+1):
                         ws.cell(rr,3).number_format="yyyy-mm-dd hh:mm:ss"
+            if performance.max_row>=2:
+                perf_table=ExcelTable(displayName="EmployeeComparison",ref=f"A1:K{performance.max_row}")
+                perf_table.tableStyleInfo=TableStyleInfo(name="TableStyleMedium4",showRowStripes=True,showColumnStripes=False)
+                performance.add_table(perf_table)
+                for rr in range(2,performance.max_row+1): performance.cell(rr,10).number_format="0.0%"
+                from openpyxl.chart import BarChart, Reference
+                chart=BarChart(); chart.type="bar"; chart.style=10; chart.title="Late arrivals and early departures"
+                chart.y_axis.title="Employee"; chart.x_axis.title="Days"
+                chart.add_data(Reference(performance,min_col=5,max_col=6,min_row=1,max_row=performance.max_row),titles_from_data=True)
+                chart.set_categories(Reference(performance,min_col=1,min_row=2,max_row=performance.max_row))
+                chart.height=8; chart.width=18
+                performance.add_chart(chart,"M2")
+                performance.freeze_panes="A2"; performance.sheet_view.showGridLines=False
             if summary.max_row>=5:
                 tab=ExcelTable(displayName="AttendanceDetails",ref=f"A4:H{summary.max_row}")
                 tab.tableStyleInfo=TableStyleInfo(name="TableStyleMedium4",showRowStripes=True,showColumnStripes=False)
