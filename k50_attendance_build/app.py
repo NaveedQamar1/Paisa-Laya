@@ -72,47 +72,92 @@ class App(tk.Tk):
         self.after(30000,self._live_refresh)
 
     def configure_background_monitoring(self):
-        """Install or remove a per-user macOS LaunchAgent for K50 punch polling."""
-        if sys.platform != "darwin":
-            messagebox.showinfo("Background monitoring","This background service installer is available in the macOS build.")
-            return
+        """Enable or disable the per-user K50 background monitor on macOS or Windows."""
         try:
-            port=int(self.port.get()); key=int(self.key.get() or "0")
-            if not 1<=port<=65535: raise ValueError()
+            port = int(self.port.get())
+            key = int(self.key.get() or "0")
+            ip = self.ip.get().strip()
+            if not ip or not 1 <= port <= 65535:
+                raise ValueError()
         except ValueError:
-            messagebox.showerror("Invalid device settings","Enter a valid port and numeric communication key first.")
+            messagebox.showerror("Invalid device settings", "Enter a valid device IP, port and numeric communication key first.")
             return
-        base=Path.home()/"SCAFAWorkforce"
-        base.mkdir(parents=True,exist_ok=True)
-        config=base/"device.json"
-        config.write_text(json.dumps({"ip":self.ip.get().strip(),"port":port,"key":key,"interval":60}),encoding="utf-8")
-        label="pk.scafa.workforce.monitor"
-        agent_dir=Path.home()/"Library"/"LaunchAgents"
-        agent_dir.mkdir(parents=True,exist_ok=True)
-        plist=agent_dir/(label+".plist")
-        executable=Path(sys.executable).resolve().parent/"scafa-monitor"
-        if not executable.exists():
-            messagebox.showerror("Monitor helper missing","The background monitor is not included in this app build. Please install the latest macOS package.")
-            return
-        if messagebox.askyesno("Background monitoring","Enable K50 monitoring every 60 seconds and start automatically whenever you log in?\n\nmacOS notifications will appear when new punches are detected. Your Mac must be awake and connected to the same network as the K50."):
-            payload={"Label":label,"ProgramArguments":[str(executable)],"RunAtLoad":True,"KeepAlive":True,
-                     "StandardOutPath":str(base/"monitor.log"),"StandardErrorPath":str(base/"monitor-error.log")}
-            import plistlib
-            plist.write_bytes(plistlib.dumps(payload))
-            uid=os.getuid()
-            subprocess.run(["launchctl","bootout",f"gui/{uid}",str(plist)],capture_output=True,text=True)
-            result=subprocess.run(["launchctl","bootstrap",f"gui/{uid}",str(plist)],capture_output=True,text=True)
-            if result.returncode:
-                messagebox.showerror("Could not start monitoring",result.stderr or result.stdout or "launchctl failed")
+
+        base = Path.home() / "SCAFAWorkforce"
+        base.mkdir(parents=True, exist_ok=True)
+        config = base / "device.json"
+        config.write_text(json.dumps({"ip": ip, "port": port, "key": key, "interval": 60}), encoding="utf-8")
+
+        if sys.platform == "win32":
+            task_name = "SCAFA Workforce Attendance Monitor"
+            executable = Path(sys.executable).resolve().parent / "scafa-monitor.exe"
+            if not executable.exists():
+                messagebox.showerror("Monitor helper missing", "The Windows background monitor is not included in this installer. Please install the latest Windows setup.")
                 return
-            self.status.set("Background K50 monitoring enabled • checks every 60 seconds")
-            messagebox.showinfo("Monitoring enabled","SCAFA Workforce will now check the K50 in the background and start automatically when you log in.")
-        else:
-            uid=os.getuid()
-            subprocess.run(["launchctl","bootout",f"gui/{uid}",str(plist)],capture_output=True,text=True)
-            if plist.exists(): plist.unlink()
-            self.status.set("Background K50 monitoring disabled")
-            messagebox.showinfo("Monitoring disabled","The background K50 monitor has been stopped and removed from login startup.")
+            if messagebox.askyesno(
+                "Background monitoring",
+                "Enable K50 monitoring every 60 seconds and start automatically whenever you sign in to Windows?\n\nWindows notifications will appear when new punches are detected. Your PC must be awake and connected to the same network as the K50."
+            ):
+                command = f'"{executable}"'
+                result = subprocess.run(
+                    ["schtasks", "/Create", "/SC", "ONLOGON", "/TN", task_name,
+                     "/TR", command, "/RL", "LIMITED", "/F"],
+                    capture_output=True, text=True
+                )
+                if result.returncode:
+                    messagebox.showerror("Could not enable monitoring", result.stderr or result.stdout or "Task Scheduler failed.")
+                    return
+                subprocess.run(["schtasks", "/Run", "/TN", task_name], capture_output=True, text=True)
+                self.status.set("Background K50 monitoring enabled • checks every 60 seconds")
+                messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now monitor the K50 in the background and start automatically when you sign in.")
+            else:
+                subprocess.run(["schtasks", "/End", "/TN", task_name], capture_output=True, text=True)
+                subprocess.run(["schtasks", "/Delete", "/TN", task_name, "/F"], capture_output=True, text=True)
+                self.status.set("Background K50 monitoring disabled")
+                messagebox.showinfo("Monitoring disabled", "The background K50 monitor has been stopped and removed from Windows startup.")
+            return
+
+        if sys.platform == "darwin":
+            label = "pk.scafa.workforce.monitor"
+            agent_dir = Path.home() / "Library" / "LaunchAgents"
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            plist = agent_dir / (label + ".plist")
+            executable = Path(sys.executable).resolve().parent / "scafa-monitor"
+            if not executable.exists():
+                messagebox.showerror("Monitor helper missing", "The background monitor is not included in this app build. Please install the latest macOS package.")
+                return
+            if messagebox.askyesno(
+                "Background monitoring",
+                "Enable K50 monitoring every 60 seconds and start automatically whenever you log in?\n\nmacOS notifications will appear when new punches are detected. Your Mac must be awake and connected to the same network as the K50."
+            ):
+                import plistlib
+                payload = {
+                    "Label": label,
+                    "ProgramArguments": [str(executable)],
+                    "RunAtLoad": True,
+                    "KeepAlive": True,
+                    "StandardOutPath": str(base / "monitor.log"),
+                    "StandardErrorPath": str(base / "monitor-error.log")
+                }
+                plist.write_bytes(plistlib.dumps(payload))
+                uid = os.getuid()
+                subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(plist)], capture_output=True, text=True)
+                result = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(plist)], capture_output=True, text=True)
+                if result.returncode:
+                    messagebox.showerror("Could not start monitoring", result.stderr or result.stdout or "launchctl failed")
+                    return
+                self.status.set("Background K50 monitoring enabled • checks every 60 seconds")
+                messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now check the K50 in the background and start automatically when you log in.")
+            else:
+                uid = os.getuid()
+                subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(plist)], capture_output=True, text=True)
+                if plist.exists():
+                    plist.unlink()
+                self.status.set("Background K50 monitoring disabled")
+                messagebox.showinfo("Monitoring disabled", "The background K50 monitor has been stopped and removed from login startup.")
+            return
+
+        messagebox.showinfo("Background monitoring", "Automatic background monitoring is supported by the Windows and macOS desktop builds.")
 
     def _date_field(self, parent, variable, width=12):
         wrap=ttk.Frame(parent)
