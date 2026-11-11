@@ -83,9 +83,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: release-macos-${{ matrix.arch }}
-          path: |
-            dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
-            dist/SCAFA_Workforce_Installer_Intel.pkg
+          path: dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: matrix.arch == 'intel'
+        with:
+          name: release-macos-intel-installer
+          path: dist/SCAFA_Workforce_Installer_Intel.pkg
           if-no-files-found: error
 
   publish:
