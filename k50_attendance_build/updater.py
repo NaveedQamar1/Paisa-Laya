@@ -1,6 +1,8 @@
 """Small external helper that applies a verified SCAFA Workforce update after the app exits."""
 import argparse
 import os
+import shlex
+import stat
 import shutil
 import subprocess
 import sys
@@ -13,9 +15,42 @@ from pathlib import Path
 
 def wait_for_process(pid, timeout=180):
     deadline=time.time()+timeout
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        kernel32=ctypes.WinDLL("kernel32",use_last_error=True)
+        kernel32.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD]
+        kernel32.OpenProcess.restype=wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes=[wintypes.HANDLE,wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype=wintypes.DWORD
+        kernel32.CloseHandle.argtypes=[wintypes.HANDLE]
+        kernel32.CloseHandle.restype=wintypes.BOOL
+        SYNCHRONIZE=0x00100000
+        handle=kernel32.OpenProcess(SYNCHRONIZE,False,pid)
+        if not handle:
+            error=ctypes.get_last_error()
+            if error==87:  # ERROR_INVALID_PARAMETER: PID no longer exists.
+                return
+            raise OSError(error,"Could not wait for the SCAFA Workforce process to close.")
+        try:
+            remaining=max(0,int((deadline-time.time())*1000))
+            result=kernel32.WaitForSingleObject(handle,remaining)
+            if result==0:
+                return
+            if result==0x102:
+                raise TimeoutError("SCAFA Workforce did not close in time. No files were replaced.")
+            raise OSError("Windows could not confirm that SCAFA Workforce had closed.")
+        finally:
+            kernel32.CloseHandle(handle)
     while time.time()<deadline:
         try:
             os.kill(pid,0)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            # The process exists but belongs to another user; do not mistake it for exited.
+            time.sleep(0.5)
+            continue
         except OSError:
             return
         time.sleep(0.5)
@@ -57,10 +92,19 @@ def safe_extract_zip(archive, destination):
             resolved=(destination/normalized).resolve()
             if resolved!=destination and destination not in resolved.parents:
                 raise RuntimeError("The update archive attempts to write outside its extraction folder.")
+            mode=(member.external_attr >> 16) & 0xFFFF
+            if stat.S_IFMT(mode)==stat.S_IFLNK:
+                raise RuntimeError("The update archive contains a symbolic link.")
         zf.extractall(destination)
+        # ZipFile.extractall does not restore Unix executable permissions.
+        for member in zf.infolist():
+            mode=(member.external_attr >> 16) & 0o777
+            if mode and not member.is_dir():
+                extracted=destination/member.filename.replace(chr(92),"/")
+                extracted.chmod(mode)
 
 
-def apply_macos(package,target):
+def apply_macos(package,target,user_uid=None):
     archive=Path(package); app_target=Path(target)
     if not archive.is_file() or app_target.suffix!=".app":
         raise RuntimeError("The macOS update package or installed application path is invalid.")
@@ -84,7 +128,16 @@ def apply_macos(package,target):
             if app_target.exists(): shutil.rmtree(app_target)
             backup.rename(app_target)
             raise
-        subprocess.Popen(["/usr/bin/open",str(app_target)])
+        try:
+            if user_uid is not None and hasattr(os, "geteuid") and os.geteuid() == 0:
+                subprocess.run(["/bin/launchctl", "asuser", str(user_uid),
+                                "/usr/bin/open", str(app_target)],check=True)
+            else:
+                subprocess.run(["/usr/bin/open", str(app_target)],check=True)
+        except Exception:
+            shutil.rmtree(app_target,ignore_errors=True)
+            backup.rename(app_target)
+            raise
         shutil.rmtree(backup,ignore_errors=True)
     finally:
         shutil.rmtree(work,ignore_errors=True)
@@ -96,11 +149,24 @@ def main():
     parser.add_argument("--package",required=True)
     parser.add_argument("--target",required=True)
     parser.add_argument("--platform",choices=("windows","macos"),required=True)
+    parser.add_argument("--user-uid",type=int,default=None)
     args=parser.parse_args()
     try:
         wait_for_process(args.pid)
-        if args.platform=="windows": apply_windows(args.package,args.target)
-        else: apply_macos(args.package,args.target)
+        if args.platform=="windows":
+            apply_windows(args.package,args.target)
+        else:
+            target=Path(args.target)
+            # /Applications is commonly administrator-owned. Request macOS authorization
+            # before replacing anything, then run the helper with the user's GUI identity.
+            if os.access(target.parent, os.W_OK):
+                apply_macos(args.package,args.target,args.user_uid)
+            else:
+                command=[sys.executable,*sys.argv[1:]]
+                shell_command=shlex.join(command)
+                escaped=shell_command.replace("\\","\\\\").replace('"','\\"')
+                apple_script='do shell script "'+escaped+'" with administrator privileges'
+                subprocess.run(["/usr/bin/osascript","-e",apple_script],check=True)
     except Exception as exc:
         show_error(str(exc))
         raise
