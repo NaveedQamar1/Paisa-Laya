@@ -1292,6 +1292,9 @@ class App(tk.Tk):
             overview.append(["Early departures",sum(p["early"] for _,p in employee_performance)])
             overview.append(["Absences",sum(p["absent"] for _,p in employee_performance)])
             overview.append(["Incomplete punches",sum(p["incomplete"] for _,p in employee_performance)])
+            latest_record=max(rows,key=lambda r:str(r[1])) if rows else None
+            latest_text=(f"{self._name(latest_record[0])} • {latest_record[1]}" if latest_record else "No punches")
+            overview.append(["Latest punch",latest_text])
             status_start=7
             status_counts={
                 "Present":sum(1 for s in status_values if s.casefold().startswith("present")),
@@ -1306,7 +1309,7 @@ class App(tk.Tk):
                 rr=status_start+offset
                 overview.cell(rr,5,status_name)
                 overview.cell(rr,6,count)
-            staff_start=14
+            staff_start=17
             overview.cell(staff_start,1,"STAFF PUNCH TOTALS")
             for j,h in enumerate(["Device User ID","Staff Name","Punches","Active Days"],1):
                 overview.cell(staff_start+1,j,h)
@@ -1326,7 +1329,7 @@ class App(tk.Tk):
                 overview.column_dimensions[col].width=width
             for row in overview.iter_rows():
                 for cell in row: cell.alignment=Alignment(vertical="center",horizontal="left")
-            for rowno in (6,15):
+            for rowno in (6,18):
                 for cell in overview[rowno]:
                     cell.font=Font(bold=True,color="FFFFFF")
                     cell.fill=PatternFill("solid",fgColor="24563B")
