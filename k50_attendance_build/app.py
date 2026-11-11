@@ -20,6 +20,8 @@ NAVY = "#17251d"
 BLUE = "#2f6b45"
 TEAL = "#477c57"
 MUTED = "#68756b"
+APP_VERSION = "1.2.2"
+RELEASE_PREFIX = "scafa-v"
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
 
 def format_worked_time(hours):
@@ -74,7 +76,7 @@ class App(tk.Tk):
 
     def check_for_updates(self):
         """Check the public release feed for a newer SCAFA Workforce build."""
-        self.status.set("Checking for updates…")
+        self.status.set(f"Checking for updates… (installed version {APP_VERSION})")
         def worker():
             try:
                 request=urllib.request.Request(
@@ -92,11 +94,21 @@ class App(tk.Tk):
         threading.Thread(target=worker,daemon=True).start()
 
     def _update_check_result(self,tag,url,assets):
-        self.status.set(f"Latest published release: {tag}")
+        latest=tag.removeprefix(RELEASE_PREFIX).lstrip("v")
+        self.status.set(f"Installed version {APP_VERSION} • Latest release {tag}")
         if not assets:
             messagebox.showinfo("SCAFA Workforce updates",f"Release {tag} has no downloadable installer assets yet.")
             return
-        messagebox.showinfo("SCAFA Workforce updates",f"Latest published version: {tag}\n\nThe update service found a release. Automatic installation is not yet enabled in this build.\n\nRelease page:\n{url}")
+        try:
+            current_parts=tuple(int(x) for x in APP_VERSION.split("."))
+            latest_parts=tuple(int(x) for x in latest.split("."))
+        except ValueError:
+            messagebox.showwarning("SCAFA Workforce updates",f"Found release {tag}, but its version number could not be compared safely.\n\n{url}")
+            return
+        if latest_parts<=current_parts:
+            messagebox.showinfo("SCAFA Workforce updates",f"You are using version {APP_VERSION}. The latest published version is {latest}. No update is required.")
+            return
+        messagebox.showinfo("SCAFA Workforce update available",f"Installed version: {APP_VERSION}\nLatest version: {latest}\n\nA newer release is available. This build can open the release page, but does not yet install updates automatically.\n\nRelease page:\n{url}")
         try: webbrowser.open(url)
         except Exception: pass
 
