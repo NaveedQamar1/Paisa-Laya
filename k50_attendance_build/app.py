@@ -75,46 +75,121 @@ class App(tk.Tk):
         self.after(30000,self._live_refresh)
 
     def check_for_updates(self):
-        """Check the public release feed for a newer SCAFA Workforce build."""
+        """Check GitHub Releases and offer a verified in-app update."""
         self.status.set(f"Checking for updates… (installed version {APP_VERSION})")
         def worker():
             try:
                 request=urllib.request.Request(
                     "https://api.github.com/repos/NaveedQamar1/Paisa-Laya/releases/latest",
                     headers={"Accept":"application/vnd.github+json","User-Agent":"SCAFA-Workforce-Updater"})
-                with urllib.request.urlopen(request,timeout=15) as response:
+                with urllib.request.urlopen(request,timeout=20) as response:
                     release=json.loads(response.read().decode("utf-8"))
-                tag=str(release.get("tag_name") or "Unknown")
-                url=str(release.get("html_url") or "https://github.com/NaveedQamar1/Paisa-Laya/releases")
-                assets=release.get("assets") or []
-                self.after(0,lambda:self._update_check_result(tag,url,assets))
+                tag=str(release.get("tag_name") or "")
+                latest=tag.removeprefix(RELEASE_PREFIX).lstrip("v")
+                current_parts=tuple(int(x) for x in APP_VERSION.split("."))
+                latest_parts=tuple(int(x) for x in latest.split("."))
+                if latest_parts<=current_parts:
+                    self.after(0,lambda:self._update_no_update(latest or tag))
+                    return
+                assets={str(a.get("name")):a for a in (release.get("assets") or [])}
+                if sys.platform=="win32":
+                    platform="windows"; asset_name="SCAFA_Workforce_Setup.exe"
+                elif sys.platform=="darwin":
+                    machine=os.uname().machine.lower()
+                    platform="macos"
+                    asset_name=("SCAFA_Workforce_macOS_apple-silicon.zip"
+                                if machine in ("arm64","aarch64") else "SCAFA_Workforce_macOS_intel.zip")
+                else:
+                    raise RuntimeError("In-app updates are currently supported on Windows and macOS only.")
+                if asset_name not in assets or "checksums.txt" not in assets:
+                    raise RuntimeError(f"Release {tag} is missing {asset_name} or checksums.txt.")
+                self.after(0,lambda t=latest:self._update_offer(t))
+                # Download in the background after the user accepts; the UI callback starts it.
+                self._pending_release=(release,asset_name,platform)
             except Exception as exc:
                 message=str(exc)
                 self.after(0,lambda m=message:self._update_check_failed(m))
         threading.Thread(target=worker,daemon=True).start()
 
-    def _update_check_result(self,tag,url,assets):
-        latest=tag.removeprefix(RELEASE_PREFIX).lstrip("v")
-        self.status.set(f"Installed version {APP_VERSION} • Latest release {tag}")
-        if not assets:
-            messagebox.showinfo("SCAFA Workforce updates",f"Release {tag} has no downloadable installer assets yet.")
+    def _update_no_update(self,latest):
+        self.status.set(f"Up to date • version {APP_VERSION}")
+        messagebox.showinfo("SCAFA Workforce updates",
+            f"You are using version {APP_VERSION}. The latest published version is {latest or APP_VERSION}. No update is required.")
+
+    def _update_offer(self,latest):
+        self.status.set(f"Update available • version {latest}")
+        if messagebox.askyesno("SCAFA Workforce update available",
+                f"Installed version: {APP_VERSION}\nLatest version: {latest}\n\nDownload and prepare this update now? Your attendance database and settings are stored separately and will be preserved."):
+            threading.Thread(target=self._download_and_prepare_update,daemon=True).start()
+
+    def _download_and_prepare_update(self):
+        try:
+            pending=getattr(self,"_pending_release",None)
+            if not pending:
+                raise RuntimeError("Update details are no longer available. Please check again.")
+            release,asset_name,platform=pending
+            assets={str(a.get("name")):a for a in (release.get("assets") or [])}
+            base=Path.home()/"SCAFAWorkforce"/"updates"
+            base.mkdir(parents=True,exist_ok=True)
+            package=base/asset_name
+            checksum_file=base/"checksums.txt"
+            for name,destination in ((asset_name,package),("checksums.txt",checksum_file)):
+                url=assets[name].get("browser_download_url")
+                if not url: raise RuntimeError(f"Release asset {name} has no download URL.")
+                req=urllib.request.Request(url,headers={"User-Agent":"SCAFA-Workforce-Updater"})
+                with urllib.request.urlopen(req,timeout=90) as response, open(destination,"wb") as out:
+                    while True:
+                        chunk=response.read(1024*1024)
+                        if not chunk: break
+                        out.write(chunk)
+            expected=None
+            for line in checksum_file.read_text(encoding="utf-8").splitlines():
+                parts=line.strip().split(None,1)
+                if len(parts)==2 and parts[1].lstrip("*").strip()==asset_name:
+                    expected=parts[0].lower(); break
+            if not expected or len(expected)!=64:
+                raise RuntimeError(f"No valid SHA-256 entry was published for {asset_name}.")
+            import hashlib
+            digest=hashlib.sha256()
+            with open(package,"rb") as stream:
+                for chunk in iter(lambda:stream.read(1024*1024),b""): digest.update(chunk)
+            if digest.hexdigest().lower()!=expected:
+                package.unlink(missing_ok=True)
+                raise RuntimeError("The downloaded update failed SHA-256 verification. The installed application has not been changed.")
+            helper_name="scafa-updater.exe" if platform=="windows" else "scafa-updater"
+            helper_source=Path(sys.executable).resolve().parent/helper_name
+            if platform=="macos":
+                helper_source=Path(sys.executable).resolve().parent/helper_name
+                app_target=Path(sys.executable).resolve().parents[2]
+            else:
+                app_target=Path(sys.executable).resolve().parent
+            if not helper_source.exists():
+                raise RuntimeError("The update helper is missing from this installation. Install the latest full setup package first.")
+            import shutil
+            helper_copy=base/("scafa-updater-run.exe" if platform=="windows" else "scafa-updater-run")
+            shutil.copy2(helper_source,helper_copy)
+            command=[str(helper_copy),"--pid",str(os.getpid()),"--package",str(package),
+                     "--target",str(app_target),"--platform",platform]
+            self.after(0,lambda:self._launch_update_helper(command))
+        except Exception as exc:
+            message=str(exc)
+            self.after(0,lambda m=message:self._update_check_failed(m))
+
+    def _launch_update_helper(self,command):
+        if not messagebox.askyesno("Ready to install update",
+                "The update has been downloaded and verified. SCAFA Workforce will close, install the update and reopen. Continue?"):
+            self.status.set("Update downloaded; installation cancelled.")
             return
         try:
-            current_parts=tuple(int(x) for x in APP_VERSION.split("."))
-            latest_parts=tuple(int(x) for x in latest.split("."))
-        except ValueError:
-            messagebox.showwarning("SCAFA Workforce updates",f"Found release {tag}, but its version number could not be compared safely.\n\n{url}")
-            return
-        if latest_parts<=current_parts:
-            messagebox.showinfo("SCAFA Workforce updates",f"You are using version {APP_VERSION}. The latest published version is {latest}. No update is required.")
-            return
-        messagebox.showinfo("SCAFA Workforce update available",f"Installed version: {APP_VERSION}\nLatest version: {latest}\n\nA newer release is available. This build can open the release page, but does not yet install updates automatically.\n\nRelease page:\n{url}")
-        try: webbrowser.open(url)
-        except Exception: pass
+            subprocess.Popen(command,close_fds=True)
+            self.destroy()
+        except Exception as exc:
+            messagebox.showerror("Could not start update",str(exc))
 
     def _update_check_failed(self,message):
-        self.status.set("Could not check for updates.")
-        messagebox.showwarning("Update check unavailable",f"Could not contact the update service. Check your internet connection.\n\n{message}")
+        self.status.set("Could not complete update check.")
+        messagebox.showwarning("SCAFA Workforce update unavailable",
+            f"Could not check or prepare the update. Your installed application has not been changed.\n\n{message}")
 
     def configure_background_monitoring(self):
         """Enable or disable the per-user K50 background monitor on macOS or Windows."""
