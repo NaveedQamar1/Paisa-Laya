@@ -1053,7 +1053,8 @@ class App(tk.Tk):
                     day=cursor.isoformat(); stamps=sorted(by_user_day.get((uid,day),[]))
                     status,first_p,last_p,hours=self._attendance_day_status(uid,day,stamps)
                     weekday=datetime.strptime(day,"%Y-%m-%d").strftime("%A")
-                    summary.append([uid,self._name(uid),f"{day} ({weekday})",len(stamps),first_p or "",last_p or "",format_worked_time(hours),status])
+                    worked_display="—" if status.startswith("Incomplete punch") else format_worked_time(hours)
+                    summary.append([uid,self._name(uid),f"{day} ({weekday})",len(stamps),first_p or "—",last_p or "—",worked_display,status])
                     status_values.append(status)
                     punch_totals[uid]+=len(stamps)
                     if stamps: active_days[uid]+=1
