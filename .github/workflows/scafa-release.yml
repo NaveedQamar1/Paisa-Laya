@@ -7,8 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Existing tag to publish (for example scafa-v1.2.2)"
+        description: "Release tag to create from this branch (for example scafa-v1.2.3)"
         required: true
+        default: "scafa-v1.2.3"
         type: string
 
 permissions:
