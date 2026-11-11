@@ -14,9 +14,33 @@ from pathlib import Path
 
 def wait_for_process(pid, timeout=180):
     deadline=time.time()+timeout
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        SYNCHRONIZE=0x00100000
+        handle=ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE,False,pid)
+        if not handle:
+            # A process that has already exited cannot be opened.
+            return
+        try:
+            remaining=max(0,int((deadline-time.time())*1000))
+            result=ctypes.windll.kernel32.WaitForSingleObject(handle,remaining)
+            if result==0:
+                return
+            if result==0x102:
+                raise TimeoutError("SCAFA Workforce did not close in time. No files were replaced.")
+            raise OSError("Windows could not confirm that SCAFA Workforce had closed.")
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
     while time.time()<deadline:
         try:
             os.kill(pid,0)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            # The process exists but belongs to another user; do not mistake it for exited.
+            time.sleep(0.5)
+            continue
         except OSError:
             return
         time.sleep(0.5)
