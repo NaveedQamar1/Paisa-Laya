@@ -1,5 +1,5 @@
 #define MyAppName "SCAFA Workforce"
-#define MyAppVersion "1.2.2"
+#define MyAppVersion "1.2.3"
 #define MyAppPublisher "SCAFA Workforce"
 #define MyAppExeName "SCAFA_Workforce.exe"
 
