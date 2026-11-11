@@ -31,6 +31,7 @@ class UpdaterHelperTests(unittest.TestCase):
             archive=root/"unsafe.zip"
             with zipfile.ZipFile(archive,"w") as zf:
                 zf.writestr("../outside.txt","unsafe")
+                zf.writestr("..\\\\outside-windows.txt","unsafe")
             with self.assertRaises(RuntimeError):
                 updater.safe_extract_zip(archive,root/"extract")
 
