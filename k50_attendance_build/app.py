@@ -161,7 +161,7 @@ class App(tk.Tk):
                 return
             if messagebox.askyesno(
                 "Background monitoring",
-                "Enable K50 monitoring every 60 seconds and start automatically whenever you log in?\n\nmacOS notifications will appear when new punches are detected. Your Mac must be awake and connected to the same network as the K50."
+                "Enable K50 monitoring every 10 seconds and start automatically whenever you log in?\n\nmacOS notifications will appear when new punches are detected. Your Mac must be awake and connected to the same network as the K50."
             ):
                 import plistlib
                 payload = {
@@ -179,7 +179,7 @@ class App(tk.Tk):
                 if result.returncode:
                     messagebox.showerror("Could not start monitoring", result.stderr or result.stdout or "launchctl failed")
                     return
-                self.status.set("Background K50 monitoring enabled • checks every 60 seconds")
+                self.status.set("Background K50 monitoring enabled • checks every 10 seconds")
                 messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now check the K50 in the background and start automatically when you log in.")
             else:
                 uid = os.getuid()
