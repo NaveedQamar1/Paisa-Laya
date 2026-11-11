@@ -69,6 +69,7 @@ class App(tk.Tk):
         self._style()
         self._ui()
         self.refresh()
+        self.after(30000,self._live_refresh)
 
     def _date_field(self, parent, variable, width=12):
         wrap=ttk.Frame(parent)
@@ -192,18 +193,21 @@ class App(tk.Tk):
         ttk.Label(self.dashboard,text="Charts and statistics reflect imported/fetched punch records in the selected date range. Staff are identified by device ID.",style="Sub.TLabel").pack(anchor="w",pady=(10,0))
 
     def _records_ui(self):
-        cols=("uid","name","time","status")
+        cols=("uid","name","date","checkin","checkout","active","attendance")
         self.tree=ttk.Treeview(self.records,columns=cols,show="headings")
-        # Keep the data columns compact and predictable instead of spreading
-        # every field across the full monitor width.
-        specs=[("uid","Device User ID",112),("name","Staff name",230),
-               ("time","Attendance date & time",205),("status","Punch status",112)]
+        specs=[("uid","Assigned ID",82),("name","Staff name",175),
+               ("date","Date",105),("checkin","Check-in",105),
+               ("checkout","Check-out",105),("active","Active hours",135),
+               ("attendance","Attendance status",170)]
         for col,title,width in specs:
             self.tree.heading(col,text=title,anchor="w")
-            self.tree.column(col,width=width,minwidth=90,stretch=False,anchor="w")
+            self.tree.column(col,width=width,minwidth=75,stretch=True,anchor="w")
         self.tree.pack(fill="both",expand=True,padx=2,pady=2)
         self.tree.tag_configure("odd",background="#f4f7f5")
         self.tree.tag_configure("even",background="#ffffff")
+        self.tree.tag_configure("late",foreground="#b45309")
+        self.tree.tag_configure("early",foreground="#b91c1c")
+        self.tree.tag_configure("open",foreground="#166534")
 
     def _rules(self):
         defaults={"default_start":"09:45","default_end":"20:00","default_grace":"15",
@@ -470,12 +474,70 @@ class App(tk.Tk):
                 return c.execute("SELECT user_id,punch_time,status FROM punches WHERE punch_time BETWEEN ? AND ? ORDER BY punch_time",(bounds[0],bounds[1])).fetchall()
             return c.execute("SELECT user_id,punch_time,status FROM punches ORDER BY punch_time").fetchall()
 
+    def _daily_attendance_rows(self, rows):
+        """Collapse raw device punches into one live attendance row per staff/day."""
+        grouped={}
+        for uid,stamp,state in rows:
+            try:
+                parsed=datetime.fromisoformat(str(stamp))
+            except ValueError:
+                continue
+            grouped.setdefault((str(uid),parsed.date()),[]).append(parsed)
+        with sqlite3.connect(DB) as c:
+            general=dict(c.execute("SELECT setting,value FROM app_settings"))
+            staff_rules={str(r[0]):(r[1],r[2],int(r[3])) for r in c.execute(
+                "SELECT user_id,start_time,end_time,grace_minutes FROM staff_rules")}
+            day_rules={(str(r[0]),int(r[1])):(r[2],r[3],int(r[4]),r[5]) for r in c.execute(
+                "SELECT user_id,weekday,start_time,end_time,grace_minutes,shift_type FROM staff_day_rules")}
+        now=datetime.now()
+        output=[]
+        for (uid,day),punches in grouped.items():
+            punches.sort()
+            first,last=punches[0],punches[-1]
+            checked_out=len(punches)>1
+            check_out=last.strftime("%H:%M:%S") if checked_out else "—"
+            end_point=last if checked_out else now
+            elapsed=max(0,int((end_point-first).total_seconds()//60))
+            hours,minutes=divmod(elapsed,60)
+            active=f"{hours} hours {minutes} minutes"
+            weekday=day.weekday()
+            start=general.get("default_start","09:45")
+            end=general.get("default_end","20:00")
+            grace=int(general.get("default_grace","15"))
+            if uid in staff_rules:
+                start,end,grace=staff_rules[uid]
+            if (uid,weekday) in day_rules:
+                start,end,grace,shift_type=day_rules[(uid,weekday)]
+            try:
+                scheduled_start=datetime.combine(day,datetime.strptime(start,"%H:%M").time())
+                scheduled_end=datetime.combine(day,datetime.strptime(end,"%H:%M").time())
+            except ValueError:
+                scheduled_start=datetime.combine(day,datetime.strptime("09:45","%H:%M").time())
+                scheduled_end=datetime.combine(day,datetime.strptime("20:00","%H:%M").time())
+            late=first>scheduled_start+timedelta(minutes=grace)
+            early=checked_out and last<scheduled_end
+            labels=[]
+            if late: labels.append("Late")
+            if early: labels.append("Early departure")
+            if not labels: labels.append("Completed" if checked_out else "In progress")
+            status=" • ".join(labels)
+            tag="early" if early else ("late" if late else ("open" if not checked_out else ""))
+            output.append((uid,day.isoformat(),first.strftime("%H:%M:%S"),check_out,active,status,tag))
+        # Assigned device IDs ascend numerically; dates descend within each ID.
+        output.sort(key=lambda r:r[1],reverse=True)
+        output.sort(key=lambda r:(0,int(r[0])) if r[0].isdigit() else (1,r[0].lower()))
+        return output
+
     def refresh(self):
         rows=self._rows()
         if rows is None: return
         for i in self.tree.get_children(): self.tree.delete(i)
-        for idx,row in enumerate(reversed(rows[-5000:])):
-            self.tree.insert("","end",values=(row[0],self._name(row[0]),row[1],row[2]),tags=("odd",) if idx%2 else ())
+        daily=self._daily_attendance_rows(rows)
+        for idx,row in enumerate(daily):
+            uid,day,checkin,checkout,active,status,tag=row
+            tags=["odd" if idx%2 else "even"]
+            if tag: tags.append(tag)
+            self.tree.insert("","end",values=(uid,self._name(uid),day,checkin,checkout,active,status),tags=tuple(tags))
         with sqlite3.connect(DB) as c:
             registered={str(r[0]) for r in c.execute("SELECT user_id FROM staff")}
         users=sorted(registered | set(str(r[0]) for r in rows),key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
@@ -487,7 +549,15 @@ class App(tk.Tk):
         avg=(len(rows)/days) if days else 0
         for label,value in zip(self.card_values,[f"{len(rows):,}",f"{staff:,}",f"{days:,}",f"{avg:.1f}"]): label.configure(text=value)
         self._draw_charts(rows)
-        self.status.set(f"{len(rows):,} punches • {staff} staff IDs • {self.start_date.get()} to {self.end_date.get()}")
+        self.status.set(f"{len(daily):,} staff/day records • {len(rows):,} punches • assigned ID order")
+
+    def _live_refresh(self):
+        try:
+            if self.winfo_exists():
+                self.refresh()
+                self.after(30000,self._live_refresh)
+        except tk.TclError:
+            pass
 
     def _draw_charts(self,rows):
         daily={}
