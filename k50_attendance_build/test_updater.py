@@ -50,10 +50,10 @@ class UpdaterHelperTests(unittest.TestCase):
                 for path in source.rglob("*"):
                     if path.is_file():
                         zf.write(path,path.relative_to(source.parent))
-            with patch.object(updater.subprocess,"Popen") as launch:
+            with patch.object(updater.subprocess,"run") as launch:
                 updater.apply_macos(archive,installed)
             self.assertEqual((installed/"Contents"/"MacOS"/"SCAFA_Workforce").read_text(),"new")
-            launch.assert_called_once()
+            launch.assert_called_once_with(["/usr/bin/open",str(installed)],check=True)
 
 
 if __name__=="__main__":
