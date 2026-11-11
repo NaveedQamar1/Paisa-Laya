@@ -109,11 +109,16 @@ def apply_macos(package,target,user_uid=None):
             if app_target.exists(): shutil.rmtree(app_target)
             backup.rename(app_target)
             raise
-        if user_uid is not None and hasattr(os, "geteuid") and os.geteuid() == 0:
-            subprocess.Popen(["/bin/launchctl", "asuser", str(user_uid),
-                              "/usr/bin/open", str(app_target)])
-        else:
-            subprocess.Popen(["/usr/bin/open", str(app_target)])
+        try:
+            if user_uid is not None and hasattr(os, "geteuid") and os.geteuid() == 0:
+                subprocess.run(["/bin/launchctl", "asuser", str(user_uid),
+                                "/usr/bin/open", str(app_target)],check=True)
+            else:
+                subprocess.run(["/usr/bin/open", str(app_target)],check=True)
+        except Exception:
+            shutil.rmtree(app_target,ignore_errors=True)
+            backup.rename(app_target)
+            raise
         shutil.rmtree(backup,ignore_errors=True)
     finally:
         shutil.rmtree(work,ignore_errors=True)
