@@ -170,6 +170,8 @@ class App(tk.Tk):
             shutil.copy2(helper_source,helper_copy)
             command=[str(helper_copy),"--pid",str(os.getpid()),"--package",str(package),
                      "--target",str(app_target),"--platform",platform]
+            if platform=="macos":
+                command.extend(["--user-uid",str(os.getuid())])
             self.after(0,lambda:self._launch_update_helper(command))
         except Exception as exc:
             message=str(exc)
