@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.release_tag || github.ref }}
+          ref: ${{ github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -59,7 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.release_tag || github.ref }}
+          ref: ${{ github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -108,4 +108,4 @@ jobs:
             printf '%s  %s\n' "$digest" "$name" >> release-assets/checksums.txt
           done < <(find release-assets -type f ! -name checksums.txt -print0)
           mapfile -d '' assets < <(find release-assets -type f -print0)
-          gh release create "$RELEASE_TAG" "${assets[@]}" --repo "${{ github.repository }}" --title "SCAFA Workforce $RELEASE_TAG" --generate-notes
+          gh release create "$RELEASE_TAG" "${assets[@]}" --repo "${{ github.repository }}" --target "$GITHUB_SHA" --title "SCAFA Workforce $RELEASE_TAG" --generate-notes
