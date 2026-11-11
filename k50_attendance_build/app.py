@@ -103,9 +103,9 @@ class App(tk.Tk):
                     raise RuntimeError("In-app updates are currently supported on Windows and macOS only.")
                 if asset_name not in assets or "checksums.txt" not in assets:
                     raise RuntimeError(f"Release {tag} is missing {asset_name} or checksums.txt.")
-                self.after(0,lambda t=latest:self._update_offer(t))
-                # Download in the background after the user accepts; the UI callback starts it.
+                # Store the release before scheduling the UI callback to avoid a worker/UI race.
                 self._pending_release=(release,asset_name,platform)
+                self.after(0,lambda t=latest:self._update_offer(t))
             except Exception as exc:
                 message=str(exc)
                 self.after(0,lambda m=message:self._update_check_failed(m))
