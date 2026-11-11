@@ -1,4 +1,4 @@
-import csv, sqlite3, threading, calendar, ipaddress, socket
+import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, subprocess, sys
 from html import escape
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -70,6 +70,49 @@ class App(tk.Tk):
         self._ui()
         self.refresh()
         self.after(30000,self._live_refresh)
+
+    def configure_background_monitoring(self):
+        """Install or remove a per-user macOS LaunchAgent for K50 punch polling."""
+        if sys.platform != "darwin":
+            messagebox.showinfo("Background monitoring","This background service installer is available in the macOS build.")
+            return
+        try:
+            port=int(self.port.get()); key=int(self.key.get() or "0")
+            if not 1<=port<=65535: raise ValueError()
+        except ValueError:
+            messagebox.showerror("Invalid device settings","Enter a valid port and numeric communication key first.")
+            return
+        base=Path.home()/"SCAFAWorkforce"
+        base.mkdir(parents=True,exist_ok=True)
+        config=base/"device.json"
+        config.write_text(json.dumps({"ip":self.ip.get().strip(),"port":port,"key":key,"interval":60}),encoding="utf-8")
+        label="pk.scafa.workforce.monitor"
+        agent_dir=Path.home()/"Library"/"LaunchAgents"
+        agent_dir.mkdir(parents=True,exist_ok=True)
+        plist=agent_dir/(label+".plist")
+        executable=Path(sys.executable).resolve().parent/"scafa-monitor"
+        if not executable.exists():
+            messagebox.showerror("Monitor helper missing","The background monitor is not included in this app build. Please install the latest macOS package.")
+            return
+        if messagebox.askyesno("Background monitoring","Enable K50 monitoring every 60 seconds and start automatically whenever you log in?\n\nmacOS notifications will appear when new punches are detected. Your Mac must be awake and connected to the same network as the K50."):
+            payload={"Label":label,"ProgramArguments":[str(executable)],"RunAtLoad":True,"KeepAlive":True,
+                     "StandardOutPath":str(base/"monitor.log"),"StandardErrorPath":str(base/"monitor-error.log")}
+            import plistlib
+            plist.write_bytes(plistlib.dumps(payload))
+            uid=os.getuid()
+            subprocess.run(["launchctl","bootout",f"gui/{uid}",str(plist)],capture_output=True,text=True)
+            result=subprocess.run(["launchctl","bootstrap",f"gui/{uid}",str(plist)],capture_output=True,text=True)
+            if result.returncode:
+                messagebox.showerror("Could not start monitoring",result.stderr or result.stdout or "launchctl failed")
+                return
+            self.status.set("Background K50 monitoring enabled • checks every 60 seconds")
+            messagebox.showinfo("Monitoring enabled","SCAFA Workforce will now check the K50 in the background and start automatically when you log in.")
+        else:
+            uid=os.getuid()
+            subprocess.run(["launchctl","bootout",f"gui/{uid}",str(plist)],capture_output=True,text=True)
+            if plist.exists(): plist.unlink()
+            self.status.set("Background K50 monitoring disabled")
+            messagebox.showinfo("Monitoring disabled","The background K50 monitor has been stopped and removed from login startup.")
 
     def _date_field(self, parent, variable, width=12):
         wrap=ttk.Frame(parent)
@@ -155,6 +198,7 @@ class App(tk.Tk):
         ttk.Button(conn,text="Backup Database",command=self.backup_database).grid(row=2,column=6,sticky="w",pady=(8,0))
         ttk.Button(conn,text="Restore Database",command=self.restore_database).grid(row=2,column=7,sticky="w",pady=(8,0))
         ttk.Button(conn,text="Find K50 automatically",command=self.discover_device).grid(row=2,column=8,sticky="w",padx=(8,0),pady=(8,0))
+        ttk.Button(conn,text="Background Monitoring",command=self.configure_background_monitoring).grid(row=2,column=9,sticky="w",padx=(8,0),pady=(8,0))
         filters=ttk.Frame(self,padding=(18,0,18,10)); filters.pack(fill="x")
         ttk.Label(filters,text="From").pack(side="left")
         self._date_field(filters,self.start_date).pack(side="left",padx=(6,14))
