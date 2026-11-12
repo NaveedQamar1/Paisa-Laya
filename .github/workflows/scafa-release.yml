@@ -48,8 +48,10 @@ jobs:
           $version = $releaseTag -replace '^scafa-v',''
           python -m pip install --upgrade pip
           python -m pip install -r k50_attendance_build/requirements.txt
+          python -m pip install pillow
+          python -c "import base64; from pathlib import Path; from PIL import Image; p=Path('k50_attendance_build/assets'); (p/'scafa_workforce_icon.png').write_bytes(base64.b64decode((p/'scafa_workforce_icon.png.b64').read_text())); Image.open(p/'scafa_workforce_icon.png').save(p/'scafa_workforce_icon.ico',format='ICO',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
           python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
-          python -m PyInstaller --noconfirm --clean --onedir --windowed --collect-data certifi --name SCAFA_Workforce k50_attendance_build/app.py
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --collect-data certifi --icon k50_attendance_build/assets/scafa_workforce_icon.ico --add-data "k50_attendance_build/assets/scafa_workforce_icon.png;assets" --name SCAFA_Workforce k50_attendance_build/app.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor --collect-all winotify k50_attendance_build/monitor.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-updater k50_attendance_build/updater.py
           Copy-Item dist/scafa-monitor.exe dist/SCAFA_Workforce/scafa-monitor.exe -Force
@@ -90,8 +92,10 @@ jobs:
           VERSION="${RELEASE_TAG#scafa-v}"
           python -m pip install --upgrade pip
           python -m pip install -r k50_attendance_build/requirements.txt
+          python -m pip install pillow
+          python -c "import base64; from pathlib import Path; from PIL import Image; p=Path('k50_attendance_build/assets'); (p/'scafa_workforce_icon.png').write_bytes(base64.b64decode((p/'scafa_workforce_icon.png.b64').read_text())); Image.open(p/'scafa_workforce_icon.png').save(p/'scafa_workforce_icon.icns',format='ICNS',sizes=[(16,16),(32,32),(64,64),(128,128),(256,256),(512,512),(1024,1024)])"
           python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
-          python -m PyInstaller --noconfirm --clean --windowed --collect-data certifi --name SCAFA_Workforce k50_attendance_build/app.py
+          python -m PyInstaller --noconfirm --clean --windowed --collect-data certifi --icon k50_attendance_build/assets/scafa_workforce_icon.icns --add-data "k50_attendance_build/assets/scafa_workforce_icon.png:assets" --name SCAFA_Workforce k50_attendance_build/app.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor k50_attendance_build/monitor.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-updater k50_attendance_build/updater.py
           install -m 755 dist/scafa-monitor dist/SCAFA_Workforce.app/Contents/MacOS/scafa-monitor
