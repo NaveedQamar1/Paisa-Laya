@@ -1,4 +1,4 @@
-"""Background K50 monitor with persistent new-punch detection and desktop alerts."""
+"""Background attendance-device monitor with persistent new-punch detection and desktop alerts."""
 import json
 import sqlite3
 import subprocess

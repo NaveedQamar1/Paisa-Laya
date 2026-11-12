@@ -21,7 +21,7 @@ NAVY = "#17251d"
 BLUE = "#2f6b45"
 TEAL = "#477c57"
 MUTED = "#68756b"
-APP_VERSION = "1.2.7"
+APP_VERSION = "1.2.9"
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
@@ -200,7 +200,7 @@ class App(tk.Tk):
             f"Could not check or prepare the update. Your installed application has not been changed.\n\n{message}")
 
     def configure_background_monitoring(self):
-        """Enable or disable the per-user K50 background monitor on macOS or Windows."""
+        """Enable or disable the per-user attendance-device background monitor on macOS or Windows."""
         try:
             port = int(self.port.get())
             key = int(self.key.get() or "0")
@@ -224,7 +224,7 @@ class App(tk.Tk):
                 return
             if messagebox.askyesno(
                 "Background monitoring",
-                "Enable K50 monitoring every 10 seconds and start automatically whenever you sign in to Windows?\n\nWindows notifications will appear when new punches are detected. Your PC must be awake and connected to the same network as the K50."
+                "Enable attendance-device monitoring every 10 seconds and start automatically whenever you sign in to Windows?\n\nWindows notifications will appear when new punches are detected. Your PC must be awake and connected to the same network as the device."
             ):
                 command = f'"{executable}"'
                 result = subprocess.run(
@@ -236,13 +236,13 @@ class App(tk.Tk):
                     messagebox.showerror("Could not enable monitoring", result.stderr or result.stdout or "Task Scheduler failed.")
                     return
                 subprocess.run(["schtasks", "/Run", "/TN", task_name], capture_output=True, text=True)
-                self.status.set("Background K50 monitoring enabled • checks every 10 seconds")
-                messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now monitor the K50 in the background and start automatically when you sign in.")
+                self.status.set("Background device monitoring enabled • checks every 10 seconds")
+                messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now monitor the device in the background and start automatically when you sign in.")
             else:
                 subprocess.run(["schtasks", "/End", "/TN", task_name], capture_output=True, text=True)
                 subprocess.run(["schtasks", "/Delete", "/TN", task_name, "/F"], capture_output=True, text=True)
-                self.status.set("Background K50 monitoring disabled")
-                messagebox.showinfo("Monitoring disabled", "The background K50 monitor has been stopped and removed from Windows startup.")
+                self.status.set("Background device monitoring disabled")
+                messagebox.showinfo("Monitoring disabled", "The background attendance-device monitor has been stopped and removed from Windows startup.")
             return
 
         if sys.platform == "darwin":
@@ -256,7 +256,7 @@ class App(tk.Tk):
                 return
             if messagebox.askyesno(
                 "Background monitoring",
-                "Enable K50 monitoring every 10 seconds and start automatically whenever you log in?\n\nmacOS notifications will appear when new punches are detected. Your Mac must be awake and connected to the same network as the K50."
+                "Enable attendance-device monitoring every 10 seconds and start automatically whenever you log in?\n\nmacOS notifications will appear when new punches are detected. Your Mac must be awake and connected to the same network as the device."
             ):
                 import plistlib
                 payload = {
@@ -274,14 +274,14 @@ class App(tk.Tk):
                 if result.returncode:
                     messagebox.showerror("Could not start monitoring", result.stderr or result.stdout or "launchctl failed")
                     return
-                self.status.set("Background K50 monitoring enabled • checks every 10 seconds")
-                messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now check the K50 in the background and start automatically when you log in.")
+                self.status.set("Background device monitoring enabled • checks every 10 seconds")
+                messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now check the device in the background and start automatically when you log in.")
             else:
                 uid = os.getuid()
                 subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(plist)], capture_output=True, text=True)
                 if plist.exists():
                     plist.unlink()
-                self.status.set("Background K50 monitoring disabled")
+                self.status.set("Background device monitoring disabled")
                 messagebox.showinfo("Monitoring disabled", "The background K50 monitor has been stopped and removed from login startup.")
             return
 
@@ -351,10 +351,14 @@ class App(tk.Tk):
         s.configure("TButton", padding=(10,7), font=("Segoe UI",9))
 
     def _ui(self):
-        header=tk.Frame(self,bg=NAVY,height=94); header.pack(fill="x")
+        # Brand-led header: script lettering echoes the original SCAFA wordmark.
+        header=tk.Frame(self,bg="#496849",height=108); header.pack(fill="x")
         header.pack_propagate(False)
-        tk.Label(header,text="SCAFA  |  WORKFORCE",bg="#2f6b45",fg="white",font=("Segoe UI",21,"bold")).pack(anchor="w",padx=24,pady=(15,2))
-        tk.Label(header,text="Staff attendance  •  K50 synchronisation  •  Management reporting",bg="#2f6b45",fg="#cbd5e1",font=("Segoe UI",10)).pack(anchor="w",padx=26)
+        brand_font = "Apple Chancery" if sys.platform == "darwin" else "Segoe Script"
+        tk.Label(header,text="Scafa",bg="#496849",fg="#f7f8ec",
+                 font=(brand_font,31),anchor="w").pack(anchor="w",padx=25,pady=(7,0))
+        tk.Label(header,text="Workforce",bg="#496849",fg="#f7f8ec",
+                 font=(brand_font,17,"italic"),anchor="w").pack(anchor="w",padx=28,pady=(0,5))
         conn=ttk.Frame(self,padding=(18,14,18,10)); conn.pack(fill="x")
         ttk.Label(conn,text="DEVICE CONNECTION",font=("Segoe UI",9,"bold")).grid(row=0,column=0,columnspan=8,sticky="w",pady=(0,6))
         for col,label,var,width in [(0,"Device IP",self.ip,17),(2,"Port",self.port,7),(4,"Comm key",self.key,7)]:
@@ -364,13 +368,13 @@ class App(tk.Tk):
                 ttk.Entry(conn,textvariable=var,width=18,validate="key",validatecommand=vcmd).grid(row=1,column=col+1,sticky="w",padx=(0,16))
             else:
                 ttk.Entry(conn,textvariable=var,width=width).grid(row=1,column=col+1,sticky="w",padx=(0,16))
-        ttk.Button(conn,text="⟳  Fetch from K50",style="Accent.TButton",command=self.fetch).grid(row=1,column=6,padx=(0,8))
+        ttk.Button(conn,text="⟳  Fetch Attendance",style="Accent.TButton",command=self.fetch).grid(row=1,column=6,padx=(0,8))
         ttk.Button(conn,text="＋  Import CSV",command=self.import_csv).grid(row=1,column=7)
         ttk.Button(conn,text="⚙  Custom Rules",command=self.open_rules).grid(row=1,column=8,padx=(8,0))
         ttk.Button(conn,text="Staff Schedules",command=self.open_staff_schedules).grid(row=1,column=9,padx=(8,0))
         ttk.Button(conn,text="Backup Database",command=self.backup_database).grid(row=2,column=6,sticky="w",pady=(8,0))
         ttk.Button(conn,text="Restore Database",command=self.restore_database).grid(row=2,column=7,sticky="w",pady=(8,0))
-        ttk.Button(conn,text="Find K50 automatically",command=self.discover_device).grid(row=2,column=8,sticky="w",padx=(8,0),pady=(8,0))
+        ttk.Button(conn,text="Discover Compatible Devices",command=self.discover_device).grid(row=2,column=8,sticky="w",padx=(8,0),pady=(8,0))
         ttk.Button(conn,text="Background Monitoring",command=self.configure_background_monitoring).grid(row=2,column=9,sticky="w",padx=(8,0),pady=(8,0))
         ttk.Button(conn,text="Check for Updates",command=self.check_for_updates).grid(row=2,column=10,sticky="w",padx=(8,0),pady=(8,0))
         filters=ttk.Frame(self,padding=(18,0,18,10)); filters.pack(fill="x")
@@ -530,7 +534,7 @@ class App(tk.Tk):
         combo.bind("<<ComboboxSelected>>",load_staff)
         def save_override():
             label=selected.get()
-            if not label: messagebox.showwarning("Select staff","Fetch staff from K50 first or select a staff member."); return
+            if not label: messagebox.showwarning("Select staff","Fetch staff from the connected device first or select a staff member."); return
             uid=label.rsplit(" (",1)[-1].rstrip(")")
             try:
                 datetime.strptime(ov["start"].get(),"%H:%M"); datetime.strptime(ov["end"].get(),"%H:%M"); datetime.strptime(ov["half"].get(),"%H:%M")
@@ -602,7 +606,7 @@ class App(tk.Tk):
                 c.execute("SELECT user_id,weekday,start_time,end_time,grace_minutes,shift_type FROM staff_day_rules")}
         staff.update({uid:self._name(uid) for uid in self._staff_names()})
         if not staff:
-            messagebox.showinfo("No employees","Fetch employee names from the K50 first.")
+            messagebox.showinfo("No employees","Fetch employee names from the connected device first.")
             return
         win=tk.Toplevel(self); win.title("SCAFA Workforce — Staff Schedules & Leave"); win.geometry("980x760"); win.minsize(900,680); win.transient(self)
         outer=ttk.Frame(win,padding=16); outer.pack(fill="both",expand=True)
@@ -1056,7 +1060,7 @@ class App(tk.Tk):
                                fill=NAVY,font=("Segoe UI",8,"bold"))
 
     def discover_device(self):
-        """Find a K50 on the local IPv4 /24 subnet and verify its ZK handshake."""
+        """Find ZKTeco-compatible attendance devices on the local IPv4 /24 subnet and verify their protocol handshake."""
         try:
             port=int(self.port.get()); key=int(self.key.get() or "0")
             if not 1<=port<=65535: raise ValueError()
@@ -1072,10 +1076,10 @@ class App(tk.Tk):
         except OSError:
             try: local_ip=str(ipaddress.ip_address(current))
             except ValueError:
-                messagebox.showerror("Network unavailable","Could not determine this computer's local network. Enter the K50 IP manually and try again.")
+                messagebox.showerror("Network unavailable","Could not determine this computer's local network. Enter the device IP manually and try again.")
                 return
         network=ipaddress.ip_network(f"{local_ip}/24",strict=False)
-        self.status.set(f"Searching {network} for a K50 device on port {port}…")
+        self.status.set(f"Searching {network} for compatible attendance devices on port {port}…")
         threading.Thread(target=self._discover_worker,args=(network,port,key),daemon=True).start()
 
     def _discover_worker(self,network,port,key):
@@ -1109,13 +1113,13 @@ class App(tk.Tk):
 
     def _discovery_done(self,address,open_ports):
         self.ip.set(address)
-        self.status.set(f"K50 found at {address} • {open_ports} responsive device port(s) checked")
-        messagebox.showinfo("K50 found",f"A ZKTeco-compatible device responded at {address}.\n\nThe IP has been filled in. Click Fetch from K50 to synchronise attendance.")
+        self.status.set(f"Compatible device found at {address} • {open_ports} responsive device port(s) checked")
+        messagebox.showinfo("Compatible device found",f"A ZKTeco-compatible attendance device responded at {address}.\n\nThe IP has been filled in. Click Fetch Attendance to synchronise attendance.")
 
     def _discovery_failed(self,open_ports):
-        self.status.set("No K50 device found on the local network.")
-        detail=f"\n\n{open_ports} device(s) had the selected port open but did not complete the K50 handshake." if open_ports else ""
-        messagebox.showwarning("K50 not found","No K50 was detected on this computer's local /24 network."+detail+"\n\nCheck that the computer and K50 are on the same LAN/VLAN, or enter the IP manually.")
+        self.status.set("No compatible attendance device found on the local network.")
+        detail=f"\n\n{open_ports} device(s) had the selected port open but did not complete the ZKTeco protocol handshake." if open_ports else ""
+        messagebox.showwarning("No compatible device found","No ZKTeco-compatible attendance device was detected on this computer's local /24 network."+detail+"\n\nCheck that the computer and device are on the same LAN/VLAN, or enter the IP manually.")
 
     def _discovery_error(self,msg):
         self.status.set("Automatic discovery failed.")
@@ -1167,7 +1171,7 @@ class App(tk.Tk):
 
     def _fetch_error(self,msg):
         self.status.set("Device connection failed.")
-        messagebox.showerror("Could not fetch attendance",f"{msg}\n\nCheck the K50 IP, LAN connection, port, and communication key.")
+        messagebox.showerror("Could not fetch attendance",f"{msg}\n\nCheck the device IP, LAN connection, port, and communication key.")
 
     def import_csv(self):
         path=filedialog.askopenfilename(title="Import attendance CSV",filetypes=[("CSV files","*.csv"),("All files","*.*")])
@@ -1267,7 +1271,7 @@ class App(tk.Tk):
         with sqlite3.connect(DB) as c:
             registered={str(r[0]) for r in c.execute("SELECT user_id FROM staff")}
         if scope=="All staff" and not (rows or registered):
-            messagebox.showwarning("No staff","No attendance punches or registered staff were found. Fetch staff from the K50 first."); return None,None
+            messagebox.showwarning("No staff","No attendance punches or registered staff were found. Fetch staff from the connected device first."); return None,None
         if scope!="All staff" and scope not in (registered | {str(r[0]) for r in rows}):
             messagebox.showwarning("Unknown staff","This staff ID is not registered and has no punches in the selected period."); return None,None
         return rows,scope
