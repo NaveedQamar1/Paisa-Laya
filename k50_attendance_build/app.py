@@ -21,7 +21,7 @@ NAVY = "#17251d"
 BLUE = "#2f6b45"
 TEAL = "#477c57"
 MUTED = "#68756b"
-APP_VERSION = "1.2.5"
+APP_VERSION = "1.2.6"
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
@@ -409,6 +409,21 @@ class App(tk.Tk):
             ttk.Label(card,text=title,style="CardTitle.TLabel").pack(anchor="w")
             val=ttk.Label(card,text="—",style="CardValue.TLabel",font=("Segoe UI",17,"bold")); val.pack(anchor="w",pady=(7,0))
             self.card_values.append(val)
+
+        # Dashboard charts must exist before the initial refresh calls _draw_charts().
+        charts=ttk.Frame(self.dashboard)
+        charts.pack(fill="both",expand=False,pady=(0,8))
+        daily_panel=ttk.Frame(charts,style="Card.TFrame",padding=8)
+        daily_panel.pack(side="left",fill="both",expand=True,padx=(0,4))
+        ttk.Label(daily_panel,text="DAILY PUNCH ACTIVITY",font=("Segoe UI",10,"bold"),background="white").pack(anchor="w")
+        self.daily_canvas=tk.Canvas(daily_panel,height=190,bg="white",highlightthickness=0)
+        self.daily_canvas.pack(fill="both",expand=True)
+        staff_panel=ttk.Frame(charts,style="Card.TFrame",padding=8)
+        staff_panel.pack(side="left",fill="both",expand=True,padx=(4,0))
+        ttk.Label(staff_panel,text="PUNCHES BY EMPLOYEE",font=("Segoe UI",10,"bold"),background="white").pack(anchor="w")
+        self.staff_canvas=tk.Canvas(staff_panel,height=190,bg="white",highlightthickness=0)
+        self.staff_canvas.pack(fill="both",expand=True)
+
         comparison=ttk.Frame(self.dashboard,style="Card.TFrame",padding=10)
         comparison.pack(fill="both",expand=True,pady=(0,8))
         ttk.Label(comparison,text="EMPLOYEE ATTENDANCE COMPARISON",
