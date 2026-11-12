@@ -82,26 +82,57 @@ def apply_windows(package,target):
 
 
 def safe_extract_zip(archive, destination):
+    """Extract regular files and safe, relative macOS bundle symlinks."""
     destination=Path(destination).resolve()
     with zipfile.ZipFile(archive) as zf:
+        members=[]
+        symlinks={}
         for member in zf.infolist():
             normalized=member.filename.replace("\\","/")
             member_path=PurePosixPath(normalized)
-            if member_path.is_absolute() or ".." in member_path.parts:
+            if member_path.is_absolute() or ".." in member_path.parts or (member_path.parts and ":" in member_path.parts[0]):
                 raise RuntimeError("The update archive contains an unsafe file path.")
-            resolved=(destination/normalized).resolve()
+            output=destination.joinpath(*member_path.parts)
+            resolved=output.resolve()
             if resolved!=destination and destination not in resolved.parents:
                 raise RuntimeError("The update archive attempts to write outside its extraction folder.")
             mode=(member.external_attr >> 16) & 0xFFFF
             if stat.S_IFMT(mode)==stat.S_IFLNK:
-                raise RuntimeError("The update archive contains a symbolic link.")
-        zf.extractall(destination)
-        # ZipFile.extractall does not restore Unix executable permissions.
-        for member in zf.infolist():
-            mode=(member.external_attr >> 16) & 0o777
-            if mode and not member.is_dir():
-                extracted=destination/member.filename.replace(chr(92),"/")
-                extracted.chmod(mode)
+                try:
+                    link_target=zf.read(member).decode("utf-8")
+                except Exception as exc:
+                    raise RuntimeError("The update archive contains an invalid symbolic link.") from exc
+                if not link_target or os.path.isabs(link_target):
+                    raise RuntimeError("The update archive contains an unsafe symbolic link.")
+                target_path=Path(os.path.normpath(str(output.parent / link_target)))
+                if target_path!=destination and destination not in target_path.parents:
+                    raise RuntimeError("The update archive contains a symbolic link outside its extraction folder.")
+                symlinks[member_path]=link_target
+            else:
+                members.append((member,member_path,mode))
+
+        # Never allow a regular file to be written through an archive-created symlink.
+        for _,member_path,_ in members:
+            if any(parent in symlinks for parent in member_path.parents):
+                raise RuntimeError("The update archive contains a file nested inside a symbolic link.")
+
+        # Write directories and regular files first; create links only after all writes finish.
+        for member,member_path,mode in members:
+            output=destination.joinpath(*member_path.parts)
+            if member.is_dir():
+                output.mkdir(parents=True,exist_ok=True)
+                continue
+            output.parent.mkdir(parents=True,exist_ok=True)
+            with zf.open(member) as source, output.open("wb") as target:
+                shutil.copyfileobj(source,target)
+            permissions=mode & 0o777
+            if permissions:
+                output.chmod(permissions)
+
+        for member_path,link_target in symlinks.items():
+            output=destination.joinpath(*member_path.parts)
+            output.parent.mkdir(parents=True,exist_ok=True)
+            os.symlink(link_target,output)
 
 
 def apply_macos(package,target,user_uid=None):
