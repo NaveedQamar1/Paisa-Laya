@@ -21,7 +21,7 @@ NAVY = "#17251d"
 BLUE = "#2f6b45"
 TEAL = "#477c57"
 MUTED = "#68756b"
-APP_VERSION = "1.2.6"
+APP_VERSION = "1.2.7"
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
@@ -50,6 +50,10 @@ def init_db():
             user_id TEXT NOT NULL, weekday INTEGER NOT NULL, start_time TEXT NOT NULL,
             end_time TEXT NOT NULL, grace_minutes INTEGER NOT NULL DEFAULT 15,
             shift_type TEXT NOT NULL DEFAULT 'Full day', PRIMARY KEY(user_id,weekday))""")
+        c.execute("""CREATE TABLE IF NOT EXISTS staff_leave (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
+            start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+            label TEXT NOT NULL DEFAULT 'Annual Leave')""")
         seed = {"weekday_window_start":"09:00","weekday_window_end":"20:00",
                 "saturday_window_start":"09:00","saturday_window_end":"17:00"}
         for k,v in seed.items():
@@ -600,10 +604,10 @@ class App(tk.Tk):
         if not staff:
             messagebox.showinfo("No employees","Fetch employee names from the K50 first.")
             return
-        win=tk.Toplevel(self); win.title("SCAFA Workforce — Staff Schedules"); win.geometry("850x560"); win.transient(self)
+        win=tk.Toplevel(self); win.title("SCAFA Workforce — Staff Schedules & Leave"); win.geometry("980x760"); win.minsize(900,680); win.transient(self)
         outer=ttk.Frame(win,padding=16); outer.pack(fill="both",expand=True)
-        ttk.Label(outer,text="INDIVIDUAL STAFF SCHEDULES",font=("Segoe UI",16,"bold")).pack(anchor="w")
-        ttk.Label(outer,text="Configure each employee's shift and grace period separately for every weekday.",style="Sub.TLabel").pack(anchor="w",pady=(3,12))
+        ttk.Label(outer,text="EMPLOYEE SCHEDULES & LEAVE",font=("Segoe UI",16,"bold")).pack(anchor="w")
+        ttk.Label(outer,text="Set each employee's weekly shift, then record multiple approved leave periods. Leave dates are excluded from absence calculations.",style="Sub.TLabel").pack(anchor="w",pady=(3,12))
         choices=[f"{staff[uid]} ({uid})" for uid in sorted(staff,key=lambda x:staff[x].lower())]
         selected=tk.StringVar(value=choices[0]); top=ttk.Frame(outer); top.pack(fill="x")
         ttk.Label(top,text="Employee").pack(side="left")
@@ -627,7 +631,58 @@ class App(tk.Tk):
             for wd in range(7):
                 vals=existing.get((uid,wd),("09:45","20:00" if wd<5 else "17:00",15,"Off" if wd==6 else "Full day"))
                 for var,val in zip(cells[wd],vals): var.set(str(val))
-        combo.bind("<<ComboboxSelected>>",load_employee)
+        leavebox=ttk.LabelFrame(outer,text="Individual employee leave / planned days off",padding=10)
+        leavebox.pack(fill="both",expand=True,pady=(2,10))
+        ttk.Label(leavebox,text="Add one day or a date range. Examples: Annual Leave, Sick Leave, Personal Leave, Training or Other approved leave.",style="Sub.TLabel").pack(anchor="w")
+        leave_form=ttk.Frame(leavebox); leave_form.pack(fill="x",pady=(8,4))
+        leave_start=tk.StringVar(value=date.today().isoformat())
+        leave_end=tk.StringVar(value=date.today().isoformat())
+        leave_reason=tk.StringVar(value="Annual Leave")
+        ttk.Label(leave_form,text="From").pack(side="left")
+        self._date_field(leave_form,leave_start,width=12).pack(side="left",padx=(4,10))
+        ttk.Label(leave_form,text="To").pack(side="left")
+        self._date_field(leave_form,leave_end,width=12).pack(side="left",padx=(4,10))
+        ttk.Label(leave_form,text="Reason").pack(side="left")
+        ttk.Combobox(leave_form,textvariable=leave_reason,
+            values=("Annual Leave","Sick Leave","Personal Leave","Training","Other approved leave"),
+            width=22).pack(side="left",padx=4)
+        leave_list=tk.Listbox(leavebox,height=5,exportselection=False)
+        leave_list.pack(fill="both",expand=True,pady=6)
+        leave_records=[]
+        def refresh_leave():
+            leave_list.delete(0,"end")
+            uid=selected.get().rsplit(" (",1)[-1].rstrip(")") if selected.get() else ""
+            with sqlite3.connect(DB) as c:
+                records=c.execute("SELECT id,start_date,end_date,label FROM staff_leave WHERE user_id=? ORDER BY start_date,end_date,id",(uid,)).fetchall()
+            leave_records.clear(); leave_records.extend(records)
+            for rid,first,last,label in records:
+                span=first if first==last else f"{first} to {last}"
+                leave_list.insert("end",f"{span} — {label}")
+        def add_leave():
+            uid=selected.get().rsplit(" (",1)[-1].rstrip(")") if selected.get() else ""
+            try:
+                first=datetime.strptime(leave_start.get().strip(),"%Y-%m-%d").date()
+                last=datetime.strptime(leave_end.get().strip(),"%Y-%m-%d").date()
+                if last<first or (last-first).days>366: raise ValueError()
+                reason=leave_reason.get().strip() or "Approved Leave"
+            except ValueError:
+                messagebox.showerror("Invalid leave dates","Enter valid YYYY-MM-DD dates. The end date must not be before the start date, and a leave period cannot exceed 367 days."); return
+            with sqlite3.connect(DB) as c:
+                c.execute("INSERT INTO staff_leave(user_id,start_date,end_date,label) VALUES(?,?,?,?)",
+                          (uid,first.isoformat(),last.isoformat(),reason))
+            refresh_leave()
+            self.status.set(f"Leave added for {self._name(uid)}")
+        def remove_leave():
+            sel=leave_list.curselection()
+            if not sel: return
+            record=leave_records[sel[0]]
+            if not messagebox.askyesno("Remove leave","Remove this employee leave period? Attendance calculations will be recalculated on refresh."): return
+            with sqlite3.connect(DB) as c: c.execute("DELETE FROM staff_leave WHERE id=?",(record[0],))
+            refresh_leave()
+        leave_buttons=ttk.Frame(leavebox); leave_buttons.pack(fill="x")
+        ttk.Button(leave_buttons,text="Add leave period",command=add_leave).pack(side="left")
+        ttk.Button(leave_buttons,text="Remove selected leave",command=remove_leave).pack(side="left",padx=8)
+        combo.bind("<<ComboboxSelected>>",lambda _e:(load_employee(),refresh_leave()))
         def save():
             uid=selected.get().rsplit(" (",1)[-1].rstrip(")")
             try:
@@ -645,12 +700,19 @@ class App(tk.Tk):
                     end_time=excluded.end_time,grace_minutes=excluded.grace_minutes,shift_type=excluded.shift_type""",rows)
             for uid0,wd,st,en,gr,typ in rows: existing[(uid0,wd)]=(st,en,gr,typ)
             messagebox.showinfo("Saved","Individual schedules saved.")
-        ttk.Label(outer,text="Default windows: Mon–Fri 9:00 AM–8:00 PM; Saturday 9:00 AM–5:00 PM. Change these in Custom Rules.",style="Sub.TLabel").pack(anchor="w")
-        ttk.Button(outer,text="Save employee schedule",style="Accent.TButton",command=save).pack(anchor="e")
+        ttk.Label(outer,text="School-wide planned holidays and sudden closures are managed separately in Custom Rules → Public holidays / closed dates.",style="Sub.TLabel").pack(anchor="w",pady=(0,5))
+        footer=ttk.Frame(outer); footer.pack(fill="x")
+        ttk.Label(footer,text="Default windows: Mon–Fri 9:00 AM–8:00 PM; Saturday 9:00 AM–5:00 PM.",style="Sub.TLabel").pack(side="left")
+        ttk.Button(footer,text="Save employee schedule",style="Accent.TButton",command=save).pack(side="right")
+        refresh_leave()
 
     def _attendance_day_status(self,uid,day,stamps):
         rules,overrides,holidays=self._rules()
         if day in holidays: return "Holiday", "", "", 0.0
+        with sqlite3.connect(DB) as c:
+            leave=c.execute("SELECT label FROM staff_leave WHERE user_id=? AND start_date<=? AND end_date>=? ORDER BY id LIMIT 1",
+                            (str(uid),day,day)).fetchone()
+        if leave: return f"On leave — {leave[0]}", "", "", 0.0
         try: workdays={int(x.strip()) for x in rules["workdays"].split(",") if x.strip()}
         except ValueError: workdays={0,1,2,3,4}
         d=datetime.strptime(day,"%Y-%m-%d").date()
@@ -889,7 +951,7 @@ class App(tk.Tk):
                 day=cursor.isoformat()
                 stamps=sorted(grouped.get((uid,day),[]))
                 status,first_p,last_p,worked=self._attendance_day_status(uid,day,stamps)
-                if status not in ("Day off","Holiday"):
+                if status not in ("Day off","Holiday") and not status.startswith("On leave"):
                     stats["expected"]+=1
                 if status=="Absent":
                     stats["absent"]+=1
@@ -1262,7 +1324,7 @@ class App(tk.Tk):
                     worked_display="—" if status.startswith("Incomplete punch") else format_worked_time(hours)
                     summary.append([uid,self._name(uid),f"{day} ({weekday})",len(stamps),first_p or "—",last_p or "—",worked_display,status])
                     status_values.append(status)
-                    if status not in ("Day off","Holiday"): perf["expected"]+=1
+                    if status not in ("Day off","Holiday") and not status.startswith("On leave"): perf["expected"]+=1
                     if status=="Absent": perf["absent"]+=1
                     elif status.startswith("Incomplete punch"):
                         perf["incomplete"]+=1; perf["present"]+=1
@@ -1318,6 +1380,7 @@ class App(tk.Tk):
                 "Absent":sum(1 for s in status_values if s.casefold()=="absent"),
                 "Day off":sum(1 for s in status_values if s.casefold()=="day off"),
                 "Holiday":sum(1 for s in status_values if s.casefold()=="holiday"),
+                "On leave":sum(1 for s in status_values if s.casefold().startswith("on leave")),
                 "Incomplete punch":sum(1 for s in status_values if s.casefold().startswith("incomplete punch"))
             }
             for offset,(status_name,count) in enumerate(status_counts.items()):
@@ -1400,7 +1463,7 @@ class App(tk.Tk):
             from openpyxl.formatting.rule import FormulaRule
             for prefix,fill in [("Present","E2F0E7"),("Late","FFF2CC"),("Half-day","FCE4D6"),
                                 ("Absent","F4CCCC"),("Day off","E7E6E6"),("Holiday","DDEBF7"),
-                                ("Incomplete punch","FCE4D6")]:
+                                ("On leave","D9EAD3"),("Incomplete punch","FCE4D6")]:
                 summary.conditional_formatting.add(f"H5:H{summary.max_row}",
                     FormulaRule(formula=[f'LEFT($H5,{len(prefix)})="{prefix}"'],fill=PatternFill("solid",fgColor=fill)))
             summary.sheet_properties.pageSetUpPr.fitToPage=True
