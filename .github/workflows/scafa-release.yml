@@ -69,8 +69,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
-            arch: apple-silicon
           - runner: macos-15-intel
             arch: intel
     runs-on: ${{ matrix.runner }}
@@ -93,7 +91,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r k50_attendance_build/requirements.txt
           python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
-          python -m PyInstaller --noconfirm --clean --windowed --name SCAFA_Workforce k50_attendance_build/app.py
+          python -m PyInstaller --noconfirm --clean --windowed --collect-data certifi --name SCAFA_Workforce k50_attendance_build/app.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor k50_attendance_build/monitor.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-updater k50_attendance_build/updater.py
           install -m 755 dist/scafa-monitor dist/SCAFA_Workforce.app/Contents/MacOS/scafa-monitor
