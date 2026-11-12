@@ -242,7 +242,7 @@ class App(tk.Tk):
                 subprocess.run(["schtasks", "/End", "/TN", task_name], capture_output=True, text=True)
                 subprocess.run(["schtasks", "/Delete", "/TN", task_name, "/F"], capture_output=True, text=True)
                 self.status.set("Background device monitoring disabled")
-                messagebox.showinfo("Monitoring disabled", "The background K50 monitor has been stopped and removed from Windows startup.")
+                messagebox.showinfo("Monitoring disabled", "The background attendance-device monitor has been stopped and removed from Windows startup.")
             return
 
         if sys.platform == "darwin":
@@ -1076,7 +1076,7 @@ class App(tk.Tk):
         except OSError:
             try: local_ip=str(ipaddress.ip_address(current))
             except ValueError:
-                messagebox.showerror("Network unavailable","Could not determine this computer's local network. Enter the K50 IP manually and try again.")
+                messagebox.showerror("Network unavailable","Could not determine this computer's local network. Enter the device IP manually and try again.")
                 return
         network=ipaddress.ip_network(f"{local_ip}/24",strict=False)
         self.status.set(f"Searching {network} for compatible attendance devices on port {port}…")
@@ -1119,7 +1119,7 @@ class App(tk.Tk):
     def _discovery_failed(self,open_ports):
         self.status.set("No compatible attendance device found on the local network.")
         detail=f"\n\n{open_ports} device(s) had the selected port open but did not complete the ZKTeco protocol handshake." if open_ports else ""
-        messagebox.showwarning("No compatible device found","No ZKTeco-compatible attendance device was detected on this computer's local /24 network."+detail+"\n\nCheck that the computer and K50 are on the same LAN/VLAN, or enter the IP manually.")
+        messagebox.showwarning("No compatible device found","No ZKTeco-compatible attendance device was detected on this computer's local /24 network."+detail+"\n\nCheck that the computer and device are on the same LAN/VLAN, or enter the IP manually.")
 
     def _discovery_error(self,msg):
         self.status.set("Automatic discovery failed.")
