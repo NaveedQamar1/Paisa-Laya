@@ -48,8 +48,10 @@ jobs:
           $version = $releaseTag -replace '^scafa-v',''
           python -m pip install --upgrade pip
           python -m pip install -r k50_attendance_build/requirements.txt
+          python -m pip install pillow
+          python -c "import base64; from pathlib import Path; from PIL import Image; p=Path('k50_attendance_build/assets'); (p/'scafa_workforce_icon.png').write_bytes(base64.b64decode((p/'scafa_workforce_icon.png.b64').read_text())); Image.open(p/'scafa_workforce_icon.png').save(p/'scafa_workforce_icon.ico',format='ICO',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
           python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
-          python -m PyInstaller --noconfirm --clean --onedir --windowed --collect-data certifi --name SCAFA_Workforce k50_attendance_build/app.py
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --collect-data certifi --icon k50_attendance_build/assets/scafa_workforce_icon.ico --add-data "k50_attendance_build/assets/scafa_workforce_icon.png;assets" --name SCAFA_Workforce k50_attendance_build/app.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor --collect-all winotify k50_attendance_build/monitor.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-updater k50_attendance_build/updater.py
           Copy-Item dist/scafa-monitor.exe dist/SCAFA_Workforce/scafa-monitor.exe -Force
@@ -90,8 +92,10 @@ jobs:
           VERSION="${RELEASE_TAG#scafa-v}"
           python -m pip install --upgrade pip
           python -m pip install -r k50_attendance_build/requirements.txt
+          python -m pip install pillow
+          python -c "import base64; from pathlib import Path; from PIL import Image; p=Path('k50_attendance_build/assets'); (p/'scafa_workforce_icon.png').write_bytes(base64.b64decode((p/'scafa_workforce_icon.png.b64').read_text())); Image.open(p/'scafa_workforce_icon.png').save(p/'scafa_workforce_icon.icns',format='ICNS',sizes=[(16,16),(32,32),(64,64),(128,128),(256,256),(512,512),(1024,1024)])"
           python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
-          python -m PyInstaller --noconfirm --clean --windowed --collect-data certifi --name SCAFA_Workforce k50_attendance_build/app.py
+          python -m PyInstaller --noconfirm --clean --windowed --collect-data certifi --icon k50_attendance_build/assets/scafa_workforce_icon.icns --add-data "k50_attendance_build/assets/scafa_workforce_icon.png:assets" --name SCAFA_Workforce k50_attendance_build/app.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor k50_attendance_build/monitor.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-updater k50_attendance_build/updater.py
           install -m 755 dist/scafa-monitor dist/SCAFA_Workforce.app/Contents/MacOS/scafa-monitor
@@ -99,6 +103,16 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent dist/SCAFA_Workforce.app dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
           if [ "${{ matrix.arch }}" = "intel" ]; then
             pkgbuild --component dist/SCAFA_Workforce.app --install-location /Applications --identifier pk.scafa.workforce --version "$VERSION" dist/SCAFA_Workforce_Installer_Intel.pkg
+
+            # Build a lightweight icon-only package for users who already have SCAFA Workforce installed.
+            mkdir -p icon-patch-root/Applications/SCAFA_Workforce.app/Contents/Resources
+            cp k50_attendance_build/assets/scafa_workforce_icon.icns icon-patch-root/Applications/SCAFA_Workforce.app/Contents/Resources/scafa_workforce_icon.icns
+            mkdir -p icon-patch-scripts
+            cp k50_attendance_build/installer/macos-icon-patch-postinstall icon-patch-scripts/postinstall
+            chmod 755 icon-patch-scripts/postinstall
+            pkgbuild --root icon-patch-root --scripts icon-patch-scripts --identifier pk.scafa.workforce.iconpatch --version "$VERSION" --install-location / dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
+            pkgutil --payload-files dist/SCAFA_Workforce_Icon_Patch_Intel.pkg | grep -F "Applications/SCAFA_Workforce.app/Contents/Resources/scafa_workforce_icon.icns"
+            # pkgbuild already confirms the postinstall script was added to the package.
           fi
       - uses: actions/upload-artifact@v4
         with:
@@ -110,6 +124,12 @@ jobs:
         with:
           name: release-macos-intel-installer
           path: dist/SCAFA_Workforce_Installer_Intel.pkg
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: matrix.arch == 'intel'
+        with:
+          name: release-macos-intel-icon-patch
+          path: dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
           if-no-files-found: error
 
   publish:

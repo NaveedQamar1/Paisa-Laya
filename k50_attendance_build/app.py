@@ -21,7 +21,7 @@ NAVY = "#17251d"
 BLUE = "#2f6b45"
 TEAL = "#477c57"
 MUTED = "#68756b"
-APP_VERSION = "1.2.9"
+APP_VERSION = "1.3.0"
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
@@ -66,6 +66,14 @@ class App(tk.Tk):
         self.geometry("1280x840")
         self.minsize(1040, 700)
         self.configure(bg=BG)
+        # Apply the approved SCAFA Workforce mark to the app window.
+        try:
+            bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+            icon_path = bundle_root / "assets" / "scafa_workforce_icon.png"
+            self._app_icon = tk.PhotoImage(file=str(icon_path))
+            self.iconphoto(True, self._app_icon)
+        except Exception:
+            pass
         init_db()
         self.ip=tk.StringVar(value="192.168.1.201")
         self.port=tk.StringVar(value="4370")
