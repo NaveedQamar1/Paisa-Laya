@@ -107,8 +107,12 @@ jobs:
             # Build a lightweight icon-only package for users who already have SCAFA Workforce installed.
             mkdir -p icon-patch-root/Applications/SCAFA_Workforce.app/Contents/Resources
             cp k50_attendance_build/assets/scafa_workforce_icon.icns icon-patch-root/Applications/SCAFA_Workforce.app/Contents/Resources/scafa_workforce_icon.icns
-            chmod +x k50_attendance_build/installer/macos-icon-patch-postinstall
-            pkgbuild --root icon-patch-root --scripts k50_attendance_build/installer --identifier pk.scafa.workforce.iconpatch --version "$VERSION" --install-location / dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
+            mkdir -p icon-patch-scripts
+            cp k50_attendance_build/installer/macos-icon-patch-postinstall icon-patch-scripts/postinstall
+            chmod 755 icon-patch-scripts/postinstall
+            pkgbuild --root icon-patch-root --scripts icon-patch-scripts --identifier pk.scafa.workforce.iconpatch --version "$VERSION" --install-location / dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
+            pkgutil --payload-files dist/SCAFA_Workforce_Icon_Patch_Intel.pkg | grep -F "Applications/SCAFA_Workforce.app/Contents/Resources/scafa_workforce_icon.icns"
+            pkgutil --scripts dist/SCAFA_Workforce_Icon_Patch_Intel.pkg | grep -F "postinstall"
           fi
       - uses: actions/upload-artifact@v4
         with:
