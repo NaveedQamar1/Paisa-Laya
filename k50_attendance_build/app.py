@@ -21,7 +21,7 @@ NAVY = "#17251d"
 BLUE = "#2f6b45"
 TEAL = "#477c57"
 MUTED = "#68756b"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
@@ -38,6 +38,17 @@ def init_db():
             UNIQUE(user_id,punch_time,status))""")
         c.execute("""CREATE TABLE IF NOT EXISTS staff (
             user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')""")
+        # Employee profile fields are additive migrations; existing staff IDs and
+        # attendance history remain unchanged when upgrading older databases.
+        staff_columns = {row[1] for row in c.execute("PRAGMA table_info(staff)")}
+        for column, definition in (
+            ("department", "TEXT NOT NULL DEFAULT ''"),
+            ("designation", "TEXT NOT NULL DEFAULT ''"),
+            ("joining_date", "TEXT NOT NULL DEFAULT ''"),
+            ("active", "INTEGER NOT NULL DEFAULT 1"),
+        ):
+            if column not in staff_columns:
+                c.execute(f"ALTER TABLE staff ADD COLUMN {column} {definition}")
         c.execute("""CREATE TABLE IF NOT EXISTS staff_rules (
             user_id TEXT PRIMARY KEY, start_time TEXT NOT NULL DEFAULT '10:00',
             end_time TEXT NOT NULL DEFAULT '18:00', grace_minutes INTEGER NOT NULL DEFAULT 10,
@@ -380,6 +391,7 @@ class App(tk.Tk):
         ttk.Button(conn,text="＋  Import CSV",command=self.import_csv).grid(row=1,column=7)
         ttk.Button(conn,text="⚙  Custom Rules",command=self.open_rules).grid(row=1,column=8,padx=(8,0))
         ttk.Button(conn,text="Staff Schedules",command=self.open_staff_schedules).grid(row=1,column=9,padx=(8,0))
+        ttk.Button(conn,text="Employee Management",command=self.open_employee_management).grid(row=1,column=10,padx=(8,0))
         ttk.Button(conn,text="Backup Database",command=self.backup_database).grid(row=2,column=6,sticky="w",pady=(8,0))
         ttk.Button(conn,text="Restore Database",command=self.restore_database).grid(row=2,column=7,sticky="w",pady=(8,0))
         ttk.Button(conn,text="Discover Compatible Devices",command=self.discover_device).grid(row=2,column=8,sticky="w",padx=(8,0),pady=(8,0))
@@ -767,6 +779,137 @@ class App(tk.Tk):
         if end and last.strftime("%H:%M") < end:
             status += " (early departure)"
         return status,first.strftime("%H:%M"),last.strftime("%H:%M"),worked
+
+    def open_employee_management(self):
+        """Manage employee profile metadata while preserving device-assigned IDs."""
+        win = tk.Toplevel(self)
+        win.title("Employee Management")
+        win.geometry("900x610")
+        win.minsize(760, 500)
+        win.transient(self)
+        win.grab_set()
+
+        outer = ttk.Frame(win, padding=16)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text="EMPLOYEE DIRECTORY", font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        ttk.Label(outer, text="Employee IDs are synchronised from the attendance device. Profile details are managed here.",
+                  style="Sub.TLabel").pack(anchor="w", pady=(3, 12))
+
+        body = ttk.Frame(outer)
+        body.pack(fill="both", expand=True)
+        left = ttk.Frame(body)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 14))
+        right = ttk.LabelFrame(body, text="Employee profile", padding=12)
+        right.pack(side="right", fill="y")
+
+        search_var = tk.StringVar()
+        ttk.Label(left, text="Search employees").pack(anchor="w")
+        search = ttk.Entry(left, textvariable=search_var)
+        search.pack(fill="x", pady=(4, 8))
+        columns = ("uid", "name", "department", "designation", "status")
+        tree = ttk.Treeview(left, columns=columns, show="headings", height=18)
+        for key, label, width in (
+            ("uid", "Device ID", 75), ("name", "Employee", 150),
+            ("department", "Department", 115), ("designation", "Designation", 125),
+            ("status", "Status", 75)
+        ):
+            tree.heading(key, text=label)
+            tree.column(key, width=width, minwidth=55, anchor="w")
+        tree.pack(fill="both", expand=True)
+
+        fields = {}
+        for label, key in (("Device-assigned ID", "uid"), ("Full name", "name"),
+                           ("Department", "department"), ("Designation", "designation"),
+                           ("Joining date (YYYY-MM-DD)", "joining_date")):
+            ttk.Label(right, text=label).pack(anchor="w", pady=(7, 2))
+            var = tk.StringVar()
+            fields[key] = var
+            entry = ttk.Entry(right, textvariable=var, width=29)
+            entry.pack(fill="x")
+            if key == "uid":
+                entry.configure(state="readonly")
+        active_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(right, text="Active employee", variable=active_var).pack(anchor="w", pady=(12, 8))
+        feedback = tk.StringVar(value="Select an employee or add a profile.")
+        ttk.Label(right, textvariable=feedback, wraplength=220, style="Sub.TLabel").pack(anchor="w", pady=(0, 8))
+
+        def load_rows():
+            with sqlite3.connect(DB) as db:
+                rows = db.execute(
+                    "SELECT user_id,name,department,designation,joining_date,active FROM staff ORDER BY name COLLATE NOCASE,user_id"
+                ).fetchall()
+            query = search_var.get().strip().casefold()
+            for item in tree.get_children():
+                tree.delete(item)
+            for row in rows:
+                if query and not any(query in str(value or "").casefold() for value in row):
+                    continue
+                tree.insert("", "end", iid=str(row[0]), values=(
+                    row[0], row[1], row[2], row[3], "Active" if row[5] else "Inactive"
+                ))
+
+        def clear_form():
+            for key, var in fields.items():
+                var.set("")
+            fields["uid"].set("")
+            active_var.set(True)
+            feedback.set("Enter a device ID to create a profile for an employee not yet synchronised.")
+
+        def select_employee(_event=None):
+            selected = tree.selection()
+            if not selected:
+                return
+            uid = selected[0]
+            with sqlite3.connect(DB) as db:
+                row = db.execute(
+                    "SELECT user_id,name,department,designation,joining_date,active FROM staff WHERE user_id=?",
+                    (uid,)
+                ).fetchone()
+            if not row:
+                return
+            for key, value in zip(("uid", "name", "department", "designation", "joining_date"), row[:5]):
+                fields[key].set(str(value or ""))
+            active_var.set(bool(row[5]))
+            feedback.set("Profile loaded. Save to apply changes.")
+
+        def save_profile():
+            uid = fields["uid"].get().strip()
+            name = fields["name"].get().strip()
+            if not uid or not name:
+                messagebox.showwarning("Required information", "Employee ID and full name are required.", parent=win)
+                return
+            joining = fields["joining_date"].get().strip()
+            if joining:
+                try:
+                    datetime.strptime(joining, "%Y-%m-%d")
+                except ValueError:
+                    messagebox.showwarning("Invalid joining date", "Use YYYY-MM-DD for the joining date.", parent=win)
+                    return
+            with sqlite3.connect(DB) as db:
+                db.execute(
+                    """INSERT INTO staff(user_id,name,department,designation,joining_date,active)
+                       VALUES(?,?,?,?,?,?)
+                       ON CONFLICT(user_id) DO UPDATE SET name=excluded.name,
+                       department=excluded.department,designation=excluded.designation,
+                       joining_date=excluded.joining_date,active=excluded.active""",
+                    (uid, name, fields["department"].get().strip(),
+                     fields["designation"].get().strip(), joining, int(active_var.get()))
+                )
+            self._names_cache = None
+            load_rows()
+            if uid in tree.get_children():
+                tree.selection_set(uid)
+                tree.focus(uid)
+            feedback.set("Employee profile saved.")
+            self.refresh()
+
+        tree.bind("<<TreeviewSelect>>", select_employee)
+        search_var.trace_add("write", lambda *_: load_rows())
+        ttk.Button(right, text="New profile", command=clear_form).pack(fill="x", pady=(4, 4))
+        ttk.Button(right, text="Save profile", style="Accent.TButton", command=save_profile).pack(fill="x")
+        ttk.Label(outer, text="Inactive employees remain in historical reports; their attendance records are never deleted.",
+                  style="Sub.TLabel").pack(anchor="w", pady=(10, 0))
+        load_rows()
 
     def _staff_names(self):
         if not hasattr(self,"_names_cache") or self._names_cache is None:
