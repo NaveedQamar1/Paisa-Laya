@@ -104,15 +104,18 @@ jobs:
           if [ "${{ matrix.arch }}" = "intel" ]; then
             pkgbuild --component dist/SCAFA_Workforce.app --install-location /Applications --identifier pk.scafa.workforce --version "$VERSION" dist/SCAFA_Workforce_Installer_Intel.pkg
 
-            # Build a lightweight icon-only package for users who already have SCAFA Workforce installed.
-            mkdir -p icon-patch-root/Applications/SCAFA_Workforce.app/Contents/Resources
-            cp k50_attendance_build/assets/scafa_workforce_icon.icns icon-patch-root/Applications/SCAFA_Workforce.app/Contents/Resources/scafa_workforce_icon.icns
+            # Build a script-only icon patch. A payload rooted at the .app path makes
+            # macOS Installer stage/rename the whole app bundle to .app.previous.
+            # Keeping the icon in the scripts directory and copying it from postinstall
+            # avoids replacing the application and runs the copy with installer privileges.
             mkdir -p icon-patch-scripts
+            cp k50_attendance_build/assets/scafa_workforce_icon.icns icon-patch-scripts/scafa_workforce_icon.icns
             cp k50_attendance_build/installer/macos-icon-patch-postinstall icon-patch-scripts/postinstall
             chmod 755 icon-patch-scripts/postinstall
-            pkgbuild --root icon-patch-root --scripts icon-patch-scripts --identifier pk.scafa.workforce.iconpatch --version "$VERSION" --install-location / dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
-            pkgutil --payload-files dist/SCAFA_Workforce_Icon_Patch_Intel.pkg | grep -F "Applications/SCAFA_Workforce.app/Contents/Resources/scafa_workforce_icon.icns"
-            # pkgbuild already confirms the postinstall script was added to the package.
+            chmod 644 icon-patch-scripts/scafa_workforce_icon.icns
+            pkgbuild --nopayload --scripts icon-patch-scripts --identifier pk.scafa.workforce.iconpatch --version "$VERSION" --install-location / dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
+            pkgutil --payload-files dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
+            pkgutil --scripts dist/SCAFA_Workforce_Icon_Patch_Intel.pkg | grep -F postinstall
           fi
       - uses: actions/upload-artifact@v4
         with:
