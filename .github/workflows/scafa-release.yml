@@ -114,8 +114,9 @@ jobs:
             chmod 755 icon-patch-scripts/postinstall
             chmod 644 icon-patch-scripts/scafa_workforce_icon.icns
             pkgbuild --nopayload --scripts icon-patch-scripts --identifier pk.scafa.workforce.iconpatch --version "$VERSION" --install-location / dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
-            pkgutil --payload-files dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
-            xar -tf dist/SCAFA_Workforce_Icon_Patch_Intel.pkg | grep -F "Scripts/postinstall"
+            # --nopayload packages have no payload for pkgutil --payload-files to list.
+            # Verify the installer script directly from the package archive instead.
+            xar -tf dist/SCAFA_Workforce_Icon_Patch_Intel.pkg | grep -Fx "Scripts/postinstall"
           fi
       - uses: actions/upload-artifact@v4
         with:
