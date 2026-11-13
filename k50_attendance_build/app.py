@@ -827,7 +827,8 @@ class App(tk.Tk):
             entry = ttk.Entry(right, textvariable=var, width=29)
             entry.pack(fill="x")
             if key == "uid":
-                entry.configure(state="readonly")
+                uid_entry = entry
+                uid_entry.configure(state="normal")
         active_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(right, text="Active employee", variable=active_var).pack(anchor="w", pady=(12, 8))
         feedback = tk.StringVar(value="Select an employee or add a profile.")
@@ -848,12 +849,15 @@ class App(tk.Tk):
                     row[0], row[1], row[2], row[3], "Active" if row[5] else "Inactive"
                 ))
 
+        current_profile_uid = {"value": None}
+
         def clear_form():
+            current_profile_uid["value"] = None
+            uid_entry.configure(state="normal")
             for key, var in fields.items():
                 var.set("")
-            fields["uid"].set("")
             active_var.set(True)
-            feedback.set("Enter a device ID to create a profile for an employee not yet synchronised.")
+            feedback.set("Enter the employee's device ID and profile details. Existing IDs cannot be reused.")
 
         def select_employee(_event=None):
             selected = tree.selection()
@@ -867,10 +871,13 @@ class App(tk.Tk):
                 ).fetchone()
             if not row:
                 return
+            current_profile_uid["value"] = str(row[0])
+            uid_entry.configure(state="normal")
             for key, value in zip(("uid", "name", "department", "designation", "joining_date"), row[:5]):
                 fields[key].set(str(value or ""))
             active_var.set(bool(row[5]))
-            feedback.set("Profile loaded. Save to apply changes.")
+            uid_entry.configure(state="readonly")
+            feedback.set("Profile loaded. The device-assigned ID is protected; edit the remaining details and save.")
 
         def save_profile():
             uid = fields["uid"].get().strip()
@@ -878,6 +885,16 @@ class App(tk.Tk):
             if not uid or not name:
                 messagebox.showwarning("Required information", "Employee ID and full name are required.", parent=win)
                 return
+            if current_profile_uid["value"] is None:
+                with sqlite3.connect(DB) as db:
+                    exists = db.execute("SELECT 1 FROM staff WHERE user_id=?", (uid,)).fetchone()
+                if exists:
+                    messagebox.showwarning(
+                        "Employee ID already exists",
+                        "This device ID already belongs to an employee. Select that employee from the directory to edit the profile.",
+                        parent=win
+                    )
+                    return
             joining = fields["joining_date"].get().strip()
             if joining:
                 try:
@@ -895,6 +912,8 @@ class App(tk.Tk):
                     (uid, name, fields["department"].get().strip(),
                      fields["designation"].get().strip(), joining, int(active_var.get()))
                 )
+            current_profile_uid["value"] = uid
+            uid_entry.configure(state="readonly")
             self._names_cache = None
             load_rows()
             if uid in tree.get_children():
