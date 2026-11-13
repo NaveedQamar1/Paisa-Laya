@@ -103,6 +103,12 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent dist/SCAFA_Workforce.app dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
           if [ "${{ matrix.arch }}" = "intel" ]; then
             pkgbuild --component dist/SCAFA_Workforce.app --install-location /Applications --identifier pk.scafa.workforce --version "$VERSION" dist/SCAFA_Workforce_Installer_Intel.pkg
+
+            # Build a lightweight icon-only package for users who already have SCAFA Workforce installed.
+            mkdir -p icon-patch-root/Applications/SCAFA_Workforce.app/Contents/Resources
+            cp k50_attendance_build/assets/scafa_workforce_icon.icns icon-patch-root/Applications/SCAFA_Workforce.app/Contents/Resources/scafa_workforce_icon.icns
+            chmod +x k50_attendance_build/installer/macos-icon-patch-postinstall
+            pkgbuild --root icon-patch-root --scripts k50_attendance_build/installer --identifier pk.scafa.workforce.iconpatch --version "$VERSION" --install-location / dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
           fi
       - uses: actions/upload-artifact@v4
         with:
@@ -114,6 +120,12 @@ jobs:
         with:
           name: release-macos-intel-installer
           path: dist/SCAFA_Workforce_Installer_Intel.pkg
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: matrix.arch == 'intel'
+        with:
+          name: release-macos-intel-icon-patch
+          path: dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
           if-no-files-found: error
 
   publish:
