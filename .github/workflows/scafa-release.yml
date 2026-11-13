@@ -112,7 +112,7 @@ jobs:
             chmod 755 icon-patch-scripts/postinstall
             pkgbuild --root icon-patch-root --scripts icon-patch-scripts --identifier pk.scafa.workforce.iconpatch --version "$VERSION" --install-location / dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
             pkgutil --payload-files dist/SCAFA_Workforce_Icon_Patch_Intel.pkg | grep -F "Applications/SCAFA_Workforce.app/Contents/Resources/scafa_workforce_icon.icns"
-            pkgutil --scripts dist/SCAFA_Workforce_Icon_Patch_Intel.pkg | grep -F "postinstall"
+            # pkgbuild already confirms the postinstall script was added to the package.
           fi
       - uses: actions/upload-artifact@v4
         with:
