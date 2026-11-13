@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euo pipefail
+
+APP="/Applications/SCAFA_Workforce.app"
+ICON_SOURCE="/Applications/SCAFA_Workforce.app/Contents/Resources/scafa_workforce_icon.icns"
+PLIST="$APP/Contents/Info.plist"
+
+if [ ! -d "$APP" ] || [ ! -f "$PLIST" ]; then
+  echo "SCAFA Workforce was not found in /Applications. Install the full application first." >&2
+  exit 1
+fi
+
+/usr/libexec/PlistBuddy -c "Set :CFBundleIconFile scafa_workforce_icon" "$PLIST" 2>/dev/null || \
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string scafa_workforce_icon" "$PLIST"
+
+touch "$APP"
+if /usr/bin/codesign -dv "$APP" >/dev/null 2>&1; then
+  echo "Icon metadata updated. The bundle's existing signature may need to be refreshed by a full signed release."
+fi
+
+/usr/bin/killall Dock >/dev/null 2>&1 || true
+exit 0
