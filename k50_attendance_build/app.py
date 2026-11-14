@@ -1019,30 +1019,34 @@ class App(tk.Tk):
                 except ValueError:
                     messagebox.showwarning("Invalid joining date", "Use YYYY-MM-DD for the joining date.", parent=win)
                     return
-            with sqlite3.connect(DB) as db:
-                previous = db.execute(
-                    "SELECT active FROM staff WHERE user_id=?", (uid,)
-                ).fetchone()
-                new_active = int(active_var.get())
-                db.execute(
-                    """INSERT INTO staff(user_id,name,department,designation,joining_date,active)
-                       VALUES(?,?,?,?,?,?)
-                       ON CONFLICT(user_id) DO UPDATE SET name=excluded.name,
-                       department=excluded.department,designation=excluded.designation,
-                       joining_date=excluded.joining_date,active=excluded.active""",
-                    (uid, name, fields["department"].get().strip(),
-                     fields["designation"].get().strip(), joining, new_active)
-                )
-                previous_profile = db.execute(
-                    "SELECT joining_date FROM staff WHERE user_id=?", (uid,)
-                ).fetchone()
-                previous_joining = previous_profile[0] if previous_profile else None
-                if previous is None or int(previous[0]) != new_active or (previous_joining or "") != joining:
-                    save_profile_status_history(
-                        db, uid, joining, new_active,
-                        previous_joining_date=previous_joining,
-                        is_new=previous is None
+            try:
+                with sqlite3.connect(DB) as db:
+                    previous = db.execute(
+                        "SELECT active FROM staff WHERE user_id=?", (uid,)
+                    ).fetchone()
+                    previous_profile = db.execute(
+                        "SELECT joining_date FROM staff WHERE user_id=?", (uid,)
+                    ).fetchone()
+                    previous_joining = previous_profile[0] if previous_profile else None
+                    new_active = int(active_var.get())
+                    if previous is None or int(previous[0]) != new_active or (previous_joining or "") != joining:
+                        save_profile_status_history(
+                            db, uid, joining, new_active,
+                            previous_joining_date=previous_joining,
+                            is_new=previous is None
+                        )
+                    db.execute(
+                        """INSERT INTO staff(user_id,name,department,designation,joining_date,active)
+                           VALUES(?,?,?,?,?,?)
+                           ON CONFLICT(user_id) DO UPDATE SET name=excluded.name,
+                           department=excluded.department,designation=excluded.designation,
+                           joining_date=excluded.joining_date,active=excluded.active""",
+                        (uid, name, fields["department"].get().strip(),
+                         fields["designation"].get().strip(), joining, new_active)
                     )
+            except ValueError as exc:
+                messagebox.showwarning("Joining date conflicts with status history", str(exc), parent=win)
+                return
             current_profile_uid["value"] = uid
             uid_entry.configure(state="readonly")
             self._names_cache = None
