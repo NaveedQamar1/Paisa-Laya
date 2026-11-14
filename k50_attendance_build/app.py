@@ -144,6 +144,11 @@ def employee_active_from_events(events, day, fallback_active=True):
     return bool(fallback_active)
 
 
+def count_expected_present_days(employee_performance):
+    """Count present days only from eligible scheduled-day performance totals."""
+    return sum(stats["present"] for _, stats in employee_performance)
+
+
 def is_expected_attendance_day(active_on_day, status):
     """Whether a date belongs in scheduled attendance performance denominators."""
     return (
@@ -1775,8 +1780,8 @@ class App(tk.Tk):
             # immediately in Excel, LibreOffice, and macOS preview applications.
             overview.append(["Total punches",sum(punch_totals.values())])
             overview.append(["Staff included",len(users)])
-            overview.append(["Active attendance days",sum(active_days.values())])
-            overview.append(["Present / late days",sum(1 for s in status_values if "present" in s.casefold() or "late" in s.casefold())])
+            overview.append(["Days with punches",sum(active_days.values())])
+            overview.append(["Present days",count_expected_present_days(employee_performance)])
             overview.append(["Late arrivals",sum(p["late"] for _,p in employee_performance)])
             overview.append(["Early departures",sum(p["early"] for _,p in employee_performance)])
             overview.append(["Absences",sum(p["absent"] for _,p in employee_performance)])
@@ -1802,7 +1807,7 @@ class App(tk.Tk):
                 overview.cell(rr,6,count)
             staff_start=17
             overview.cell(staff_start,1,"STAFF PUNCH TOTALS")
-            for j,h in enumerate(["Device User ID","Staff Name","Punches","Active Days"],1):
+            for j,h in enumerate(["Device User ID","Staff Name","Punches","Days with Punches"],1):
                 overview.cell(staff_start+1,j,h)
             for idx,uid in enumerate(users,staff_start+2):
                 overview.cell(idx,1,uid)
