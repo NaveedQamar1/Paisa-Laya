@@ -16,6 +16,21 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
         app.DB = self.old_db
         self.temp.cleanup()
 
+
+    def test_migration_is_idempotent_and_does_not_duplicate_status_events(self):
+        with sqlite3.connect(app.DB) as db:
+            db.execute("CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')")
+            db.execute("CREATE TABLE punches(user_id TEXT NOT NULL, punch_time TEXT NOT NULL, status TEXT DEFAULT '', UNIQUE(user_id,punch_time,status))")
+            db.execute("INSERT INTO staff(user_id,name) VALUES('44','Legacy Staff')")
+            db.execute("INSERT INTO punches(user_id,punch_time,status) VALUES('44','2024-01-02 09:00:00','')")
+        app.init_db()
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM staff_status_history WHERE user_id='44'"
+            ).fetchone()[0], 2)
+            self.assertTrue(app.employee_active_on(db, "44", "2024-01-02"))
+
     def test_existing_database_migrates_without_losing_staff_or_punches(self):
         with sqlite3.connect(app.DB) as db:
             db.execute("CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')")
