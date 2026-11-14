@@ -77,6 +77,54 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
         self.assertTrue(app.employee_active_from_events(events, "2026-11-13", True))
         self.assertFalse(app.employee_active_from_events(events, "2026-11-14", True))
 
+
+    def test_new_employee_with_future_joining_date_is_inactive_until_start(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute("INSERT INTO staff(user_id,name,joining_date,active) VALUES('31','Future Hire','2026-12-01',1)")
+            app.save_profile_status_history(db, "31", "2026-12-01", True, is_new=True, effective_today="2026-11-14")
+            self.assertFalse(app.employee_active_on(db, "31", "2026-11-30"))
+            self.assertTrue(app.employee_active_on(db, "31", "2026-12-01"))
+            events = db.execute(
+                "SELECT active,effective_date FROM staff_status_history WHERE user_id='31' ORDER BY effective_date"
+            ).fetchall()
+        self.assertEqual(events, [(0, "0001-01-01"), (1, "2026-12-01")])
+
+    def test_editing_joining_date_moves_only_initial_start_event(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute("INSERT INTO staff(user_id,name,joining_date,active) VALUES('32','Sara','2024-01-01',1)")
+            app.save_profile_status_history(db, "32", "2024-01-01", True, is_new=True, effective_today="2026-11-14")
+            db.execute(
+                "INSERT INTO staff_status_history(user_id,active,effective_date,source) VALUES('32',0,'2026-06-01','profile')"
+            )
+            app.save_profile_status_history(
+                db, "32", "2024-02-01", True,
+                previous_joining_date="2024-01-01", effective_today="2026-11-14"
+            )
+            self.assertFalse(app.employee_active_on(db, "32", "2024-01-31"))
+            self.assertTrue(app.employee_active_on(db, "32", "2024-02-01"))
+            self.assertFalse(app.employee_active_on(db, "32", "2026-06-01"))
+            events = db.execute(
+                "SELECT active,effective_date FROM staff_status_history WHERE user_id='32' ORDER BY effective_date"
+            ).fetchall()
+        self.assertEqual(events, [(0, "0001-01-01"), (1, "2024-02-01"), (0, "2026-06-01")])
+
+    def test_joining_date_edit_rejects_collision_without_losing_history(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute("INSERT INTO staff(user_id,name,joining_date,active) VALUES('33','Ali','2024-01-01',1)")
+            app.save_profile_status_history(db, "33", "2024-01-01", True, is_new=True)
+            db.execute(
+                "INSERT INTO staff_status_history(user_id,active,effective_date,source) VALUES('33',0,'2024-02-01','profile')"
+            )
+            with self.assertRaises(ValueError):
+                app.save_profile_status_history(
+                    db, "33", "2024-02-01", True, previous_joining_date="2024-01-01"
+                )
+            self.assertTrue(app.employee_active_on(db, "33", "2024-01-15"))
+            self.assertFalse(app.employee_active_on(db, "33", "2024-02-01"))
+
     def test_device_name_sync_does_not_overwrite_profile_metadata(self):
         app.init_db()
         with sqlite3.connect(app.DB) as db:
