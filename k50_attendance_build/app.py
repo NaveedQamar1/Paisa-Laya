@@ -121,6 +121,14 @@ def employee_active_on(db, user_id, day, fallback_active=True):
     return bool(row[0]) if row else bool(fallback_active)
 
 
+def employee_active_from_events(events, day, fallback_active=True):
+    """Evaluate preloaded (effective_date, active) events without repeated DB queries."""
+    for effective_date, active in reversed(events):
+        if effective_date <= str(day):
+            return bool(active)
+    return bool(fallback_active)
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -1180,6 +1188,11 @@ class App(tk.Tk):
         last=datetime.strptime(self.end_date.get(),"%Y-%m-%d").date()
         with sqlite3.connect(DB) as c:
             registered={str(r[0]) for r in c.execute("SELECT user_id FROM staff")}
+            status_history={}
+            for status_uid,active_value,effective_date in c.execute(
+                "SELECT user_id,active,effective_date FROM staff_status_history ORDER BY effective_date,id"
+            ):
+                status_history.setdefault(str(status_uid),[]).append((str(effective_date),bool(active_value)))
         staff_ids=sorted(registered|{uid for uid,day in grouped},
             key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
         if selected_uid:
@@ -1194,7 +1207,8 @@ class App(tk.Tk):
                 day=cursor.isoformat()
                 stamps=sorted(grouped.get((uid,day),[]))
                 status,first_p,last_p,worked=self._attendance_day_status(uid,day,stamps)
-                if status not in ("Day off","Holiday","Inactive") and not status.startswith("On leave"):
+                active_on_day=employee_active_from_events(status_history.get(uid,()),day)
+                if active_on_day and status not in ("Day off","Holiday","Inactive") and not status.startswith("On leave"):
                     stats["expected"]+=1
                 if status=="Absent":
                     stats["absent"]+=1
@@ -1549,6 +1563,11 @@ class App(tk.Tk):
             with sqlite3.connect(DB) as c:
                 known=sorted({str(r[0]) for r in c.execute("SELECT user_id FROM staff")} | {str(r[0]) for r in rows},
                     key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
+                status_history={}
+                for status_uid,active_value,effective_date in c.execute(
+                    "SELECT user_id,active,effective_date FROM staff_status_history ORDER BY effective_date,id"
+                ):
+                    status_history.setdefault(str(status_uid),[]).append((str(effective_date),bool(active_value)))
             first=datetime.strptime(self.start_date.get(),"%Y-%m-%d").date()
             last=datetime.strptime(self.end_date.get(),"%Y-%m-%d").date()
             if last<first: raise ValueError("End date must not precede start date.")
@@ -1567,7 +1586,8 @@ class App(tk.Tk):
                     worked_display="—" if status.startswith("Incomplete punch") else format_worked_time(hours)
                     summary.append([uid,self._name(uid),f"{day} ({weekday})",len(stamps),first_p or "—",last_p or "—",worked_display,status])
                     status_values.append(status)
-                    if status not in ("Day off","Holiday") and not status.startswith("On leave"): perf["expected"]+=1
+                    active_on_day=employee_active_from_events(status_history.get(uid,()),day)
+                    if active_on_day and status not in ("Day off","Holiday","Inactive") and not status.startswith("On leave"): perf["expected"]+=1
                     if status=="Absent": perf["absent"]+=1
                     elif status.startswith("Incomplete punch"):
                         perf["incomplete"]+=1; perf["present"]+=1
