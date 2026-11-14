@@ -129,6 +129,59 @@ def employee_active_from_events(events, day, fallback_active=True):
     return bool(fallback_active)
 
 
+def save_profile_status_history(db, user_id, joining_date, active, previous_joining_date=None,
+                                is_new=False, effective_today=None):
+    """Persist a profile's employment start without overwriting later status changes."""
+    uid = str(user_id)
+    today = effective_today or date.today().isoformat()
+    start = joining_date or today
+    if is_new:
+        if joining_date and active:
+            # A dated start must not make the employee active before their first day.
+            db.execute(
+                """INSERT OR IGNORE INTO staff_status_history
+                   (user_id,active,effective_date,source) VALUES(?,0,'0001-01-01','profile-baseline')""",
+                (uid,)
+            )
+        db.execute(
+            """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+               VALUES(?,?,?,'profile')
+               ON CONFLICT(user_id,effective_date) DO UPDATE SET
+               active=excluded.active,changed_at=CURRENT_TIMESTAMP,source='profile'""",
+            (uid, int(bool(active)), start)
+        )
+        return
+
+    if joining_date == (previous_joining_date or ""):
+        return
+
+    # Move only the original employment-start event. Later activation/deactivation
+    # events remain on their original dates and retain their ordering.
+    first = db.execute(
+        """SELECT id,active,effective_date,source FROM staff_status_history
+           WHERE user_id=? ORDER BY effective_date,id LIMIT 1""",
+        (uid,)
+    ).fetchone()
+    if first and int(first[1]) and first[3] in ("profile", "migration"):
+        target = start
+        conflict = db.execute(
+            "SELECT id FROM staff_status_history WHERE user_id=? AND effective_date=? AND id<>?",
+            (uid, target, first[0])
+        ).fetchone()
+        if conflict:
+            raise ValueError("The revised joining date conflicts with another employment-status event.")
+        db.execute(
+            "UPDATE staff_status_history SET effective_date=?,changed_at=CURRENT_TIMESTAMP,source='profile' WHERE id=?",
+            (target, first[0])
+        )
+        if joining_date:
+            db.execute(
+                """INSERT OR IGNORE INTO staff_status_history
+                   (user_id,active,effective_date,source) VALUES(?,0,'0001-01-01','profile-baseline')""",
+                (uid,)
+            )
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -980,16 +1033,15 @@ class App(tk.Tk):
                     (uid, name, fields["department"].get().strip(),
                      fields["designation"].get().strip(), joining, new_active)
                 )
-                if previous is None or int(previous[0]) != new_active:
-                    # A new profile's joining date is its employment start;
-                    # later active/inactive changes take effect on the change date.
-                    effective_date = joining if previous is None and joining else date.today().isoformat()
-                    db.execute(
-                        """INSERT INTO staff_status_history(user_id,active,effective_date,source)
-                           VALUES(?,?,?,'profile')
-                           ON CONFLICT(user_id,effective_date) DO UPDATE SET
-                           active=excluded.active,changed_at=CURRENT_TIMESTAMP,source='profile'""",
-                        (uid, new_active, effective_date)
+                previous_profile = db.execute(
+                    "SELECT joining_date FROM staff WHERE user_id=?", (uid,)
+                ).fetchone()
+                previous_joining = previous_profile[0] if previous_profile else None
+                if previous is None or int(previous[0]) != new_active or (previous_joining or "") != joining:
+                    save_profile_status_history(
+                        db, uid, joining, new_active,
+                        previous_joining_date=previous_joining,
+                        is_new=previous is None
                     )
             current_profile_uid["value"] = uid
             uid_entry.configure(state="readonly")
