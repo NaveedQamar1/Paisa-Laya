@@ -81,7 +81,7 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
         app.init_db()
         with sqlite3.connect(app.DB) as db:
             event = db.execute(
-                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='21'"
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='21' AND source='migration'"
             ).fetchone()
             self.assertEqual(event, (1, "2024-03-05", "migration"))
             self.assertTrue(app.employee_active_on(db, "21", "2024-03-05"))
@@ -100,6 +100,22 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             self.assertTrue(app.employee_active_on(db, "22", "2026-11-13"))
             self.assertFalse(app.employee_active_on(db, "22", "2026-11-14"))
             self.assertFalse(app.employee_active_on(db, "22", "2026-12-01"))
+
+
+    def test_legacy_inactive_employee_does_not_get_retroactive_baseline(self):
+        with sqlite3.connect(app.DB) as db:
+            db.execute("CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')")
+            db.execute("CREATE TABLE punches(user_id TEXT NOT NULL, punch_time TEXT NOT NULL, status TEXT DEFAULT '', UNIQUE(user_id,punch_time,status))")
+            db.execute("ALTER TABLE staff ADD COLUMN joining_date TEXT NOT NULL DEFAULT ''")
+            db.execute("ALTER TABLE staff ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+            db.execute("INSERT INTO staff(user_id,name,joining_date,active) VALUES('43','Former Staff','2020-01-01',0)")
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            self.assertTrue(app.employee_active_on(db, "43", "2026-11-13"))
+            self.assertFalse(app.employee_active_on(db, "43", "2026-11-14"))
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM staff_status_history WHERE user_id='43' AND source LIKE '%baseline'"
+            ).fetchone()[0], 0)
 
     def test_preloaded_status_events_respect_effective_date(self):
         events = [("2024-01-01", True), ("2026-11-14", False)]
