@@ -132,6 +132,16 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM staff_status_history WHERE user_id='43' AND source LIKE '%baseline'"
             ).fetchone()[0], 0)
 
+
+    def test_only_active_scheduled_days_count_toward_performance(self):
+        self.assertTrue(app.is_expected_attendance_day(True, "Present"))
+        self.assertTrue(app.is_expected_attendance_day(True, "Absent"))
+        self.assertFalse(app.is_expected_attendance_day(False, "Present"))
+        self.assertFalse(app.is_expected_attendance_day(True, "Inactive"))
+        self.assertFalse(app.is_expected_attendance_day(True, "Day off"))
+        self.assertFalse(app.is_expected_attendance_day(True, "Holiday"))
+        self.assertFalse(app.is_expected_attendance_day(True, "On leave — Annual Leave"))
+
     def test_preloaded_status_events_respect_effective_date(self):
         events = [("2024-01-01", True), ("2026-11-14", False)]
         self.assertTrue(app.employee_active_from_events(events, "2026-11-13"))
