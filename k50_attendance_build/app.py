@@ -63,6 +63,17 @@ def init_db():
         for uid, active, joining in c.execute(
             "SELECT user_id,active,joining_date FROM staff"
         ).fetchall():
+            if int(active or 0) and joining:
+                try:
+                    datetime.strptime(str(joining), "%Y-%m-%d")
+                    c.execute(
+                        """INSERT OR IGNORE INTO staff_status_history
+                           (user_id,active,effective_date,source)
+                           VALUES(?,0,'0001-01-01','migration-baseline')""",
+                        (str(uid),)
+                    )
+                except ValueError:
+                    pass
             has_history = c.execute(
                 "SELECT 1 FROM staff_status_history WHERE user_id=? LIMIT 1", (str(uid),)
             ).fetchone()
