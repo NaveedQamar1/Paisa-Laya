@@ -63,30 +63,34 @@ def init_db():
         for uid, active, joining in c.execute(
             "SELECT user_id,active,joining_date FROM staff"
         ).fetchall():
+            valid_joining = False
             if joining:
                 try:
                     datetime.strptime(str(joining), "%Y-%m-%d")
-                    c.execute(
-                        """INSERT OR IGNORE INTO staff_status_history
-                           (user_id,active,effective_date,source)
-                           VALUES(?,0,'0001-01-01','migration-baseline')""",
-                        (str(uid),)
-                    )
+                    valid_joining = True
                 except ValueError:
                     pass
-            has_history = c.execute(
-                "SELECT 1 FROM staff_status_history WHERE user_id=? LIMIT 1", (str(uid),)
+            if valid_joining:
+                # Baseline prevents a dated employee from being counted before
+                # their joining date, but is not itself a complete status history.
+                c.execute(
+                    """INSERT OR IGNORE INTO staff_status_history
+                       (user_id,active,effective_date,source)
+                       VALUES(?,0,'0001-01-01','migration-baseline')""",
+                    (str(uid),)
+                )
+            has_status_event = c.execute(
+                """SELECT 1 FROM staff_status_history
+                   WHERE user_id=? AND source<>'migration-baseline'
+                   LIMIT 1""",
+                (str(uid),)
             ).fetchone()
-            if has_history:
+            if has_status_event:
                 continue
             effective = date.today().isoformat()
             if int(active or 0):
-                if joining:
-                    try:
-                        datetime.strptime(str(joining), "%Y-%m-%d")
-                        effective = str(joining)
-                    except ValueError:
-                        pass
+                if valid_joining:
+                    effective = str(joining)
                 else:
                     first_punch = c.execute(
                         "SELECT MIN(substr(punch_time,1,10)) FROM punches WHERE user_id=?",
@@ -178,10 +182,11 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
     # events remain on their original dates and retain their ordering.
     first = db.execute(
         """SELECT id,active,effective_date,source FROM staff_status_history
-           WHERE user_id=? ORDER BY effective_date,id LIMIT 1""",
+           WHERE user_id=? AND active=1 AND source IN ('profile','migration')
+           ORDER BY effective_date,id LIMIT 1""",
         (uid,)
     ).fetchone()
-    if first and int(first[1]) and first[3] in ("profile", "migration"):
+    if first:
         target = start
         conflict = db.execute(
             "SELECT id FROM staff_status_history WHERE user_id=? AND effective_date=? AND id<>?",
