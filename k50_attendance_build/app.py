@@ -981,7 +981,9 @@ class App(tk.Tk):
                      fields["designation"].get().strip(), joining, new_active)
                 )
                 if previous is None or int(previous[0]) != new_active:
-                    effective_date = date.today().isoformat()
+                    # A new profile's joining date is its employment start;
+                    # later active/inactive changes take effect on the change date.
+                    effective_date = joining if previous is None and joining else date.today().isoformat()
                     db.execute(
                         """INSERT INTO staff_status_history(user_id,active,effective_date,source)
                            VALUES(?,?,?,'profile')
