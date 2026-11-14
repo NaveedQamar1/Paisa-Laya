@@ -198,6 +198,39 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
            ORDER BY effective_date,id LIMIT 1""",
         (uid,)
     ).fetchone()
+    if not first:
+        has_real_event = db.execute(
+            """SELECT 1 FROM staff_status_history
+               WHERE user_id=? AND source<>'profile-baseline'
+               LIMIT 1""",
+            (uid,)
+        ).fetchone()
+        if not has_real_event:
+            db.execute(
+                """INSERT OR IGNORE INTO staff_status_history
+                   (user_id,active,effective_date,source)
+                   VALUES(?,0,'0001-01-01','profile-baseline')""",
+                (uid,)
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES(?,?,?,'profile')
+                   ON CONFLICT(user_id,effective_date) DO UPDATE SET
+                   active=excluded.active,changed_at=CURRENT_TIMESTAMP,source='profile'""",
+                (uid, int(bool(active)), start)
+            )
+            if status_changed:
+                effective_status_date = today
+                if active and joining_date and joining_date > today:
+                    effective_status_date = joining_date
+                db.execute(
+                    """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                       VALUES(?,?,?,'profile')
+                       ON CONFLICT(user_id,effective_date) DO UPDATE SET
+                       active=excluded.active,changed_at=CURRENT_TIMESTAMP,source='profile'""",
+                    (uid, int(bool(active)), effective_status_date)
+                )
+            return
     if first:
         target = start
         conflict = db.execute(
