@@ -133,6 +133,10 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             ).fetchone()[0], 0)
 
 
+    def test_present_day_metric_uses_eligible_performance_totals(self):
+        rows=[("17", {"present": 3}), ("18", {"present": 1})]
+        self.assertEqual(app.count_expected_present_days(rows), 4)
+
     def test_only_active_scheduled_days_count_toward_performance(self):
         self.assertTrue(app.is_expected_attendance_day(True, "Present"))
         self.assertTrue(app.is_expected_attendance_day(True, "Absent"))
