@@ -190,6 +190,36 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             self.assertTrue(app.employee_active_on(db, "34", "2026-11-13"))
             self.assertFalse(app.employee_active_on(db, "34", "2026-11-14"))
 
+
+    def test_future_employee_activation_takes_effect_on_joining_date(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            app.save_profile_status_history(
+                db, "51", "2026-12-01", False, is_new=True, effective_today="2026-11-14"
+            )
+            app.save_profile_status_history(
+                db, "51", "2026-12-01", True,
+                previous_joining_date="2026-12-01", status_changed=True,
+                effective_today="2026-11-14"
+            )
+            self.assertFalse(app.employee_active_on(db, "51", "2026-11-30"))
+            self.assertTrue(app.employee_active_on(db, "51", "2026-12-01"))
+
+    def test_joining_date_cannot_be_moved_after_a_later_status_change(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            app.save_profile_status_history(db, "52", "2024-01-01", True, is_new=True)
+            db.execute(
+                "INSERT INTO staff_status_history(user_id,active,effective_date,source) VALUES('52',0,'2025-01-01','profile')"
+            )
+            with self.assertRaises(ValueError):
+                app.save_profile_status_history(
+                    db, "52", "2025-06-01", True,
+                    previous_joining_date="2024-01-01"
+                )
+            self.assertTrue(app.employee_active_on(db, "52", "2024-06-01"))
+            self.assertFalse(app.employee_active_on(db, "52", "2025-01-01"))
+
     def test_device_name_sync_does_not_overwrite_profile_metadata(self):
         app.init_db()
         with sqlite3.connect(app.DB) as db:
