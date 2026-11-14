@@ -125,6 +125,20 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             self.assertTrue(app.employee_active_on(db, "33", "2024-01-15"))
             self.assertFalse(app.employee_active_on(db, "33", "2024-02-01"))
 
+
+    def test_active_toggle_records_effective_date_without_changing_joining_date(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute("INSERT INTO staff(user_id,name,joining_date,active) VALUES('34','Mina','2024-01-01',1)")
+            app.save_profile_status_history(db, "34", "2024-01-01", True, is_new=True)
+            app.save_profile_status_history(
+                db, "34", "2024-01-01", False,
+                previous_joining_date="2024-01-01", status_changed=True,
+                effective_today="2026-11-14"
+            )
+            self.assertTrue(app.employee_active_on(db, "34", "2026-11-13"))
+            self.assertFalse(app.employee_active_on(db, "34", "2026-11-14"))
+
     def test_device_name_sync_does_not_overwrite_profile_metadata(self):
         app.init_db()
         with sqlite3.connect(app.DB) as db:
