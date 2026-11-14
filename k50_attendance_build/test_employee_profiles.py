@@ -66,6 +66,17 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             self.assertFalse(app.employee_active_on(db, "22", "2026-11-14"))
             self.assertFalse(app.employee_active_on(db, "22", "2026-12-01"))
 
+    def test_preloaded_status_events_respect_effective_date(self):
+        events = [("2024-01-01", True), ("2026-11-14", False)]
+        self.assertTrue(app.employee_active_from_events(events, "2026-11-13"))
+        self.assertFalse(app.employee_active_from_events(events, "2026-11-14"))
+        self.assertFalse(app.employee_active_from_events(events, "2026-12-01"))
+
+    def test_preloaded_status_events_use_fallback_before_first_event(self):
+        events = [("2026-11-14", False)]
+        self.assertTrue(app.employee_active_from_events(events, "2026-11-13", True))
+        self.assertFalse(app.employee_active_from_events(events, "2026-11-14", True))
+
     def test_device_name_sync_does_not_overwrite_profile_metadata(self):
         app.init_db()
         with sqlite3.connect(app.DB) as db:
