@@ -144,6 +144,15 @@ def employee_active_from_events(events, day, fallback_active=True):
     return bool(fallback_active)
 
 
+def is_expected_attendance_day(active_on_day, status):
+    """Whether a date belongs in scheduled attendance performance denominators."""
+    return (
+        bool(active_on_day)
+        and status not in ("Day off", "Holiday", "Inactive")
+        and not status.startswith("On leave")
+    )
+
+
 def save_profile_status_history(db, user_id, joining_date, active, previous_joining_date=None,
                                 is_new=False, status_changed=False, effective_today=None):
     """Persist a profile's employment start without overwriting later status changes."""
@@ -1309,21 +1318,22 @@ class App(tk.Tk):
                 stamps=sorted(grouped.get((uid,day),[]))
                 status,first_p,last_p,worked=self._attendance_day_status(uid,day,stamps)
                 active_on_day=employee_active_from_events(status_history.get(uid,()),day)
-                if active_on_day and status not in ("Day off","Holiday","Inactive") and not status.startswith("On leave"):
+                eligible_day=is_expected_attendance_day(active_on_day,status)
+                if eligible_day:
                     stats["expected"]+=1
-                if status=="Absent":
-                    stats["absent"]+=1
-                elif status.startswith("Incomplete punch"):
-                    stats["incomplete"]+=1
-                    stats["present"]+=1
-                    if "Late" in status: stats["late"]+=1
-                elif stamps:
-                    stats["present"]+=1
-                    if "Late" in status: stats["late"]+=1
-                    else: stats["ontime"]+=1
-                    if "early departure" in status: stats["early"]+=1
-                    try: arrivals.append(datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S").hour*60+datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S").minute)
-                    except ValueError: pass
+                    if status=="Absent":
+                        stats["absent"]+=1
+                    elif status.startswith("Incomplete punch"):
+                        stats["incomplete"]+=1
+                        stats["present"]+=1
+                        if "Late" in status: stats["late"]+=1
+                    elif stamps:
+                        stats["present"]+=1
+                        if "Late" in status: stats["late"]+=1
+                        else: stats["ontime"]+=1
+                        if "early departure" in status: stats["early"]+=1
+                        try: arrivals.append(datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S").hour*60+datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S").minute)
+                        except ValueError: pass
                 cursor+=timedelta(days=1)
             rate=(stats["ontime"]/stats["expected"]*100) if stats["expected"] else 0
             avg=""
@@ -1688,20 +1698,22 @@ class App(tk.Tk):
                     summary.append([uid,self._name(uid),f"{day} ({weekday})",len(stamps),first_p or "—",last_p or "—",worked_display,status])
                     status_values.append(status)
                     active_on_day=employee_active_from_events(status_history.get(uid,()),day)
-                    if active_on_day and status not in ("Day off","Holiday","Inactive") and not status.startswith("On leave"): perf["expected"]+=1
-                    if status=="Absent": perf["absent"]+=1
-                    elif status.startswith("Incomplete punch"):
-                        perf["incomplete"]+=1; perf["present"]+=1
-                        if "Late" in status: perf["late"]+=1
-                    elif stamps:
-                        perf["present"]+=1
-                        if "Late" in status: perf["late"]+=1
-                        else: perf["ontime"]+=1
-                        if "early departure" in status: perf["early"]+=1
-                        try:
-                            arrival=datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S")
-                            perf["arrivals"].append(arrival.hour*60+arrival.minute)
-                        except ValueError: pass
+                    eligible_day=is_expected_attendance_day(active_on_day,status)
+                    if eligible_day:
+                        perf["expected"]+=1
+                        if status=="Absent": perf["absent"]+=1
+                        elif status.startswith("Incomplete punch"):
+                            perf["incomplete"]+=1; perf["present"]+=1
+                            if "Late" in status: perf["late"]+=1
+                        elif stamps:
+                            perf["present"]+=1
+                            if "Late" in status: perf["late"]+=1
+                            else: perf["ontime"]+=1
+                            if "early departure" in status: perf["early"]+=1
+                            try:
+                                arrival=datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S")
+                                perf["arrivals"].append(arrival.hour*60+arrival.minute)
+                            except ValueError: pass
                     punch_totals[uid]+=len(stamps)
                     if stamps: active_days[uid]+=1
                     cursor+=timedelta(days=1)
