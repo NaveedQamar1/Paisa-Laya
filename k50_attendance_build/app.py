@@ -70,8 +70,8 @@ def init_db():
                     valid_joining = True
                 except ValueError:
                     pass
-            if valid_joining:
-                # Baseline prevents a dated employee from being counted before
+            if int(active or 0):
+                # Baseline prevents an active employee from being counted before
                 # their joining date, but is not itself a complete status history.
                 c.execute(
                     """INSERT OR IGNORE INTO staff_status_history
@@ -151,13 +151,13 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
     today = effective_today or date.today().isoformat()
     start = joining_date or today
     if is_new:
-        if joining_date:
-            # A dated start must not make the employee active before their first day.
-            db.execute(
-                """INSERT OR IGNORE INTO staff_status_history
-                   (user_id,active,effective_date,source) VALUES(?,0,'0001-01-01','profile-baseline')""",
-                (uid,)
-            )
+        # A new profile must not be counted before its employment start, even
+        # when the joining date is omitted (then the start defaults to today).
+        db.execute(
+            """INSERT OR IGNORE INTO staff_status_history
+               (user_id,active,effective_date,source) VALUES(?,0,'0001-01-01','profile-baseline')""",
+            (uid,)
+        )
         db.execute(
             """INSERT INTO staff_status_history(user_id,active,effective_date,source)
                VALUES(?,?,?,'profile')
