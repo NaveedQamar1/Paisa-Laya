@@ -199,6 +199,14 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
                    (user_id,active,effective_date,source) VALUES(?,0,'0001-01-01','profile-baseline')""",
                 (uid,)
             )
+    if status_changed:
+        db.execute(
+            """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+               VALUES(?,?,?,'profile')
+               ON CONFLICT(user_id,effective_date) DO UPDATE SET
+               active=excluded.active,changed_at=CURRENT_TIMESTAMP,source='profile'""",
+            (uid, int(bool(active)), today)
+        )
 
 
 class App(tk.Tk):
