@@ -49,6 +49,46 @@ def init_db():
         ):
             if column not in staff_columns:
                 c.execute(f"ALTER TABLE staff ADD COLUMN {column} {definition}")
+        # Keep dated employment-status events so inactive periods do not create
+        # false absences and historical attendance remains available.
+        c.execute("""CREATE TABLE IF NOT EXISTS staff_status_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            active INTEGER NOT NULL CHECK(active IN (0,1)),
+            effective_date TEXT NOT NULL,
+            changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            source TEXT NOT NULL DEFAULT 'profile',
+            UNIQUE(user_id,effective_date))""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_staff_status_history_lookup ON staff_status_history(user_id,effective_date)")
+        for uid, active, joining in c.execute(
+            "SELECT user_id,active,joining_date FROM staff"
+        ).fetchall():
+            has_history = c.execute(
+                "SELECT 1 FROM staff_status_history WHERE user_id=? LIMIT 1", (str(uid),)
+            ).fetchone()
+            if has_history:
+                continue
+            effective = date.today().isoformat()
+            if int(active or 0):
+                if joining:
+                    try:
+                        datetime.strptime(str(joining), "%Y-%m-%d")
+                        effective = str(joining)
+                    except ValueError:
+                        pass
+                else:
+                    first_punch = c.execute(
+                        "SELECT MIN(substr(punch_time,1,10)) FROM punches WHERE user_id=?",
+                        (str(uid),)
+                    ).fetchone()[0]
+                    if first_punch:
+                        effective = str(first_punch)
+            # For legacy inactive profiles the deactivation date is unknown.
+            # Use migration day rather than retroactively erasing expected days.
+            c.execute(
+                "INSERT INTO staff_status_history(user_id,active,effective_date,source) VALUES(?,?,?,?)",
+                (str(uid), int(bool(active)), effective, "migration")
+            )
         c.execute("""CREATE TABLE IF NOT EXISTS staff_rules (
             user_id TEXT PRIMARY KEY, start_time TEXT NOT NULL DEFAULT '10:00',
             end_time TEXT NOT NULL DEFAULT '18:00', grace_minutes INTEGER NOT NULL DEFAULT 10,
@@ -69,6 +109,17 @@ def init_db():
                 "saturday_window_start":"09:00","saturday_window_end":"17:00"}
         for k,v in seed.items():
             c.execute("INSERT OR IGNORE INTO app_settings(setting,value) VALUES(?,?)",(k,v))
+
+def employee_active_on(db, user_id, day, fallback_active=True):
+    """Return employment status on an ISO date using the latest effective event."""
+    row = db.execute(
+        """SELECT active FROM staff_status_history
+           WHERE user_id=? AND effective_date<=?
+           ORDER BY effective_date DESC,id DESC LIMIT 1""",
+        (str(user_id), str(day))
+    ).fetchone()
+    return bool(row[0]) if row else bool(fallback_active)
+
 
 class App(tk.Tk):
     def __init__(self):
@@ -736,7 +787,12 @@ class App(tk.Tk):
         with sqlite3.connect(DB) as c:
             leave=c.execute("SELECT label FROM staff_leave WHERE user_id=? AND start_date<=? AND end_date>=? ORDER BY id LIMIT 1",
                             (str(uid),day,day)).fetchone()
+            active_on_day = employee_active_on(c, uid, day)
         if leave: return f"On leave — {leave[0]}", "", "", 0.0
+        # Actual punches remain visible even if an employee was inactive on that
+        # date; only no-punch days are excluded from expected attendance.
+        if not active_on_day and not stamps:
+            return "Inactive", "", "", 0.0
         try: workdays={int(x.strip()) for x in rules["workdays"].split(",") if x.strip()}
         except ValueError: workdays={0,1,2,3,4}
         d=datetime.strptime(day,"%Y-%m-%d").date()
@@ -903,6 +959,10 @@ class App(tk.Tk):
                     messagebox.showwarning("Invalid joining date", "Use YYYY-MM-DD for the joining date.", parent=win)
                     return
             with sqlite3.connect(DB) as db:
+                previous = db.execute(
+                    "SELECT active FROM staff WHERE user_id=?", (uid,)
+                ).fetchone()
+                new_active = int(active_var.get())
                 db.execute(
                     """INSERT INTO staff(user_id,name,department,designation,joining_date,active)
                        VALUES(?,?,?,?,?,?)
@@ -910,8 +970,17 @@ class App(tk.Tk):
                        department=excluded.department,designation=excluded.designation,
                        joining_date=excluded.joining_date,active=excluded.active""",
                     (uid, name, fields["department"].get().strip(),
-                     fields["designation"].get().strip(), joining, int(active_var.get()))
+                     fields["designation"].get().strip(), joining, new_active)
                 )
+                if previous is None or int(previous[0]) != new_active:
+                    effective_date = date.today().isoformat()
+                    db.execute(
+                        """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                           VALUES(?,?,?,'profile')
+                           ON CONFLICT(user_id,effective_date) DO UPDATE SET
+                           active=excluded.active,changed_at=CURRENT_TIMESTAMP,source='profile'""",
+                        (uid, new_active, effective_date)
+                    )
             current_profile_uid["value"] = uid
             uid_entry.configure(state="readonly")
             self._names_cache = None
@@ -926,7 +995,7 @@ class App(tk.Tk):
         search_var.trace_add("write", lambda *_: load_rows())
         ttk.Button(right, text="New profile", command=clear_form).pack(fill="x", pady=(4, 4))
         ttk.Button(right, text="Save profile", style="Accent.TButton", command=save_profile).pack(fill="x")
-        ttk.Label(outer, text="Inactive employees remain in historical reports; their attendance records are never deleted.",
+        ttk.Label(outer, text="Inactive employees remain in historical reports; their attendance records are never deleted. From the effective date, days without punches are excluded from expected attendance.",
                   style="Sub.TLabel").pack(anchor="w", pady=(10, 0))
         load_rows()
 
@@ -1125,7 +1194,7 @@ class App(tk.Tk):
                 day=cursor.isoformat()
                 stamps=sorted(grouped.get((uid,day),[]))
                 status,first_p,last_p,worked=self._attendance_day_status(uid,day,stamps)
-                if status not in ("Day off","Holiday") and not status.startswith("On leave"):
+                if status not in ("Day off","Holiday","Inactive") and not status.startswith("On leave"):
                     stats["expected"]+=1
                 if status=="Absent":
                     stats["absent"]+=1
@@ -1555,6 +1624,7 @@ class App(tk.Tk):
                 "Day off":sum(1 for s in status_values if s.casefold()=="day off"),
                 "Holiday":sum(1 for s in status_values if s.casefold()=="holiday"),
                 "On leave":sum(1 for s in status_values if s.casefold().startswith("on leave")),
+                "Inactive":sum(1 for s in status_values if s.casefold()=="inactive"),
                 "Incomplete punch":sum(1 for s in status_values if s.casefold().startswith("incomplete punch"))
             }
             for offset,(status_name,count) in enumerate(status_counts.items()):
