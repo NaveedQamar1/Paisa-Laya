@@ -245,6 +245,21 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             self.assertTrue(app.employee_active_on(db, "52", "2024-06-01"))
             self.assertFalse(app.employee_active_on(db, "52", "2025-01-01"))
 
+
+    def test_profile_joining_date_creates_history_for_device_synced_employee(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute("INSERT INTO staff(user_id,name,active) VALUES('53','Device Synced',1)")
+            app.save_profile_status_history(
+                db, "53", "2024-04-01", True,
+                previous_joining_date="", effective_today="2026-11-14"
+            )
+            self.assertFalse(app.employee_active_on(db, "53", "2024-03-31"))
+            self.assertTrue(app.employee_active_on(db, "53", "2024-04-01"))
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM staff_status_history WHERE user_id='53' AND active=1"
+            ).fetchone()[0], 1)
+
     def test_device_name_sync_does_not_overwrite_profile_metadata(self):
         app.init_db()
         with sqlite3.connect(app.DB) as db:
