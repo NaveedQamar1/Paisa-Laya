@@ -233,11 +233,14 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
             return
     if first:
         target = start
+        # A later status event only blocks the revised start date when it
+        # would fall on or before that new start. Events after the revised
+        # start remain valid and must retain their original effective dates.
         conflict = db.execute(
             """SELECT effective_date FROM staff_status_history
-               WHERE user_id=? AND id<>? AND effective_date>=?
+               WHERE user_id=? AND id<>? AND effective_date>? AND effective_date<=?
                ORDER BY effective_date,id LIMIT 1""",
-            (uid, first[0], target)
+            (uid, first[0], first[2], target)
         ).fetchone()
         if conflict:
             raise ValueError(
