@@ -63,7 +63,7 @@ def init_db():
         for uid, active, joining in c.execute(
             "SELECT user_id,active,joining_date FROM staff"
         ).fetchall():
-            if int(active or 0) and joining:
+            if joining:
                 try:
                     datetime.strptime(str(joining), "%Y-%m-%d")
                     c.execute(
@@ -141,13 +141,13 @@ def employee_active_from_events(events, day, fallback_active=True):
 
 
 def save_profile_status_history(db, user_id, joining_date, active, previous_joining_date=None,
-                                is_new=False, effective_today=None):
+                                is_new=False, status_changed=False, effective_today=None):
     """Persist a profile's employment start without overwriting later status changes."""
     uid = str(user_id)
     today = effective_today or date.today().isoformat()
     start = joining_date or today
     if is_new:
-        if joining_date and active:
+        if joining_date:
             # A dated start must not make the employee active before their first day.
             db.execute(
                 """INSERT OR IGNORE INTO staff_status_history
@@ -164,6 +164,14 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
         return
 
     if joining_date == (previous_joining_date or ""):
+        if status_changed:
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES(?,?,?,'profile')
+                   ON CONFLICT(user_id,effective_date) DO UPDATE SET
+                   active=excluded.active,changed_at=CURRENT_TIMESTAMP,source='profile'""",
+                (uid, int(bool(active)), today)
+            )
         return
 
     # Move only the original employment-start event. Later activation/deactivation
@@ -1044,7 +1052,8 @@ class App(tk.Tk):
                         save_profile_status_history(
                             db, uid, joining, new_active,
                             previous_joining_date=previous_joining,
-                            is_new=previous is None
+                            is_new=previous is None,
+                            status_changed=previous is not None and int(previous[0]) != new_active
                         )
                     db.execute(
                         """INSERT INTO staff(user_id,name,department,designation,joining_date,active)
