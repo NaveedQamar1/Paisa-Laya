@@ -61,6 +61,20 @@ class MonitorNotificationTests(unittest.TestCase):
         self.assertEqual(seen, {("2026-11-15 09:00:00", "101", "0")})
         notify.assert_called_once()
 
+    def test_empty_first_poll_is_persisted_so_first_later_punch_notifies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "monitor-state.json"
+            device = "192.168.1.50:4370"
+            with patch.object(monitor, "STATE", state):
+                baseline = monitor.initial_seen_punches([])
+                monitor.save_state(device, baseline)
+                loaded = monitor.load_state(device)
+                self.assertEqual(loaded, set())
+                with patch.object(monitor, "notify") as notify:
+                    seen = monitor.notify_new_punches(self.sample_event(), loaded)
+            self.assertIn(("2026-11-15 09:00:00", "101", "0"), seen)
+            notify.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -105,6 +105,11 @@ def notify_new_punches(inserted, last_seen):
     return seen
 
 
+def initial_seen_punches(inserted):
+    """Return the initial device baseline, including a valid empty baseline."""
+    return {(stamp, uid, status) for stamp, uid, status, name in inserted}
+
+
 def main():
     BASE.mkdir(parents=True, exist_ok=True)
     last_device = None
@@ -148,7 +153,12 @@ def main():
                     ).fetchone()
                     name = name_row[0] if name_row and name_row[0] else f"User {uid}"
                     inserted.append((stamp, uid, status, name))
-            if records:
+            if last_seen is None:
+                # Persist an empty baseline too. Otherwise the first later punch
+                # would be mistaken for historical data and never notify.
+                last_seen = initial_seen_punches(inserted)
+                save_state(device_key, last_seen)
+            elif records:
                 # Exact punch identities catch delayed/out-of-order device records.
                 # Failed desktop notifications remain unseen and are retried next poll.
                 last_seen = notify_new_punches(inserted, last_seen)
