@@ -339,6 +339,42 @@ def save_employee_profile(db, user_id, name, department="", designation="", join
     return uid
 
 
+def add_employee_leave(db, user_id, start_date, end_date, label="Annual Leave"):
+    """Add a bounded leave period without allowing ambiguous overlapping records."""
+    uid = str(user_id or "").strip()
+    if not uid:
+        raise ValueError("Select an employee before adding leave.")
+    try:
+        first = datetime.strptime(str(start_date).strip(), "%Y-%m-%d").date()
+        last = datetime.strptime(str(end_date).strip(), "%Y-%m-%d").date()
+    except ValueError:
+        raise ValueError("Enter valid dates in YYYY-MM-DD format.") from None
+    if last < first:
+        raise ValueError("The end date must not be before the start date.")
+    if (last - first).days > 366:
+        raise ValueError("A leave period cannot exceed 367 days.")
+    if not db.execute("SELECT 1 FROM staff WHERE user_id=?", (uid,)).fetchone():
+        raise ValueError("The selected employee is no longer registered. Refresh the directory.")
+
+    overlap = db.execute(
+        """SELECT start_date,end_date,label FROM staff_leave
+           WHERE user_id=? AND start_date<=? AND end_date>=?
+           ORDER BY start_date,end_date,id LIMIT 1""",
+        (uid, last.isoformat(), first.isoformat())
+    ).fetchone()
+    if overlap:
+        raise ValueError(
+            f"This leave period overlaps an existing {overlap[2]} period "
+            f"({overlap[0]} to {overlap[1]}). Remove or adjust the existing period first."
+        )
+    reason = str(label or "").strip() or "Approved Leave"
+    cursor = db.execute(
+        "INSERT INTO staff_leave(user_id,start_date,end_date,label) VALUES(?,?,?,?)",
+        (uid, first.isoformat(), last.isoformat(), reason)
+    )
+    return cursor.lastrowid
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -954,15 +990,13 @@ class App(tk.Tk):
         def add_leave():
             uid=selected.get().rsplit(" (",1)[-1].rstrip(")") if selected.get() else ""
             try:
-                first=datetime.strptime(leave_start.get().strip(),"%Y-%m-%d").date()
-                last=datetime.strptime(leave_end.get().strip(),"%Y-%m-%d").date()
-                if last<first or (last-first).days>366: raise ValueError()
-                reason=leave_reason.get().strip() or "Approved Leave"
-            except ValueError:
-                messagebox.showerror("Invalid leave dates","Enter valid YYYY-MM-DD dates. The end date must not be before the start date, and a leave period cannot exceed 367 days."); return
-            with sqlite3.connect(DB) as c:
-                c.execute("INSERT INTO staff_leave(user_id,start_date,end_date,label) VALUES(?,?,?,?)",
-                          (uid,first.isoformat(),last.isoformat(),reason))
+                with sqlite3.connect(DB) as c:
+                    add_employee_leave(
+                        c, uid, leave_start.get(), leave_end.get(), leave_reason.get()
+                    )
+            except ValueError as exc:
+                messagebox.showerror("Invalid leave period", str(exc))
+                return
             refresh_leave()
             self.status.set(f"Leave added for {self._name(uid)}")
         def remove_leave():
