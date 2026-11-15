@@ -60,6 +60,18 @@ class DatabaseAdministrationTests(unittest.TestCase):
             )
         showinfo.assert_called_once()
 
+    def test_failed_backup_keeps_previous_destination_and_removes_temporary_file(self):
+        corrupt_source = self.root / "corrupt-source.db"
+        corrupt_source.write_bytes(b"not a SQLite database")
+        destination = self.root / "existing-backup.db"
+        destination.write_bytes(b"previous verified backup")
+
+        with self.assertRaises(sqlite3.DatabaseError):
+            app.write_database_backup(corrupt_source, destination)
+
+        self.assertEqual(destination.read_bytes(), b"previous verified backup")
+        self.assertEqual(list(self.root.glob(".existing-backup.db.*.tmp")), [])
+
     def test_backup_rejects_live_database_as_destination_without_modifying_data(self):
         self.add_current_record("101", "Keep Live Staff", "2026-11-16 09:00:00")
 

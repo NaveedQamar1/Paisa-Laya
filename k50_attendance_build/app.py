@@ -1,4 +1,5 @@
 import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, subprocess, sys, urllib.request, webbrowser, ssl
+import tempfile
 import certifi
 from html import escape
 from datetime import datetime, date, timedelta
@@ -441,6 +442,38 @@ def import_punch_rows(db, records):
             (uid, stamp, state),
         ).rowcount
     return inserted, skipped
+
+
+def write_database_backup(source_path, destination_path):
+    """Write and validate a temporary SQLite snapshot before replacing a backup file."""
+    destination = Path(destination_path)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=str(destination.parent)
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    source = None
+    target = None
+    try:
+        source = sqlite3.connect(source_path)
+        target = sqlite3.connect(temporary)
+        source.backup(target)
+        integrity = target.execute("PRAGMA integrity_check").fetchone()
+        if not integrity or integrity[0] != "ok":
+            raise ValueError("The generated backup failed SQLite's integrity check.")
+        target.close()
+        target = None
+        source.close()
+        source = None
+        # Same-directory replacement is atomic; an existing good backup remains
+        # untouched if snapshot creation or validation fails.
+        os.replace(temporary, destination)
+    finally:
+        if target is not None:
+            target.close()
+        if source is not None:
+            source.close()
+        temporary.unlink(missing_ok=True)
 
 
 def validate_attendance_backup(db):
@@ -1848,8 +1881,7 @@ class App(tk.Tk):
                     "Choose a separate backup file. The live attendance database cannot be used as its own backup destination.",
                 )
                 return
-            with sqlite3.connect(DB) as source, sqlite3.connect(path) as target:
-                source.backup(target)
+            write_database_backup(DB, path)
             messagebox.showinfo("Backup complete",f"Database backup saved to:\n{path}")
             self.status.set(f"Database backup saved • {path}")
         except Exception as e:
