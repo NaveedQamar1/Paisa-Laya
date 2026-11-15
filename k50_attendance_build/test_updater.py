@@ -65,6 +65,19 @@ class UpdaterHelperTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 updater.safe_extract_zip(archive,root/"extracted")
 
+    def test_zip_extraction_rejects_relative_symlink_escape(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "relative-escape.zip"
+            info = zipfile.ZipInfo("SCAFA_Workforce.app/Contents/Resources/escape")
+            info.create_system = 3
+            info.external_attr = (0o120777 << 16)
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr(info, "../../../../outside")
+            with self.assertRaisesRegex(RuntimeError, "outside its extraction folder"):
+                updater.safe_extract_zip(archive, root / "extract")
+
     def test_macos_update_replaces_bundle_and_relaunches(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
