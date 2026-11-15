@@ -1852,9 +1852,7 @@ class App(tk.Tk):
                                                   wrap_text=(cell.row==header_row))
                 for rr in range(header_row+1,ws.max_row+1):
                     ws.row_dimensions[rr].height=21
-                if ws is summary:
-                    pass
-                else:
+                if ws is raw:
                     for rr in range(2,ws.max_row+1):
                         ws.cell(rr,3).number_format="yyyy-mm-dd hh:mm:ss"
             if performance.max_row>=2:
