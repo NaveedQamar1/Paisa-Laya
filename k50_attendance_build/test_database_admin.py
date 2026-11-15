@@ -76,6 +76,33 @@ class DatabaseAdministrationTests(unittest.TestCase):
             backup.execute(
                 "INSERT INTO punches(user_id,punch_time,status) VALUES('new','2026-11-15 10:00:00','')"
             )
+            backup.execute("""CREATE TABLE staff_rules (
+                user_id TEXT PRIMARY KEY, start_time TEXT NOT NULL DEFAULT '10:00',
+                end_time TEXT NOT NULL DEFAULT '18:00', grace_minutes INTEGER NOT NULL DEFAULT 10,
+                half_day_after TEXT NOT NULL DEFAULT '12:00', min_hours REAL NOT NULL DEFAULT 4.0
+            )""")
+            backup.execute("INSERT INTO staff_rules VALUES('new','08:30','17:30',5,'12:30',4.5)")
+            backup.execute("CREATE TABLE app_settings(setting TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            backup.executemany(
+                "INSERT INTO app_settings(setting,value) VALUES(?,?)",
+                [("weekday_window_start","08:30"),("custom_theme","forest")],
+            )
+            backup.execute("CREATE TABLE holidays(holiday_date TEXT PRIMARY KEY,label TEXT NOT NULL DEFAULT '')")
+            backup.execute("INSERT INTO holidays VALUES('2026-12-25','School Closure')")
+            backup.execute("""CREATE TABLE staff_day_rules (
+                user_id TEXT NOT NULL, weekday INTEGER NOT NULL, start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL, grace_minutes INTEGER NOT NULL DEFAULT 15,
+                shift_type TEXT NOT NULL DEFAULT 'Full day', PRIMARY KEY(user_id,weekday)
+            )""")
+            backup.execute("INSERT INTO staff_day_rules VALUES('new',5,'09:00','14:00',10,'Half day')")
+            backup.execute("""CREATE TABLE staff_leave (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
+                start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT 'Annual Leave'
+            )""")
+            backup.execute(
+                "INSERT INTO staff_leave(user_id,start_date,end_date,label) VALUES('new','2026-12-28','2026-12-30','Annual Leave')"
+            )
 
         with patch.object(app.filedialog, "askopenfilename", return_value=str(backup_path)), \
              patch.object(app.messagebox, "askyesno", return_value=True), \
@@ -92,6 +119,30 @@ class DatabaseAdministrationTests(unittest.TestCase):
                 restored.execute("SELECT name FROM staff WHERE user_id='old'").fetchone()
             )
             self.assertEqual(restored.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 1)
+            self.assertEqual(
+                restored.execute("SELECT * FROM staff_rules WHERE user_id='new'").fetchone(),
+                ("new", "08:30", "17:30", 5, "12:30", 4.5),
+            )
+            self.assertEqual(
+                restored.execute("SELECT value FROM app_settings WHERE setting='weekday_window_start'").fetchone(),
+                ("08:30",),
+            )
+            self.assertEqual(
+                restored.execute("SELECT value FROM app_settings WHERE setting='custom_theme'").fetchone(),
+                ("forest",),
+            )
+            self.assertEqual(
+                restored.execute("SELECT * FROM holidays WHERE holiday_date='2026-12-25'").fetchone(),
+                ("2026-12-25", "School Closure"),
+            )
+            self.assertEqual(
+                restored.execute("SELECT * FROM staff_day_rules WHERE user_id='new' AND weekday=5").fetchone(),
+                ("new", 5, "09:00", "14:00", 10, "Half day"),
+            )
+            self.assertEqual(
+                restored.execute("SELECT user_id,start_date,end_date,label FROM staff_leave WHERE user_id='new'").fetchone(),
+                ("new", "2026-12-28", "2026-12-30", "Annual Leave"),
+            )
         safety_backups = list(self.root.glob("Pre_Restore_Backup_*.db"))
         self.assertEqual(len(safety_backups), 1)
         with sqlite3.connect(safety_backups[0]) as safety:
@@ -171,6 +222,62 @@ class DatabaseAdministrationTests(unittest.TestCase):
                 "Keep This Staff",
             )
             self.assertEqual(current.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 1)
+
+    def test_restore_rejects_incomplete_optional_schedule_schema_before_confirmation(self):
+        self.add_current_record("101", "Keep This Staff", "2026-11-15 09:00:00")
+        invalid_path = self.root / "incomplete-schedule.db"
+        with sqlite3.connect(invalid_path) as invalid:
+            invalid.execute("CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL)")
+            invalid.execute("CREATE TABLE punches(user_id TEXT NOT NULL, punch_time TEXT NOT NULL, status TEXT DEFAULT '', UNIQUE(user_id,punch_time,status))")
+            invalid.execute("CREATE TABLE staff_rules(user_id TEXT PRIMARY KEY, start_time TEXT)")
+
+        with (
+            patch.object(app.filedialog, "askopenfilename", return_value=str(invalid_path)),
+            patch.object(app.messagebox, "askyesno") as confirm,
+            patch.object(app.messagebox, "showerror") as showerror,
+        ):
+            app.App.restore_database(self.ctx)
+
+        confirm.assert_not_called()
+        showerror.assert_called_once()
+        self.assertIn("incomplete staff_rules table", str(showerror.call_args))
+        with sqlite3.connect(app.DB) as current:
+            self.assertEqual(
+                current.execute("SELECT name FROM staff WHERE user_id='101'").fetchone()[0],
+                "Keep This Staff",
+            )
+            self.assertEqual(current.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 1)
+
+
+    def test_restore_rejects_non_unique_optional_schedule_records_before_confirmation(self):
+        self.add_current_record("101", "Keep This Staff", "2026-11-15 09:00:00")
+        invalid_path = self.root / "non-unique-schedule.db"
+        with sqlite3.connect(invalid_path) as invalid:
+            invalid.execute("CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL)")
+            invalid.execute("CREATE TABLE punches(user_id TEXT NOT NULL, punch_time TEXT NOT NULL, status TEXT DEFAULT '', UNIQUE(user_id,punch_time,status))")
+            invalid.execute("""CREATE TABLE staff_day_rules (
+                user_id TEXT NOT NULL, weekday INTEGER NOT NULL, start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL, grace_minutes INTEGER NOT NULL DEFAULT 15,
+                shift_type TEXT NOT NULL DEFAULT 'Full day'
+            )""")
+
+        with (
+            patch.object(app.filedialog, "askopenfilename", return_value=str(invalid_path)),
+            patch.object(app.messagebox, "askyesno") as confirm,
+            patch.object(app.messagebox, "showerror") as showerror,
+        ):
+            app.App.restore_database(self.ctx)
+
+        confirm.assert_not_called()
+        showerror.assert_called_once()
+        self.assertIn("unique staff_day_rules records", str(showerror.call_args))
+        with sqlite3.connect(app.DB) as current:
+            self.assertEqual(
+                current.execute("SELECT name FROM staff WHERE user_id='101'").fetchone()[0],
+                "Keep This Staff",
+            )
+            self.assertEqual(current.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 1)
+
 
 
 if __name__ == "__main__":
