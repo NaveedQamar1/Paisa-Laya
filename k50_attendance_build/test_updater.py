@@ -1,5 +1,8 @@
+import os
+import stat
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -118,6 +121,96 @@ class UpdaterHelperTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     updater.apply_macos(archive,installed)
             self.assertEqual(old_exe.read_text(),"old")
+
+
+    @unittest.skipIf(os.name == "nt", "Windows runners may not permit symbolic-link creation")
+    def test_zip_extraction_preserves_safe_relative_framework_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "framework.zip"
+            current = zipfile.ZipInfo(
+                "SCAFA_Workforce.app/Contents/Frameworks/Python.framework/Versions/Current"
+            )
+            current.create_system = 3
+            current.external_attr = (stat.S_IFLNK | 0o777) << 16
+            python_link = zipfile.ZipInfo(
+                "SCAFA_Workforce.app/Contents/Frameworks/Python.framework/Python"
+            )
+            python_link.create_system = 3
+            python_link.external_attr = (stat.S_IFLNK | 0o777) << 16
+            runtime = zipfile.ZipInfo(
+                "SCAFA_Workforce.app/Contents/Frameworks/Python.framework/Versions/3.12/Python"
+            )
+            runtime.create_system = 3
+            runtime.external_attr = (stat.S_IFREG | 0o755) << 16
+
+            with zipfile.ZipFile(archive, "w") as zf:
+                # Put links before their targets to verify extraction is order-independent.
+                zf.writestr(current, "3.12")
+                zf.writestr(python_link, "Versions/Current/Python")
+                zf.writestr(runtime, b"python-runtime")
+
+            destination = root / "extracted"
+            updater.safe_extract_zip(archive, destination)
+
+            current_path = destination / current.filename
+            python_path = destination / python_link.filename
+            self.assertTrue(current_path.is_symlink())
+            self.assertEqual(os.readlink(current_path), "3.12")
+            self.assertTrue(python_path.is_symlink())
+            self.assertEqual(os.readlink(python_path), "Versions/Current/Python")
+            self.assertEqual(python_path.read_bytes(), b"python-runtime")
+
+    def test_zip_extraction_rejects_regular_files_nested_inside_archive_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "nested-symlink.zip"
+            link = zipfile.ZipInfo("SCAFA_Workforce.app/Contents/Resources/Current")
+            link.create_system = 3
+            link.external_attr = (stat.S_IFLNK | 0o777) << 16
+
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr(link, "Versions/Current")
+                zf.writestr(
+                    "SCAFA_Workforce.app/Contents/Resources/Current/payload",
+                    b"must not be written through a symlink",
+                )
+
+            destination = root / "extracted"
+            with self.assertRaisesRegex(RuntimeError, "nested inside a symbolic link"):
+                updater.safe_extract_zip(archive, destination)
+            self.assertFalse(destination.exists())
+
+    def test_macos_copy_failure_restores_previous_application_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed = root / "SCAFA_Workforce.app"
+            old_executable = installed / "Contents" / "MacOS" / "SCAFA_Workforce"
+            old_executable.parent.mkdir(parents=True)
+            old_executable.write_text("old application")
+
+            source = root / "package" / "SCAFA_Workforce.app"
+            new_executable = source / "Contents" / "MacOS" / "SCAFA_Workforce"
+            new_executable.parent.mkdir(parents=True)
+            new_executable.write_text("new application")
+            archive = root / "update.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.write(new_executable, new_executable.relative_to(source.parent))
+
+            def fail_after_partial_copy(_source, destination, symlinks=True):
+                partial = Path(destination)
+                partial.mkdir()
+                (partial / "partial-install").write_text("incomplete")
+                raise OSError("simulated disk-full error")
+
+            with patch.object(updater.shutil, "copytree", side_effect=fail_after_partial_copy):
+                with self.assertRaisesRegex(OSError, "simulated disk-full"):
+                    updater.apply_macos(archive, installed)
+
+            self.assertEqual(old_executable.read_text(), "old application")
+            self.assertFalse((installed / "partial-install").exists())
+            self.assertFalse(installed.with_name("SCAFA_Workforce.app.previous").exists())
+
 
 
 if __name__=="__main__":
