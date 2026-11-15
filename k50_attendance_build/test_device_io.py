@@ -246,5 +246,61 @@ class DeviceIOTests(unittest.TestCase):
 
 
 
+    def test_fetch_worker_reenables_and_disconnects_device_after_read_failures(self):
+        for failure_stage in ("get_users", "get_attendance"):
+            with self.subTest(failure_stage=failure_stage):
+                class FakeConnection:
+                    def __init__(self):
+                        self.disabled = 0
+                        self.enabled = 0
+                        self.disconnected = 0
+
+                    def disable_device(self):
+                        self.disabled += 1
+
+                    def enable_device(self):
+                        self.enabled += 1
+
+                    def disconnect(self):
+                        self.disconnected += 1
+
+                    def get_users(self):
+                        if failure_stage == "get_users":
+                            raise RuntimeError("simulated user read failure")
+                        return [SimpleNamespace(user_id=101, name="Ayesha")]
+
+                    def get_attendance(self):
+                        raise RuntimeError("simulated attendance read failure")
+
+                connection = FakeConnection()
+
+                class FakeZK:
+                    def __init__(self, *args, **kwargs):
+                        pass
+
+                    def connect(self):
+                        return connection
+
+                fake_module = types.ModuleType("zk")
+                fake_module.ZK = FakeZK
+                ctx = self.context()
+                errors = []
+                ctx._fetch_error = errors.append
+                ctx._fetch_done = Mock()
+
+                with patch.dict(sys.modules, {"zk": fake_module}):
+                    app.App._fetch_worker(ctx, "192.168.1.50", 4370, 0)
+
+                self.assertEqual(connection.disabled, 1)
+                self.assertEqual(connection.enabled, 1)
+                self.assertEqual(connection.disconnected, 1)
+                self.assertEqual(len(errors), 1)
+                self.assertIn("simulated", errors[0])
+                ctx._fetch_done.assert_not_called()
+                with sqlite3.connect(app.DB) as db:
+                    self.assertEqual(db.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 0)
+
+
+
 if __name__ == "__main__":
     unittest.main()
