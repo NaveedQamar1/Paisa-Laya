@@ -288,5 +288,135 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
         self.assertEqual(row, ("Ayesha Updated", "Kitchen", "Chef", "2024-02-01", 1))
 
 
+
+class EmployeeProfileSaveTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.root = Path(self.temp.name)
+        self.old_db = app.DB
+        self.old_base = app.BASE
+        app.BASE = self.root
+        app.DB = self.root / "attendance.db"
+        app.init_db()
+
+    def tearDown(self):
+        app.DB = self.old_db
+        app.BASE = self.old_base
+        self.temp.cleanup()
+
+    def save_profile(self, user_id, name, **overrides):
+        values = {
+            "user_id": user_id,
+            "name": name,
+            "department": "Kitchen",
+            "designation": "Chef",
+            "joining_date": "2024-01-01",
+            "active": True,
+        }
+        values.update(overrides)
+        with sqlite3.connect(app.DB) as db:
+            return app.save_employee_profile(db, **values)
+
+    def test_create_profile_saves_metadata_and_effective_start(self):
+        self.assertEqual(
+            self.save_profile("701", "Mariam", effective_today="2026-11-15"),
+            "701",
+        )
+        with sqlite3.connect(app.DB) as db:
+            profile = db.execute(
+                "SELECT user_id,name,department,designation,joining_date,active FROM staff WHERE user_id='701'"
+            ).fetchone()
+            history = db.execute(
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='701' ORDER BY effective_date"
+            ).fetchall()
+        self.assertEqual(profile, ("701", "Mariam", "Kitchen", "Chef", "2024-01-01", 1))
+        self.assertEqual(history, [
+            (0, "0001-01-01", "profile-baseline"),
+            (1, "2024-01-01", "profile"),
+        ])
+
+    def test_edit_profile_updates_metadata_without_rewriting_status_history(self):
+        self.save_profile("701", "Mariam")
+        with sqlite3.connect(app.DB) as db:
+            before = db.execute(
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='701' ORDER BY effective_date"
+            ).fetchall()
+        self.save_profile(
+            "701", "Mariam Khan", department="Pastry", designation="Head Chef",
+            current_user_id="701"
+        )
+        with sqlite3.connect(app.DB) as db:
+            profile = db.execute(
+                "SELECT name,department,designation FROM staff WHERE user_id='701'"
+            ).fetchone()
+            after = db.execute(
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='701' ORDER BY effective_date"
+            ).fetchall()
+        self.assertEqual(profile, ("Mariam Khan", "Pastry", "Head Chef"))
+        self.assertEqual(after, before)
+
+    def test_new_profile_cannot_overwrite_an_existing_device_id(self):
+        self.save_profile("701", "Original Employee")
+        with self.assertRaisesRegex(ValueError, "already belongs to an employee"):
+            self.save_profile("701", "Replacement Employee")
+        with sqlite3.connect(app.DB) as db:
+            self.assertEqual(
+                db.execute("SELECT name FROM staff WHERE user_id='701'").fetchone()[0],
+                "Original Employee",
+            )
+
+    def test_edit_cannot_change_device_assigned_id(self):
+        self.save_profile("701", "Original Employee")
+        with self.assertRaisesRegex(ValueError, "device-assigned employee ID cannot be changed"):
+            self.save_profile("702", "Changed Employee", current_user_id="701")
+        with sqlite3.connect(app.DB) as db:
+            self.assertEqual(
+                db.execute("SELECT user_id,name FROM staff").fetchall(),
+                [("701", "Original Employee")],
+            )
+
+    def test_edit_of_deleted_profile_does_not_recreate_it(self):
+        with self.assertRaisesRegex(ValueError, "profile no longer exists"):
+            self.save_profile("701", "Stale Employee", current_user_id="701")
+        with sqlite3.connect(app.DB) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM staff").fetchone()[0], 0)
+
+    def test_invalid_joining_date_is_rejected_without_writes(self):
+        with self.assertRaisesRegex(ValueError, "Use YYYY-MM-DD"):
+            self.save_profile("701", "Invalid Date", joining_date="15-11-2026")
+        with sqlite3.connect(app.DB) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM staff").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM staff_status_history").fetchone()[0], 0)
+
+    def test_status_history_failure_rolls_back_profile_update(self):
+        self.save_profile("701", "Original Employee")
+        with sqlite3.connect(app.DB) as db:
+            before = db.execute(
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='701' ORDER BY effective_date"
+            ).fetchall()
+            db.execute(
+                """CREATE TRIGGER reject_profile_history_update
+                   BEFORE UPDATE ON staff_status_history
+                   WHEN NEW.source='profile'
+                   BEGIN SELECT RAISE(ABORT, 'simulated history failure'); END"""
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.save_profile(
+                "701", "Changed Employee", joining_date="2024-02-01",
+                current_user_id="701"
+            )
+        with sqlite3.connect(app.DB) as db:
+            profile = db.execute(
+                "SELECT name,joining_date FROM staff WHERE user_id='701'"
+            ).fetchone()
+            after = db.execute(
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='701' ORDER BY effective_date"
+            ).fetchall()
+        self.assertEqual(profile, ("Original Employee", "2024-01-01"))
+        self.assertEqual(after, before)
+
+
 if __name__ == "__main__":
+    unittest.main()
+
     unittest.main()

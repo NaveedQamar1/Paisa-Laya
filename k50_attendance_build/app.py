@@ -274,6 +274,71 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
         )
 
 
+def save_employee_profile(db, user_id, name, department="", designation="", joining_date="",
+                          active=True, current_user_id=None, effective_today=None):
+    """Save an employee profile atomically without changing its device-assigned ID."""
+    uid = str(user_id or "").strip()
+    full_name = str(name or "").strip()
+    joining = str(joining_date or "").strip()
+    if not uid or not full_name:
+        raise ValueError("Employee ID and full name are required.")
+    if current_user_id is not None and uid != str(current_user_id):
+        raise ValueError("The device-assigned employee ID cannot be changed.")
+    if joining:
+        try:
+            datetime.strptime(joining, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Use YYYY-MM-DD for the joining date.") from None
+
+    department = str(department or "").strip()
+    designation = str(designation or "").strip()
+    new_active = int(bool(active))
+    db.execute("SAVEPOINT employee_profile_save")
+    try:
+        previous = db.execute(
+            "SELECT active,joining_date FROM staff WHERE user_id=?", (uid,)
+        ).fetchone()
+        if current_user_id is None and previous is not None:
+            raise ValueError(
+                "This device ID already belongs to an employee. Select that employee from the directory to edit the profile."
+            )
+        if current_user_id is not None and previous is None:
+            raise ValueError(
+                "This employee profile no longer exists. Refresh the directory and select it again."
+            )
+
+        if previous is None:
+            db.execute(
+                """INSERT INTO staff(user_id,name,department,designation,joining_date,active)
+                   VALUES(?,?,?,?,?,?)""",
+                (uid, full_name, department, designation, joining, new_active)
+            )
+            save_profile_status_history(
+                db, uid, joining, new_active, is_new=True, effective_today=effective_today
+            )
+        else:
+            previous_active = int(previous[0])
+            previous_joining = previous[1] or ""
+            db.execute(
+                """UPDATE staff SET name=?,department=?,designation=?,joining_date=?,active=?
+                   WHERE user_id=?""",
+                (full_name, department, designation, joining, new_active, uid)
+            )
+            if previous_active != new_active or previous_joining != joining:
+                save_profile_status_history(
+                    db, uid, joining, new_active,
+                    previous_joining_date=previous_joining,
+                    status_changed=previous_active != new_active,
+                    effective_today=effective_today
+                )
+        db.execute("RELEASE SAVEPOINT employee_profile_save")
+    except Exception:
+        db.execute("ROLLBACK TO SAVEPOINT employee_profile_save")
+        db.execute("RELEASE SAVEPOINT employee_profile_save")
+        raise
+    return uid
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -1090,55 +1155,18 @@ class App(tk.Tk):
 
         def save_profile():
             uid = fields["uid"].get().strip()
-            name = fields["name"].get().strip()
-            if not uid or not name:
-                messagebox.showwarning("Required information", "Employee ID and full name are required.", parent=win)
-                return
-            if current_profile_uid["value"] is None:
-                with sqlite3.connect(DB) as db:
-                    exists = db.execute("SELECT 1 FROM staff WHERE user_id=?", (uid,)).fetchone()
-                if exists:
-                    messagebox.showwarning(
-                        "Employee ID already exists",
-                        "This device ID already belongs to an employee. Select that employee from the directory to edit the profile.",
-                        parent=win
-                    )
-                    return
-            joining = fields["joining_date"].get().strip()
-            if joining:
-                try:
-                    datetime.strptime(joining, "%Y-%m-%d")
-                except ValueError:
-                    messagebox.showwarning("Invalid joining date", "Use YYYY-MM-DD for the joining date.", parent=win)
-                    return
             try:
                 with sqlite3.connect(DB) as db:
-                    previous = db.execute(
-                        "SELECT active FROM staff WHERE user_id=?", (uid,)
-                    ).fetchone()
-                    previous_profile = db.execute(
-                        "SELECT joining_date FROM staff WHERE user_id=?", (uid,)
-                    ).fetchone()
-                    previous_joining = previous_profile[0] if previous_profile else None
-                    new_active = int(active_var.get())
-                    if previous is None or int(previous[0]) != new_active or (previous_joining or "") != joining:
-                        save_profile_status_history(
-                            db, uid, joining, new_active,
-                            previous_joining_date=previous_joining,
-                            is_new=previous is None,
-                            status_changed=previous is not None and int(previous[0]) != new_active
-                        )
-                    db.execute(
-                        """INSERT INTO staff(user_id,name,department,designation,joining_date,active)
-                           VALUES(?,?,?,?,?,?)
-                           ON CONFLICT(user_id) DO UPDATE SET name=excluded.name,
-                           department=excluded.department,designation=excluded.designation,
-                           joining_date=excluded.joining_date,active=excluded.active""",
-                        (uid, name, fields["department"].get().strip(),
-                         fields["designation"].get().strip(), joining, new_active)
+                    uid = save_employee_profile(
+                        db, uid, fields["name"].get(),
+                        department=fields["department"].get(),
+                        designation=fields["designation"].get(),
+                        joining_date=fields["joining_date"].get(),
+                        active=active_var.get(),
+                        current_user_id=current_profile_uid["value"]
                     )
-            except ValueError as exc:
-                messagebox.showwarning("Joining date conflicts with status history", str(exc), parent=win)
+            except (ValueError, sqlite3.IntegrityError) as exc:
+                messagebox.showwarning("Unable to save employee profile", str(exc), parent=win)
                 return
             current_profile_uid["value"] = uid
             uid_entry.configure(state="readonly")
@@ -1149,6 +1177,7 @@ class App(tk.Tk):
                 tree.focus(uid)
             feedback.set("Employee profile saved.")
             self.refresh()
+
 
         tree.bind("<<TreeviewSelect>>", select_employee)
         search_var.trace_add("write", lambda *_: load_rows())
