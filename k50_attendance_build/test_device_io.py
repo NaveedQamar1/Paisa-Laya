@@ -226,5 +226,25 @@ class DeviceIOTests(unittest.TestCase):
         self.assertEqual(zk_calls[0][1]["password"], 123)
 
 
+    def test_fetch_rejects_ports_outside_tcp_range_before_starting_worker(self):
+        for port in ("0", "65536", "-1"):
+            with self.subTest(port=port):
+                ctx = SimpleNamespace(
+                    ip=SimpleNamespace(get=lambda: "192.168.1.50"),
+                    port=SimpleNamespace(get=lambda value=port: value),
+                    key=SimpleNamespace(get=lambda: "0"),
+                    status=SimpleNamespace(set=Mock()),
+                )
+                with patch.object(app.threading, "Thread") as worker, \
+                     patch.object(app.messagebox, "showerror") as showerror:
+                    app.App.fetch(ctx)
+                worker.assert_not_called()
+                showerror.assert_called_once_with(
+                    "Invalid settings",
+                    "Port must be between 1 and 65535.",
+                )
+
+
+
 if __name__ == "__main__":
     unittest.main()

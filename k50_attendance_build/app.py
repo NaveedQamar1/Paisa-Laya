@@ -1818,6 +1818,9 @@ class App(tk.Tk):
         try: port=int(self.port.get()); key=int(self.key.get() or "0")
         except ValueError:
             messagebox.showerror("Invalid settings","Port and communication key must be numbers."); return
+        if not 1 <= port <= 65535:
+            messagebox.showerror("Invalid settings","Port must be between 1 and 65535.")
+            return
         self.status.set("Connecting to device…")
         threading.Thread(target=self._fetch_worker,args=(ip,port,key),daemon=True).start()
 
