@@ -416,6 +416,35 @@ class EmployeeProfileSaveTests(unittest.TestCase):
         self.assertEqual(after, before)
 
 
+class EmployeeDirectoryFilterTests(unittest.TestCase):
+    def setUp(self):
+        self.rows = [
+            ("701", "Ayesha Khan", "Pastry", "Chef", "2024-05-10", 1),
+            ("702", "Bilal Ahmed", "Kitchen", "Commis", "2023-02-01", 0),
+        ]
+
+    def test_search_matches_id_name_department_designation_and_joining_date(self):
+        for query in ("701", "AYESHA", "pastry", "chef", "2024-05"):
+            with self.subTest(query=query):
+                self.assertEqual(app.filter_employee_rows(self.rows, query), [self.rows[0]])
+
+    def test_search_matches_the_displayed_active_status(self):
+        self.assertEqual(app.filter_employee_rows(self.rows, "inactive"), [self.rows[1]])
+        self.assertEqual(app.filter_employee_rows(self.rows, "active"), [self.rows[0]])
+
+    def test_empty_search_preserves_all_rows_and_input_order(self):
+        self.assertEqual(app.filter_employee_rows(self.rows, "  "), self.rows)
+
+    def test_filtered_directory_clears_a_hidden_profile_selection(self):
+        visible = app.filter_employee_rows(self.rows, "pastry")
+        self.assertIsNone(app.retain_visible_employee_selection("702", visible))
+
+    def test_filtered_directory_retains_a_visible_profile_selection(self):
+        visible = app.filter_employee_rows(self.rows, "ayesha")
+        self.assertEqual(app.retain_visible_employee_selection("701", visible), "701")
+        self.assertIsNone(app.retain_visible_employee_selection(None, visible))
+
+
 if __name__ == "__main__":
     unittest.main()
 

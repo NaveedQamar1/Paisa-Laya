@@ -339,6 +339,29 @@ def save_employee_profile(db, user_id, name, department="", designation="", join
     return uid
 
 
+def filter_employee_rows(rows, query):
+    """Filter directory rows across profile fields, including the displayed status label."""
+    needle = str(query or "").strip().casefold()
+    if not needle:
+        return list(rows)
+    matches = []
+    for row in rows:
+        status = "Active" if bool(row[5]) else "Inactive"
+        searchable = (*row, status)
+        if any(needle in str(value or "").casefold() for value in searchable):
+            matches.append(row)
+    return matches
+
+
+def retain_visible_employee_selection(current_user_id, visible_rows):
+    """Keep an edited profile selected only while it remains visible in the filtered directory."""
+    if current_user_id is None:
+        return None
+    visible_ids = {str(row[0]) for row in visible_rows}
+    selected_id = str(current_user_id)
+    return selected_id if selected_id in visible_ids else None
+
+
 def add_employee_leave(db, user_id, start_date, end_date, label="Annual Leave"):
     """Add a bounded leave period without allowing ambiguous overlapping records."""
     uid = str(user_id or "").strip()
@@ -1147,15 +1170,23 @@ class App(tk.Tk):
                 rows = db.execute(
                     "SELECT user_id,name,department,designation,joining_date,active FROM staff ORDER BY name COLLATE NOCASE,user_id"
                 ).fetchall()
-            query = search_var.get().strip().casefold()
+            visible_rows = filter_employee_rows(rows, search_var.get())
             for item in tree.get_children():
                 tree.delete(item)
-            for row in rows:
-                if query and not any(query in str(value or "").casefold() for value in row):
-                    continue
+            for row in visible_rows:
                 tree.insert("", "end", iid=str(row[0]), values=(
                     row[0], row[1], row[2], row[3], "Active" if row[5] else "Inactive"
                 ))
+            selected_uid = retain_visible_employee_selection(
+                current_profile_uid["value"], visible_rows
+            )
+            if current_profile_uid["value"] is not None:
+                if selected_uid is None:
+                    # Never leave a hidden employee editable after the search filter changes.
+                    clear_form()
+                else:
+                    tree.selection_set(selected_uid)
+                    tree.focus(selected_uid)
 
         current_profile_uid = {"value": None}
 
