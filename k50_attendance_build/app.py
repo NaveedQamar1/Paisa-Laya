@@ -1857,7 +1857,10 @@ class App(tk.Tk):
 
         device_warning="; ".join(cleanup_errors) if cleanup_errors else None
         if fetch_error is not None:
-            self.after(0,lambda m=fetch_error,w=device_warning:self._fetch_error(m,w))
+            if device_warning:
+                self.after(0,lambda m=fetch_error,w=device_warning:self._fetch_error(m,w))
+            else:
+                self.after(0,lambda m=fetch_error:self._fetch_error(m))
         elif device_warning:
             self.after(0,lambda t=total,i=inserted,s=saved_users,w=device_warning:self._fetch_done(t,i,s,w))
         else:
