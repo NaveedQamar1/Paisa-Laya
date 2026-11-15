@@ -144,7 +144,7 @@ class DatabaseAdministrationTests(unittest.TestCase):
 
         confirm.assert_not_called()
         showerror.assert_called_once()
-        self.assertIn("live database", str(showerror.call_args).lower())
+        self.assertIn("database currently in use", str(showerror.call_args).lower())
         self.assertTrue(os.path.samefile(alias, app.DB))
         with sqlite3.connect(app.DB) as current:
             self.assertEqual(current.execute("PRAGMA integrity_check").fetchone()[0], "ok")
