@@ -1841,6 +1841,13 @@ class App(tk.Tk):
         if not path:
             return
         try:
+            # Resolve symlinks so a destination alias cannot overwrite the live database.
+            if Path(path).expanduser().resolve() == Path(DB).expanduser().resolve():
+                messagebox.showerror(
+                    "Invalid backup destination",
+                    "Choose a separate backup file. The live attendance database cannot be used as its own backup destination.",
+                )
+                return
             with sqlite3.connect(DB) as source, sqlite3.connect(path) as target:
                 source.backup(target)
             messagebox.showinfo("Backup complete",f"Database backup saved to:\n{path}")

@@ -60,6 +60,30 @@ class DatabaseAdministrationTests(unittest.TestCase):
             )
         showinfo.assert_called_once()
 
+    def test_backup_rejects_live_database_as_destination_without_modifying_data(self):
+        self.add_current_record("101", "Keep Live Staff", "2026-11-16 09:00:00")
+
+        with (
+            patch.object(app.filedialog, "asksaveasfilename", return_value=str(app.DB)),
+            patch.object(app.messagebox, "showerror") as showerror,
+            patch.object(app.messagebox, "showinfo") as showinfo,
+        ):
+            app.App.backup_database(self.ctx)
+
+        showerror.assert_called_once()
+        self.assertIn("live attendance database", str(showerror.call_args).lower())
+        showinfo.assert_not_called()
+        with sqlite3.connect(app.DB) as current:
+            self.assertEqual(current.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(
+                current.execute("SELECT name FROM staff WHERE user_id='101'").fetchone()[0],
+                "Keep Live Staff",
+            )
+            self.assertEqual(
+                current.execute("SELECT COUNT(*) FROM punches WHERE user_id='101'").fetchone()[0],
+                1,
+            )
+
     def test_restore_replaces_data_and_retains_pre_restore_safety_backup(self):
         self.add_current_record("old", "Old Staff", "2026-11-14 09:00:00")
         backup_path = self.root / "restore-source.db"
