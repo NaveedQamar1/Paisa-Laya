@@ -70,6 +70,41 @@ def log_error(message):
         pass
 
 
+def notify_new_punches(inserted, last_seen):
+    """Notify newly observed punches and retain failed deliveries for retry."""
+    current_keys = {(stamp, uid, status) for stamp, uid, status, name in inserted}
+    if last_seen is None:
+        # First poll establishes a baseline; historical punches are not new alerts.
+        return current_keys
+
+    seen = set(last_seen)
+    for stamp, uid, status, name in sorted(inserted, key=lambda item: item[0]):
+        key = (stamp, uid, status)
+        if key in seen:
+            continue
+        punch_dt = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
+        when = punch_dt.strftime("%I:%M:%S %p")
+        same_day_count = sum(
+            1 for item in inserted
+            if item[1] == uid and item[0][:10] == stamp[:10]
+            and item[0] <= stamp
+        )
+        if same_day_count == 1:
+            title, detail = "Employee arrived", f"{name} arrived • {when}"
+        elif same_day_count == 2:
+            title, detail = "Employee checked out", f"{name} checked out • {when}"
+        else:
+            title, detail = "New attendance punch", f"{name} • {when}"
+        try:
+            notify(title, detail)
+        except Exception as exc:
+            # Leave the identity unseen so the next poll can retry delivery.
+            log_error(f"Notification failed for {name} ({uid}) at {stamp}: {exc}")
+        else:
+            seen.add(key)
+    return seen
+
+
 def main():
     BASE.mkdir(parents=True, exist_ok=True)
     last_device = None
@@ -114,37 +149,10 @@ def main():
                     name = name_row[0] if name_row and name_row[0] else f"User {uid}"
                     inserted.append((stamp, uid, status, name))
             if records:
-                current_keys = {(stamp, uid, status) for stamp, uid, status, name in inserted}
-                # First run establishes a baseline; afterwards compare exact punch
-                # identities, not a timestamp watermark. This catches late-arriving
-                # and out-of-order device records and records already inserted by app.py.
-                if last_seen is None:
-                    last_seen = current_keys
-                    save_state(device_key, last_seen)
-                else:
-                    new_events = [item for item in inserted
-                                  if (item[0], item[1], item[2]) not in last_seen]
-                    new_events.sort(key=lambda item: item[0])
-                    for stamp, uid, status, name in new_events:
-                        punch_dt = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
-                        when = punch_dt.strftime("%I:%M:%S %p")
-                        same_day_count = sum(
-                            1 for item in inserted
-                            if item[1] == uid and item[0][:10] == stamp[:10]
-                            and item[0] <= stamp
-                        )
-                        if same_day_count == 1:
-                            title, detail = "Employee arrived", f"{name} arrived • {when}"
-                        elif same_day_count == 2:
-                            title, detail = "Employee checked out", f"{name} checked out • {when}"
-                        else:
-                            title, detail = "New attendance punch", f"{name} • {when}"
-                        try:
-                            notify(title, detail)
-                        except Exception as exc:
-                            log_error(f"Notification failed for {name} ({uid}) at {stamp}: {exc}")
-                    last_seen.update(current_keys)
-                    save_state(device_key, last_seen)
+                # Exact punch identities catch delayed/out-of-order device records.
+                # Failed desktop notifications remain unseen and are retried next poll.
+                last_seen = notify_new_punches(inserted, last_seen)
+                save_state(device_key, last_seen)
         except Exception as exc:
             log_error(exc)
         finally:

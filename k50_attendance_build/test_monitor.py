@@ -28,5 +28,39 @@ class MonitorStateTests(unittest.TestCase):
                 self.assertIsNone(monitor.load_state("192.168.1.51:4370"))
 
 
+
+class MonitorNotificationTests(unittest.TestCase):
+    def sample_event(self):
+        return [("2026-11-15 09:00:00", "101", "0", "Ayesha")]
+
+    def test_first_poll_establishes_baseline_without_historical_notifications(self):
+        inserted = self.sample_event()
+        with patch.object(monitor, "notify") as notify:
+            seen = monitor.notify_new_punches(inserted, None)
+        self.assertEqual(seen, {("2026-11-15 09:00:00", "101", "0")})
+        notify.assert_not_called()
+
+    def test_failed_notification_remains_unseen_and_is_retried(self):
+        inserted = self.sample_event()
+        key = ("2026-11-15 09:00:00", "101", "0")
+        with patch.object(
+            monitor, "notify", side_effect=[RuntimeError("notification permission denied"), None]
+        ) as notify, patch.object(monitor, "log_error") as log_error:
+            seen = monitor.notify_new_punches(inserted, set())
+            self.assertNotIn(key, seen)
+            seen = monitor.notify_new_punches(inserted, seen)
+        self.assertIn(key, seen)
+        self.assertEqual(notify.call_count, 2)
+        log_error.assert_called_once()
+
+    def test_successfully_notified_punch_is_not_repeated(self):
+        inserted = self.sample_event()
+        with patch.object(monitor, "notify") as notify:
+            seen = monitor.notify_new_punches(inserted, set())
+            seen = monitor.notify_new_punches(inserted, seen)
+        self.assertEqual(seen, {("2026-11-15 09:00:00", "101", "0")})
+        notify.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
