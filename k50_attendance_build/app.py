@@ -1826,6 +1826,9 @@ class App(tk.Tk):
 
     def _fetch_worker(self,ip,port,key):
         conn=None
+        fetch_error=None
+        cleanup_errors=[]
+        total=inserted=saved_users=0
         try:
             from zk import ZK
             conn=ZK(ip,port=port,timeout=12,password=key,force_udp=False, ommit_ping=False).connect()
@@ -1833,30 +1836,57 @@ class App(tk.Tk):
             device_users=conn.get_users()
             saved_users=self._store_device_users(device_users)
             rows=conn.get_attendance()
-            inserted=0
+            total=len(rows)
             with sqlite3.connect(DB) as c:
                 for row in rows:
                     stamp=row.timestamp.strftime("%Y-%m-%d %H:%M:%S")
                     cur=c.execute("INSERT OR IGNORE INTO punches(user_id,punch_time,status) VALUES(?,?,?)",(str(row.user_id),stamp,str(getattr(row,"status",""))))
                     inserted+=cur.rowcount
-            self.after(0,lambda:self._fetch_done(len(rows),inserted,saved_users))
         except Exception as e:
-            msg=str(e); self.after(0,lambda m=msg:self._fetch_error(m))
+            fetch_error=str(e)
         finally:
             if conn:
-                try: conn.enable_device()
-                except Exception: pass
-                try: conn.disconnect()
-                except Exception: pass
+                try:
+                    conn.enable_device()
+                except Exception as e:
+                    cleanup_errors.append(f"Could not re-enable attendance device: {e}")
+                try:
+                    conn.disconnect()
+                except Exception as e:
+                    cleanup_errors.append(f"Could not disconnect from attendance device: {e}")
 
-    def _fetch_done(self,total,inserted,saved_users=0):
+        device_warning="; ".join(cleanup_errors) if cleanup_errors else None
+        if fetch_error is not None:
+            self.after(0,lambda m=fetch_error,w=device_warning:self._fetch_error(m,w))
+        elif device_warning:
+            self.after(0,lambda t=total,i=inserted,s=saved_users,w=device_warning:self._fetch_done(t,i,s,w))
+        else:
+            self.after(0,lambda t=total,i=inserted,s=saved_users:self._fetch_done(t,i,s))
+
+    def _fetch_done(self,total,inserted,saved_users=0,device_warning=None):
         self.refresh()
-        self.status.set(f"Sync complete • {saved_users} staff names synced • {total} punches read • {inserted} new")
-        messagebox.showinfo("Sync complete",f"Staff names fetched: {saved_users}\nAttendance records read: {total}\nNew attendance records saved: {inserted}")
+        summary=f"Staff names fetched: {saved_users}\nAttendance records read: {total}\nNew attendance records saved: {inserted}"
+        if device_warning:
+            self.status.set(f"Sync complete • {saved_users} staff names synced • {total} punches read • {inserted} new • DEVICE WARNING")
+            messagebox.showwarning(
+                "Sync completed with device warning",
+                f"{summary}\n\n{device_warning}\n\nCheck the attendance device before the next sync.",
+            )
+        else:
+            self.status.set(f"Sync complete • {saved_users} staff names synced • {total} punches read • {inserted} new")
+            messagebox.showinfo("Sync complete",summary)
 
-    def _fetch_error(self,msg):
-        self.status.set("Device connection failed.")
-        messagebox.showerror("Could not fetch attendance",f"{msg}\n\nCheck the device IP, LAN connection, port, and communication key.")
+    def _fetch_error(self,msg,device_warning=None):
+        if device_warning:
+            self.status.set("Device connection failed; attendance device needs attention.")
+            detail=f"\n\nDevice cleanup warning: {device_warning}\n\nCheck the device before the next fetch."
+        else:
+            self.status.set("Device connection failed.")
+            detail=""
+        messagebox.showerror(
+            "Could not fetch attendance",
+            f"{msg}\n\nCheck the device IP, LAN connection, port, and communication key.{detail}",
+        )
 
     def import_csv(self):
         path=filedialog.askopenfilename(title="Import attendance CSV",filetypes=[("CSV files","*.csv"),("All files","*.*")])

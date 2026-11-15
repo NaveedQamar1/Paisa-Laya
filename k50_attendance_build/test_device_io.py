@@ -302,5 +302,87 @@ class DeviceIOTests(unittest.TestCase):
 
 
 
+    def test_fetch_worker_reports_device_reenable_failure_after_saving_punches(self):
+        user = SimpleNamespace(user_id=101, name="Ayesha")
+        punch = SimpleNamespace(
+            user_id=101,
+            timestamp=datetime(2026, 11, 16, 9, 0, 0),
+            status=0,
+        )
+
+        class FakeConnection:
+            def __init__(self):
+                self.disabled = 0
+                self.enabled = 0
+                self.disconnected = 0
+
+            def disable_device(self):
+                self.disabled += 1
+
+            def enable_device(self):
+                self.enabled += 1
+                raise RuntimeError("simulated re-enable failure")
+
+            def disconnect(self):
+                self.disconnected += 1
+
+            def get_users(self):
+                return [user]
+
+            def get_attendance(self):
+                return [punch]
+
+        connection = FakeConnection()
+
+        class FakeZK:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def connect(self):
+                return connection
+
+        fake_module = types.ModuleType("zk")
+        fake_module.ZK = FakeZK
+        ctx = self.context()
+        completed = []
+        errors = []
+        ctx._fetch_done = lambda total, inserted, saved, warning=None: completed.append(
+            (total, inserted, saved, warning)
+        )
+        ctx._fetch_error = lambda message, warning=None: errors.append((message, warning))
+
+        with patch.dict(sys.modules, {"zk": fake_module}):
+            app.App._fetch_worker(ctx, "192.168.1.50", 4370, 0)
+
+        self.assertEqual(connection.disabled, 1)
+        self.assertEqual(connection.enabled, 1)
+        self.assertEqual(connection.disconnected, 1)
+        self.assertEqual(len(errors), 0)
+        self.assertEqual(completed, [(
+            1, 1, 1, "Could not re-enable attendance device: simulated re-enable failure"
+        )])
+        with sqlite3.connect(app.DB) as db:
+            self.assertEqual(
+                db.execute("SELECT user_id,punch_time,status FROM punches").fetchall(),
+                [("101", "2026-11-16 09:00:00", "0")],
+            )
+
+        ui_ctx = SimpleNamespace(
+            refresh=Mock(),
+            status=SimpleNamespace(set=Mock()),
+        )
+        with patch.object(app.messagebox, "showwarning") as showwarning, \
+             patch.object(app.messagebox, "showinfo") as showinfo:
+            app.App._fetch_done(
+                ui_ctx, 1, 1, 1,
+                "Could not re-enable attendance device: simulated re-enable failure",
+            )
+        showwarning.assert_called_once()
+        showinfo.assert_not_called()
+        self.assertIn("DEVICE WARNING", ui_ctx.status.set.call_args.args[0])
+
+
+
+
 if __name__ == "__main__":
     unittest.main()
