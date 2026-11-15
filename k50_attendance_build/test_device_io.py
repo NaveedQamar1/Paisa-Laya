@@ -121,6 +121,74 @@ class DeviceIOTests(unittest.TestCase):
             ],
         )
 
+    def test_device_name_sync_preserves_employee_profile_and_status_history(self):
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                """INSERT INTO staff(user_id,name,department,designation,joining_date,active)
+                   VALUES('101','Old Device Name','Kitchen','Chef','2024-03-01',0)"""
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES('101',0,'2026-10-01','profile')"""
+            )
+
+        users = [SimpleNamespace(user_id=101, name="Updated Device Name")]
+
+        class FakeConnection:
+            def disable_device(self):
+                pass
+
+            def enable_device(self):
+                pass
+
+            def disconnect(self):
+                pass
+
+            def get_users(self):
+                return users
+
+            def get_attendance(self):
+                return []
+
+        connection = FakeConnection()
+
+        class FakeZK:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def connect(self):
+                return connection
+
+        fake_module = types.ModuleType("zk")
+        fake_module.ZK = FakeZK
+        ctx = self.context()
+        completed = []
+        errors = []
+        ctx._fetch_done = lambda total, inserted, saved: completed.append(
+            (total, inserted, saved)
+        )
+        ctx._fetch_error = errors.append
+
+        with patch.dict(sys.modules, {"zk": fake_module}):
+            app.App._fetch_worker(ctx, "192.168.1.50", 4370, 0)
+
+        self.assertEqual(completed, [(0, 0, 1)])
+        self.assertEqual(errors, [])
+        with sqlite3.connect(app.DB) as db:
+            profile = db.execute(
+                """SELECT name,department,designation,joining_date,active
+                   FROM staff WHERE user_id='101'"""
+            ).fetchone()
+            history = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='101' ORDER BY effective_date,id"""
+            ).fetchall()
+        self.assertEqual(
+            profile,
+            ("Updated Device Name", "Kitchen", "Chef", "2024-03-01", 0),
+        )
+        self.assertEqual(history, [(0, "2026-10-01", "profile")])
+
     def test_discovery_reports_only_after_protocol_handshake(self):
         address = ipaddress.ip_address("192.168.1.25")
         network = SimpleNamespace(hosts=lambda: [address])
