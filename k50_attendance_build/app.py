@@ -404,7 +404,7 @@ def add_employee_leave(db, user_id, start_date, end_date, label="Annual Leave"):
 def normalize_punch_timestamp(value):
     """Normalize supported device-export timestamps; reject values that cannot be reported safely."""
     raw = str(value or "").strip()
-    if not raw:
+    if not raw or ("T" not in raw and " " not in raw):
         return None
     try:
         parsed = datetime.fromisoformat(raw)

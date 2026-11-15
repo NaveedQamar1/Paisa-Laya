@@ -157,6 +157,14 @@ class CSVImportRegressionTests(unittest.TestCase):
             count = db.execute("SELECT COUNT(*) FROM punches").fetchone()[0]
         self.assertEqual((inserted, skipped, count), (0, 3, 0))
 
+    def test_import_rejects_date_only_iso_value_as_not_a_punch_timestamp(self):
+        with sqlite3.connect(app.DB) as db:
+            inserted, skipped = app.import_punch_rows(db, [
+                ("103", "2026-11-15", "0"),
+            ])
+            count = db.execute("SELECT COUNT(*) FROM punches").fetchone()[0]
+        self.assertEqual((inserted, skipped, count), (0, 1, 0))
+
     def test_import_keeps_duplicate_punches_idempotent(self):
         record = ("101", "2026-11-15 09:00:00", "0")
         with sqlite3.connect(app.DB) as db:
