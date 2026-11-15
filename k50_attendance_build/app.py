@@ -347,8 +347,11 @@ def filter_employee_rows(rows, query):
     matches = []
     for row in rows:
         status = "Active" if bool(row[5]) else "Inactive"
-        searchable = (*row, status)
-        if any(needle in str(value or "").casefold() for value in searchable):
+        profile_fields = row[:5]
+        if (
+            any(needle in str(value or "").casefold() for value in profile_fields)
+            or status.casefold().startswith(needle)
+        ):
             matches.append(row)
     return matches
 
