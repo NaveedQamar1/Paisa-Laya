@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 
 import app
@@ -126,8 +127,14 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             db.execute("INSERT INTO staff(user_id,name,joining_date,active) VALUES('43','Former Staff','2020-01-01',0)")
         app.init_db()
         with sqlite3.connect(app.DB) as db:
-            self.assertTrue(app.employee_active_on(db, "43", "2026-11-13"))
-            self.assertFalse(app.employee_active_on(db, "43", "2026-11-14"))
+            migration_day = db.execute(
+                "SELECT effective_date FROM staff_status_history WHERE user_id='43' AND source='migration'"
+            ).fetchone()[0]
+            day_before_migration = (
+                date.fromisoformat(migration_day) - timedelta(days=1)
+            ).isoformat()
+            self.assertTrue(app.employee_active_on(db, "43", day_before_migration))
+            self.assertFalse(app.employee_active_on(db, "43", migration_day))
             self.assertEqual(db.execute(
                 "SELECT COUNT(*) FROM staff_status_history WHERE user_id='43' AND source LIKE '%baseline'"
             ).fetchone()[0], 0)
