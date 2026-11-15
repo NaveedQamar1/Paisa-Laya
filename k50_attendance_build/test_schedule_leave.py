@@ -81,7 +81,7 @@ class ScheduleLeaveRegressionTests(unittest.TestCase):
 
     def test_leave_period_longer_than_367_days_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "cannot exceed 367 days"):
-            self.add_leave(first="2026-01-01", last="2027-01-02")
+            self.add_leave(first="2026-01-01", last="2027-01-03")
 
     def test_leave_requires_a_registered_employee(self):
         with self.assertRaisesRegex(ValueError, "no longer registered"):
