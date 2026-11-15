@@ -117,7 +117,7 @@ class ReportExportTests(unittest.TestCase):
         showerror.assert_not_called()
         pdf = destination.read_bytes()
         self.assertTrue(pdf.startswith(b"%PDF-"))
-        page_count = len(re.findall(rb"/Type\\s*/Page\\b", pdf))
+        page_count = len(re.findall(rb"/Type\s*/Page\b", pdf))
         self.assertGreaterEqual(page_count, 3)
 
 
