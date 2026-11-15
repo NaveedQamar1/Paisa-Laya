@@ -51,6 +51,7 @@ jobs:
           python -m pip install pillow
           python -c "import base64; from pathlib import Path; from PIL import Image; p=Path('k50_attendance_build/assets'); (p/'scafa_workforce_icon.png').write_bytes(base64.b64decode((p/'scafa_workforce_icon.png.b64').read_text())); Image.open(p/'scafa_workforce_icon.png').save(p/'scafa_workforce_icon.ico',format='ICO',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
           python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "Python unit tests failed" }
           python -m PyInstaller --noconfirm --clean --onedir --windowed --collect-data certifi --icon k50_attendance_build/assets/scafa_workforce_icon.ico --add-data "k50_attendance_build/assets/scafa_workforce_icon.png;assets" --name SCAFA_Workforce k50_attendance_build/app.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor --collect-all winotify k50_attendance_build/monitor.py
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-updater k50_attendance_build/updater.py
