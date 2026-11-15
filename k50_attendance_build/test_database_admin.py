@@ -157,6 +157,50 @@ class DatabaseAdministrationTests(unittest.TestCase):
                 1,
             )
 
+    def test_restore_aborts_if_atomic_safety_backup_cannot_be_created(self):
+        self.add_current_record("old", "Keep Existing Staff", "2026-11-15 09:00:00")
+        backup_path = self.root / "restore-source.db"
+        with sqlite3.connect(backup_path) as backup:
+            backup.execute(
+                "CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')"
+            )
+            backup.execute(
+                "CREATE TABLE punches(user_id TEXT NOT NULL, punch_time TEXT NOT NULL, status TEXT DEFAULT '', UNIQUE(user_id,punch_time,status))"
+            )
+            backup.execute("INSERT INTO staff(user_id,name) VALUES('new','Must Not Restore')")
+            backup.execute(
+                "INSERT INTO punches(user_id,punch_time,status) VALUES('new','2026-11-16 10:00:00','')"
+            )
+
+        with (
+            patch.object(app.filedialog, "askopenfilename", return_value=str(backup_path)),
+            patch.object(app.messagebox, "askyesno", return_value=True),
+            patch.object(
+                app,
+                "write_database_backup",
+                side_effect=OSError("simulated disk-full safety-backup failure"),
+            ) as create_safety_backup,
+            patch.object(app.messagebox, "showerror") as showerror,
+            patch.object(app.messagebox, "showinfo") as showinfo,
+        ):
+            app.App.restore_database(self.ctx)
+
+        create_safety_backup.assert_called_once()
+        showerror.assert_called_once()
+        showinfo.assert_not_called()
+        self.assertIn("simulated disk-full", str(showerror.call_args))
+        self.assertEqual(list(self.root.glob("Pre_Restore_Backup_*.db")), [])
+        with sqlite3.connect(app.DB) as current:
+            self.assertEqual(current.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(
+                current.execute("SELECT name FROM staff WHERE user_id='old'").fetchone()[0],
+                "Keep Existing Staff",
+            )
+            self.assertIsNone(
+                current.execute("SELECT name FROM staff WHERE user_id='new'").fetchone()
+            )
+            self.assertEqual(current.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 1)
+
     def test_restore_replaces_data_and_retains_pre_restore_safety_backup(self):
         self.add_current_record("old", "Old Staff", "2026-11-14 09:00:00")
         backup_path = self.root / "restore-source.db"

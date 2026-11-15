@@ -1918,8 +1918,9 @@ class App(tk.Tk):
                 "A safety backup of the current database will be created first. Continue?"):
                 return
             safety=BASE / f"Pre_Restore_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-            with sqlite3.connect(DB) as current, sqlite3.connect(safety) as backup:
-                current.backup(backup)
+            # Reuse the validated, atomic snapshot writer for the safety copy.
+            # If this fails, abort before replacing the live attendance database.
+            write_database_backup(DB, safety)
             with sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro",uri=True) as source, sqlite3.connect(DB) as target:
                 source.backup(target)
             self._names_cache=None
