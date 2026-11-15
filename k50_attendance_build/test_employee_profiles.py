@@ -48,6 +48,88 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
         self.assertEqual(punches, 1)
 
 
+    def test_employee_migration_preserves_existing_schedule_holiday_leave_and_settings(self):
+        with sqlite3.connect(app.DB) as db:
+            db.execute("CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')")
+            db.execute("CREATE TABLE punches(user_id TEXT NOT NULL, punch_time TEXT NOT NULL, status TEXT DEFAULT '', UNIQUE(user_id,punch_time,status))")
+            db.execute("INSERT INTO staff(user_id,name) VALUES('17','Ayesha')")
+            db.execute("INSERT INTO punches(user_id,punch_time,status) VALUES('17','2026-11-01 09:45:00','')")
+
+            db.execute("""CREATE TABLE staff_rules (
+                user_id TEXT PRIMARY KEY, start_time TEXT NOT NULL DEFAULT '10:00',
+                end_time TEXT NOT NULL DEFAULT '18:00', grace_minutes INTEGER NOT NULL DEFAULT 10,
+                half_day_after TEXT NOT NULL DEFAULT '12:00', min_hours REAL NOT NULL DEFAULT 4.0
+            )""")
+            db.execute("""CREATE TABLE app_settings (
+                setting TEXT PRIMARY KEY, value TEXT NOT NULL
+            )""")
+            db.execute("""CREATE TABLE holidays (
+                holiday_date TEXT PRIMARY KEY, label TEXT NOT NULL DEFAULT ''
+            )""")
+            db.execute("""CREATE TABLE staff_day_rules (
+                user_id TEXT NOT NULL, weekday INTEGER NOT NULL, start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL, grace_minutes INTEGER NOT NULL DEFAULT 15,
+                shift_type TEXT NOT NULL DEFAULT 'Full day', PRIMARY KEY(user_id,weekday)
+            )""")
+            db.execute("""CREATE TABLE staff_leave (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
+                start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT 'Annual Leave'
+            )""")
+
+            db.execute(
+                "INSERT INTO staff_rules VALUES(?,?,?,?,?,?)",
+                ("17", "08:30", "17:30", 5, "12:30", 4.5),
+            )
+            db.executemany(
+                "INSERT INTO app_settings(setting,value) VALUES(?,?)",
+                [("weekday_window_start", "08:30"), ("custom_theme", "forest")],
+            )
+            db.execute(
+                "INSERT INTO holidays(holiday_date,label) VALUES(?,?)",
+                ("2026-12-25", "School Closure"),
+            )
+            db.execute(
+                "INSERT INTO staff_day_rules VALUES(?,?,?,?,?,?)",
+                ("17", 5, "09:00", "14:00", 10, "Half day"),
+            )
+            db.execute(
+                "INSERT INTO staff_leave(user_id,start_date,end_date,label) VALUES(?,?,?,?)",
+                ("17", "2026-12-28", "2026-12-30", "Annual Leave"),
+            )
+
+        app.init_db()
+
+        with sqlite3.connect(app.DB) as db:
+            self.assertEqual(
+                db.execute("SELECT * FROM staff_rules WHERE user_id='17'").fetchone(),
+                ("17", "08:30", "17:30", 5, "12:30", 4.5),
+            )
+            self.assertEqual(
+                db.execute("SELECT value FROM app_settings WHERE setting='weekday_window_start'").fetchone(),
+                ("08:30",),
+            )
+            self.assertEqual(
+                db.execute("SELECT value FROM app_settings WHERE setting='custom_theme'").fetchone(),
+                ("forest",),
+            )
+            self.assertEqual(
+                db.execute("SELECT * FROM holidays WHERE holiday_date='2026-12-25'").fetchone(),
+                ("2026-12-25", "School Closure"),
+            )
+            self.assertEqual(
+                db.execute("SELECT * FROM staff_day_rules WHERE user_id='17' AND weekday=5").fetchone(),
+                ("17", 5, "09:00", "14:00", 10, "Half day"),
+            )
+            self.assertEqual(
+                db.execute("SELECT user_id,start_date,end_date,label FROM staff_leave WHERE user_id='17'").fetchone(),
+                ("17", "2026-12-28", "2026-12-30", "Annual Leave"),
+            )
+            self.assertEqual(
+                db.execute("SELECT user_id,punch_time,status FROM punches").fetchall(),
+                [("17", "2026-11-01 09:45:00", "")],
+            )
+
     def test_migration_with_existing_joining_date_creates_active_event_after_baseline(self):
         with sqlite3.connect(app.DB) as db:
             db.execute("CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')")
