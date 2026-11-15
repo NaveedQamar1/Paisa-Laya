@@ -123,5 +123,49 @@ class DatabaseAdministrationTests(unittest.TestCase):
             self.assertEqual(current.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 1)
 
 
+    def test_restore_rejects_incompatible_columns_before_confirmation(self):
+        self.add_current_record("101", "Keep This Staff", "2026-11-15 09:00:00")
+        invalid_path = self.root / "incompatible-schema.db"
+        with sqlite3.connect(invalid_path) as invalid:
+            invalid.execute("CREATE TABLE staff(user_id TEXT PRIMARY KEY, display_name TEXT)")
+            invalid.execute("CREATE TABLE punches(user_id TEXT, recorded_at TEXT, state TEXT)")
+
+        with patch.object(app.filedialog, "askopenfilename", return_value=str(invalid_path)), \\
+             patch.object(app.messagebox, "askyesno") as confirm, \\
+             patch.object(app.messagebox, "showerror") as showerror:
+            app.App.restore_database(self.ctx)
+
+        confirm.assert_not_called()
+        showerror.assert_called_once()
+        with sqlite3.connect(app.DB) as current:
+            self.assertEqual(
+                current.execute("SELECT name FROM staff WHERE user_id='101'").fetchone()[0],
+                "Keep This Staff",
+            )
+            self.assertEqual(current.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 1)
+
+    def test_restore_rejects_missing_punch_uniqueness_before_confirmation(self):
+        self.add_current_record("101", "Keep This Staff", "2026-11-15 09:00:00")
+        invalid_path = self.root / "duplicate-prone-schema.db"
+        with sqlite3.connect(invalid_path) as invalid:
+            invalid.execute("CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL)")
+            invalid.execute("CREATE TABLE punches(user_id TEXT NOT NULL, punch_time TEXT NOT NULL, status TEXT DEFAULT '')")
+
+        with patch.object(app.filedialog, "askopenfilename", return_value=str(invalid_path)), \\
+             patch.object(app.messagebox, "askyesno") as confirm, \\
+             patch.object(app.messagebox, "showerror") as showerror:
+            app.App.restore_database(self.ctx)
+
+        confirm.assert_not_called()
+        showerror.assert_called_once()
+        self.assertIn("duplicate attendance punch", str(showerror.call_args))
+        with sqlite3.connect(app.DB) as current:
+            self.assertEqual(
+                current.execute("SELECT name FROM staff WHERE user_id='101'").fetchone()[0],
+                "Keep This Staff",
+            )
+            self.assertEqual(current.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -401,6 +401,63 @@ def add_employee_leave(db, user_id, start_date, end_date, label="Annual Leave"):
     return cursor.lastrowid
 
 
+def validate_attendance_backup(db):
+    """Reject structurally incomplete backups before they can replace live data."""
+    integrity = db.execute("PRAGMA integrity_check").fetchone()
+    if not integrity or integrity[0] != "ok":
+        raise ValueError("The selected file failed SQLite's integrity check.")
+
+    tables = {
+        row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if not {"punches", "staff"}.issubset(tables):
+        raise ValueError(
+            "This file does not look like a SCAFA Workforce attendance database."
+        )
+
+    required_columns = {
+        "staff": {"user_id", "name"},
+        "punches": {"user_id", "punch_time", "status"},
+    }
+    for table, required in required_columns.items():
+        actual = {
+            row[1] for row in db.execute(f"PRAGMA table_info('{table}')")
+        }
+        missing = sorted(required - actual)
+        if missing:
+            raise ValueError(
+                f"The backup is missing required {table} columns: {', '.join(missing)}."
+            )
+
+    def has_unique_key(table, expected_columns):
+        table_columns = list(db.execute(f"PRAGMA table_info('{table}')"))
+        if len(expected_columns) == 1 and any(
+            row[1] == expected_columns[0] and row[5] > 0
+            for row in table_columns
+        ):
+            return True
+        for index in db.execute(f"PRAGMA index_list('{table}')"):
+            if not index[2] or (len(index) > 4 and index[4]):
+                continue
+            index_name = str(index[1]).replace('"', '""')
+            indexed_columns = [
+                row[2] for row in db.execute(
+                    f'PRAGMA index_info("{index_name}")'
+                )
+            ]
+            if len(indexed_columns) == len(expected_columns) and set(indexed_columns) == set(expected_columns):
+                return True
+        return False
+
+    if not has_unique_key("staff", ("user_id",)):
+        raise ValueError("The backup must enforce unique staff device IDs.")
+    if not has_unique_key("punches", ("user_id", "punch_time", "status")):
+        raise ValueError("The backup must prevent duplicate attendance punch records.")
+    return True
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -1730,12 +1787,7 @@ class App(tk.Tk):
                 messagebox.showerror("Invalid backup","Choose a backup file, not the database currently in use.")
                 return
             with sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro",uri=True) as check:
-                integrity=check.execute("PRAGMA integrity_check").fetchone()
-                tables={r[0] for r in check.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                if not integrity or integrity[0]!="ok":
-                    raise ValueError("The selected file failed SQLite's integrity check.")
-                if not {"punches","staff"}.issubset(tables):
-                    raise ValueError("This file does not look like a SCAFA Workforce attendance database.")
+                validate_attendance_backup(check)
             if not messagebox.askyesno(
                 "Confirm database restore",
                 "Restoring replaces the current attendance data and settings. "
