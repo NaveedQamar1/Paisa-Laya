@@ -401,6 +401,48 @@ def add_employee_leave(db, user_id, start_date, end_date, label="Annual Leave"):
     return cursor.lastrowid
 
 
+def normalize_punch_timestamp(value):
+    """Normalize supported device-export timestamps; reject values that cannot be reported safely."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        parsed = None
+        for date_format in (
+            "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M",
+            "%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M",
+            "%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %I:%M %p",
+        ):
+            try:
+                parsed = datetime.strptime(raw, date_format)
+                break
+            except ValueError:
+                continue
+    if parsed is None or parsed.tzinfo is not None:
+        return None
+    return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def import_punch_rows(db, records):
+    """Insert valid attendance rows idempotently and count malformed rows separately."""
+    inserted = 0
+    skipped = 0
+    for user_id, timestamp, status in records:
+        uid = str(user_id or "").strip()
+        stamp = normalize_punch_timestamp(timestamp)
+        if not uid or stamp is None:
+            skipped += 1
+            continue
+        state = str(status or "").strip()
+        inserted += db.execute(
+            "INSERT OR IGNORE INTO punches(user_id,punch_time,status) VALUES(?,?,?)",
+            (uid, stamp, state),
+        ).rowcount
+    return inserted, skipped
+
+
 def validate_attendance_backup(db):
     """Reject structurally incomplete backups before they can replace live data."""
     integrity = db.execute("PRAGMA integrity_check").fetchone()
@@ -1735,7 +1777,6 @@ class App(tk.Tk):
     def import_csv(self):
         path=filedialog.askopenfilename(title="Import attendance CSV",filetypes=[("CSV files","*.csv"),("All files","*.*")])
         if not path: return
-        count=0
         try:
             with open(path,"r",newline="",encoding="utf-8-sig") as f:
                 sample=f.read(4096); f.seek(0)
@@ -1747,15 +1788,11 @@ class App(tk.Tk):
                 timecol=next((fields[x] for x in ("date/time","datetime","timestamp","punch time","date time","time") if x in fields),None)
                 statecol=next((fields[x] for x in ("status","state","punch status") if x in fields),None)
                 if not uidcol or not timecol: raise ValueError("CSV needs User ID/PIN and Date/Time/Timestamp columns.")
+                records=((row.get(uidcol),row.get(timecol),row.get(statecol) if statecol else "") for row in reader)
                 with sqlite3.connect(DB) as c:
-                    for row in reader:
-                        uid=(row.get(uidcol) or "").strip(); stamp=(row.get(timecol) or "").strip(); state=(row.get(statecol) or "").strip() if statecol else ""
-                        if uid and stamp:
-                            try: stamp=datetime.fromisoformat(stamp).strftime("%Y-%m-%d %H:%M:%S")
-                            except ValueError: pass
-                            count+=c.execute("INSERT OR IGNORE INTO punches(user_id,punch_time,status) VALUES(?,?,?)",(uid,stamp,state)).rowcount
+                    count,skipped=import_punch_rows(c,records)
             self.refresh()
-            messagebox.showinfo("Import complete",f"Imported {count} new records.")
+            messagebox.showinfo("Import complete",f"Imported {count} new records.\\nSkipped {skipped} rows with missing IDs or invalid timestamps.")
         except Exception as e: messagebox.showerror("Import failed",str(e))
 
     def backup_database(self):

@@ -121,5 +121,52 @@ class ReportExportTests(unittest.TestCase):
         self.assertGreaterEqual(page_count, 3)
 
 
+class CSVImportRegressionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.old_db = app.DB
+        app.DB = Path(self.temp.name) / "attendance.db"
+        app.init_db()
+
+    def tearDown(self):
+        app.DB = self.old_db
+        self.temp.cleanup()
+
+    def test_import_normalizes_iso_and_pakistani_day_first_timestamps(self):
+        with sqlite3.connect(app.DB) as db:
+            inserted, skipped = app.import_punch_rows(db, [
+                ("101", "2026-11-15T09:00:00", "0"),
+                ("102", "15/11/2026 17:30", "1"),
+            ])
+            rows = db.execute(
+                "SELECT user_id,punch_time,status FROM punches ORDER BY user_id"
+            ).fetchall()
+        self.assertEqual((inserted, skipped), (2, 0))
+        self.assertEqual(rows, [
+            ("101", "2026-11-15 09:00:00", "0"),
+            ("102", "2026-11-15 17:30:00", "1"),
+        ])
+
+    def test_import_skips_missing_ids_invalid_and_timezone_ambiguous_timestamps(self):
+        with sqlite3.connect(app.DB) as db:
+            inserted, skipped = app.import_punch_rows(db, [
+                ("101", "not-a-date", "0"),
+                ("", "2026-11-15 09:00:00", "0"),
+                ("102", "2026-11-15T09:00:00+05:00", "0"),
+            ])
+            count = db.execute("SELECT COUNT(*) FROM punches").fetchone()[0]
+        self.assertEqual((inserted, skipped, count), (0, 3, 0))
+
+    def test_import_keeps_duplicate_punches_idempotent(self):
+        record = ("101", "2026-11-15 09:00:00", "0")
+        with sqlite3.connect(app.DB) as db:
+            first = app.import_punch_rows(db, [record])
+            second = app.import_punch_rows(db, [record])
+            count = db.execute("SELECT COUNT(*) FROM punches").fetchone()[0]
+        self.assertEqual(first, (1, 0))
+        self.assertEqual(second, (0, 0))
+        self.assertEqual(count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
