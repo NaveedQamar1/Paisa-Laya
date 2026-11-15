@@ -108,9 +108,11 @@ class DatabaseAdministrationTests(unittest.TestCase):
         with sqlite3.connect(invalid_path) as invalid:
             invalid.execute("CREATE TABLE unrelated(value TEXT)")
 
-        with patch.object(app.filedialog, "askopenfilename", return_value=str(invalid_path)), \
-             patch.object(app.messagebox, "askyesno") as confirm, \
-             patch.object(app.messagebox, "showerror") as showerror:
+        with (
+            patch.object(app.filedialog, "askopenfilename", return_value=str(invalid_path)),
+            patch.object(app.messagebox, "askyesno") as confirm,
+            patch.object(app.messagebox, "showerror") as showerror,
+        ):
             app.App.restore_database(self.ctx)
 
         confirm.assert_not_called()
@@ -130,9 +132,11 @@ class DatabaseAdministrationTests(unittest.TestCase):
             invalid.execute("CREATE TABLE staff(user_id TEXT PRIMARY KEY, display_name TEXT)")
             invalid.execute("CREATE TABLE punches(user_id TEXT, recorded_at TEXT, state TEXT)")
 
-        with patch.object(app.filedialog, "askopenfilename", return_value=str(invalid_path)), \\
-             patch.object(app.messagebox, "askyesno") as confirm, \\
-             patch.object(app.messagebox, "showerror") as showerror:
+        with (
+            patch.object(app.filedialog, "askopenfilename", return_value=str(invalid_path)),
+            patch.object(app.messagebox, "askyesno") as confirm,
+            patch.object(app.messagebox, "showerror") as showerror,
+        ):
             app.App.restore_database(self.ctx)
 
         confirm.assert_not_called()
@@ -151,9 +155,11 @@ class DatabaseAdministrationTests(unittest.TestCase):
             invalid.execute("CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL)")
             invalid.execute("CREATE TABLE punches(user_id TEXT NOT NULL, punch_time TEXT NOT NULL, status TEXT DEFAULT '')")
 
-        with patch.object(app.filedialog, "askopenfilename", return_value=str(invalid_path)), \\
-             patch.object(app.messagebox, "askyesno") as confirm, \\
-             patch.object(app.messagebox, "showerror") as showerror:
+        with (
+            patch.object(app.filedialog, "askopenfilename", return_value=str(invalid_path)),
+            patch.object(app.messagebox, "askyesno") as confirm,
+            patch.object(app.messagebox, "showerror") as showerror,
+        ):
             app.App.restore_database(self.ctx)
 
         confirm.assert_not_called()
