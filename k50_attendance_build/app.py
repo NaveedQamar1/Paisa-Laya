@@ -473,6 +473,28 @@ def validate_attendance_backup(db):
                 f"The backup is missing required {table} columns: {', '.join(missing)}."
             )
 
+    # Optional legacy tables are allowed to be absent so older backups can be migrated,
+    # but an existing table with an incomplete schema cannot be repaired by CREATE TABLE IF NOT EXISTS.
+    optional_columns = {
+        "staff_rules": {"user_id", "start_time", "end_time", "grace_minutes", "half_day_after", "min_hours"},
+        "app_settings": {"setting", "value"},
+        "holidays": {"holiday_date", "label"},
+        "staff_day_rules": {"user_id", "weekday", "start_time", "end_time", "grace_minutes", "shift_type"},
+        "staff_leave": {"id", "user_id", "start_date", "end_date", "label"},
+        "staff_status_history": {"id", "user_id", "active", "effective_date", "changed_at", "source"},
+    }
+    for table, required in optional_columns.items():
+        if table not in tables:
+            continue
+        actual = {
+            row[1] for row in db.execute(f"PRAGMA table_info('{table}')")
+        }
+        missing = sorted(required - actual)
+        if missing:
+            raise ValueError(
+                f"The backup has an incomplete {table} table; missing required columns: {', '.join(missing)}."
+            )
+
     def has_unique_key(table, expected_columns):
         table_columns = list(db.execute(f"PRAGMA table_info('{table}')"))
         if len(expected_columns) == 1 and any(
@@ -492,6 +514,20 @@ def validate_attendance_backup(db):
             if len(indexed_columns) == len(expected_columns) and set(indexed_columns) == set(expected_columns):
                 return True
         return False
+
+    optional_unique_keys = {
+        "staff_rules": ("user_id",),
+        "app_settings": ("setting",),
+        "holidays": ("holiday_date",),
+        "staff_day_rules": ("user_id", "weekday"),
+        "staff_leave": ("id",),
+        "staff_status_history": ("user_id", "effective_date"),
+    }
+    for table, columns in optional_unique_keys.items():
+        if table in tables and not has_unique_key(table, columns):
+            raise ValueError(
+                f"The backup must enforce unique {table} records by {', '.join(columns)}."
+            )
 
     if not has_unique_key("staff", ("user_id",)):
         raise ValueError("The backup must enforce unique staff device IDs.")
