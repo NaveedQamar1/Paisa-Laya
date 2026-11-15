@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -27,6 +28,12 @@ class DatabaseAdministrationTests(unittest.TestCase):
         app.DB = self.old_db
         app.BASE = self.old_base
         self.temp.cleanup()
+
+    def create_hardlink_or_skip(self, source, destination):
+        try:
+            os.link(source, destination)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Hard links are unavailable on this filesystem: {exc}")
 
     def add_current_record(self, user_id, name, stamp):
         with sqlite3.connect(app.DB) as db:
@@ -85,6 +92,60 @@ class DatabaseAdministrationTests(unittest.TestCase):
         showerror.assert_called_once()
         self.assertIn("live attendance database", str(showerror.call_args).lower())
         showinfo.assert_not_called()
+        with sqlite3.connect(app.DB) as current:
+            self.assertEqual(current.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(
+                current.execute("SELECT name FROM staff WHERE user_id='101'").fetchone()[0],
+                "Keep Live Staff",
+            )
+            self.assertEqual(
+                current.execute("SELECT COUNT(*) FROM punches WHERE user_id='101'").fetchone()[0],
+                1,
+            )
+
+    def test_backup_rejects_hardlink_alias_to_live_database(self):
+        self.add_current_record("101", "Keep Live Staff", "2026-11-16 09:00:00")
+        alias = self.root / "attendance-hardlink.db"
+        self.create_hardlink_or_skip(app.DB, alias)
+
+        with (
+            patch.object(app.filedialog, "asksaveasfilename", return_value=str(alias)),
+            patch.object(app.messagebox, "showerror") as showerror,
+            patch.object(app.messagebox, "showinfo") as showinfo,
+        ):
+            app.App.backup_database(self.ctx)
+
+        showerror.assert_called_once()
+        self.assertIn("live attendance database", str(showerror.call_args).lower())
+        showinfo.assert_not_called()
+        self.assertTrue(os.path.samefile(alias, app.DB))
+        with sqlite3.connect(app.DB) as current:
+            self.assertEqual(current.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(
+                current.execute("SELECT name FROM staff WHERE user_id='101'").fetchone()[0],
+                "Keep Live Staff",
+            )
+            self.assertEqual(
+                current.execute("SELECT COUNT(*) FROM punches WHERE user_id='101'").fetchone()[0],
+                1,
+            )
+
+    def test_restore_rejects_hardlink_alias_to_live_database_before_confirmation(self):
+        self.add_current_record("101", "Keep Live Staff", "2026-11-16 09:00:00")
+        alias = self.root / "attendance-restore-hardlink.db"
+        self.create_hardlink_or_skip(app.DB, alias)
+
+        with (
+            patch.object(app.filedialog, "askopenfilename", return_value=str(alias)),
+            patch.object(app.messagebox, "askyesno") as confirm,
+            patch.object(app.messagebox, "showerror") as showerror,
+        ):
+            app.App.restore_database(self.ctx)
+
+        confirm.assert_not_called()
+        showerror.assert_called_once()
+        self.assertIn("live database", str(showerror.call_args).lower())
+        self.assertTrue(os.path.samefile(alias, app.DB))
         with sqlite3.connect(app.DB) as current:
             self.assertEqual(current.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(

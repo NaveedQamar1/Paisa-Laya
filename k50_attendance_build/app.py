@@ -444,6 +444,18 @@ def import_punch_rows(db, records):
     return inserted, skipped
 
 
+def paths_refer_to_same_file(first, second):
+    """Detect identical paths, symlinks, and hard-link aliases."""
+    first_path = Path(first).expanduser()
+    second_path = Path(second).expanduser()
+    if first_path.resolve() == second_path.resolve():
+        return True
+    try:
+        return os.path.samefile(first_path, second_path)
+    except FileNotFoundError:
+        return False
+
+
 def write_database_backup(source_path, destination_path):
     """Write and validate a temporary SQLite snapshot before replacing a backup file."""
     destination = Path(destination_path)
@@ -1875,7 +1887,7 @@ class App(tk.Tk):
             return
         try:
             # Resolve symlinks so a destination alias cannot overwrite the live database.
-            if Path(path).expanduser().resolve() == Path(DB).expanduser().resolve():
+            if paths_refer_to_same_file(path, DB):
                 messagebox.showerror(
                     "Invalid backup destination",
                     "Choose a separate backup file. The live attendance database cannot be used as its own backup destination.",
@@ -1895,7 +1907,7 @@ class App(tk.Tk):
         if not path:
             return
         try:
-            if Path(path).resolve()==DB.resolve():
+            if paths_refer_to_same_file(path, DB):
                 messagebox.showerror("Invalid backup","Choose a backup file, not the database currently in use.")
                 return
             with sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro",uri=True) as check:
