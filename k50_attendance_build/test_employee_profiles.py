@@ -1,6 +1,8 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import contextmanager
+from unittest.mock import patch
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -17,6 +19,45 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
         app.DB = self.old_db
         self.temp.cleanup()
 
+
+    def test_schema_migration_runs_under_database_maintenance_lock(self):
+        lock_active = False
+
+        @contextmanager
+        def tracked_lock(database_path, timeout):
+            nonlocal lock_active
+            self.assertEqual(Path(database_path), app.DB)
+            self.assertEqual(timeout, 300)
+            lock_active = True
+            try:
+                yield
+            finally:
+                lock_active = False
+
+        real_connect = sqlite3.connect
+
+        def connect_while_locked(*args, **kwargs):
+            self.assertTrue(
+                lock_active,
+                "Schema migration opened the database without the maintenance lock.",
+            )
+            return real_connect(*args, **kwargs)
+
+        with (
+            patch.object(app, "database_maintenance_lock", side_effect=tracked_lock),
+            patch.object(app.sqlite3, "connect", side_effect=connect_while_locked),
+        ):
+            app.init_db()
+
+        self.assertFalse(lock_active)
+
+    def test_schema_migration_can_reuse_an_existing_maintenance_lock(self):
+        with patch.object(
+            app,
+            "database_maintenance_lock",
+            side_effect=AssertionError("The existing maintenance lock must not be reacquired."),
+        ):
+            app.init_db(maintenance_lock_held=True)
 
     def test_migration_is_idempotent_and_does_not_duplicate_status_events(self):
         with sqlite3.connect(app.DB) as db:

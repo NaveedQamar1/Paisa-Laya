@@ -109,7 +109,11 @@ def format_worked_time(hours):
     whole_hours,minutes=divmod(total_minutes,60)
     return f"{whole_hours} hours {minutes} minutes"
 
-def init_db():
+def init_db(*, maintenance_lock_held=False):
+    """Apply schema migrations while excluding concurrent attendance-monitor writes."""
+    if not maintenance_lock_held:
+        with database_maintenance_lock(DB, timeout=300):
+            return init_db(maintenance_lock_held=True)
     with sqlite3.connect(DB) as c:
         c.execute("""CREATE TABLE IF NOT EXISTS punches (
             user_id TEXT NOT NULL, punch_time TEXT NOT NULL, status TEXT DEFAULT '',
@@ -2263,7 +2267,7 @@ class App(tk.Tk):
                     # If the atomic pre-restore snapshot fails, abort before replacing live data.
                     write_database_backup(DB, safety)
                     restore_database_snapshot(staged, DB)
-                    init_db()
+                    init_db(maintenance_lock_held=True)
             self._names_cache=None
             self.refresh()
             messagebox.showinfo("Restore complete",f"Database restored successfully.\nSafety backup: {safety}")
