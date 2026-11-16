@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import updater
+import app
 
 
 class UpdaterHelperTests(unittest.TestCase):
@@ -211,6 +212,71 @@ class UpdaterHelperTests(unittest.TestCase):
             self.assertFalse((installed / "partial-install").exists())
             self.assertFalse(installed.with_name("SCAFA_Workforce.app.previous").exists())
 
+
+
+    def test_update_verification_matches_manifest_and_github_asset_digest(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "update.zip"
+            checksum_file = root / "checksums.txt"
+            package.write_bytes(b"verified SCAFA update")
+            digest = hashlib.sha256(package.read_bytes()).hexdigest()
+            checksum_file.write_text(f"{digest}  {package.name}\\n", encoding="utf-8")
+            self.assertEqual(
+                app.verify_update_asset(package, checksum_file, package.name, f"sha256:{digest}"),
+                digest,
+            )
+
+    def test_update_verification_rejects_manifest_mismatch_with_github_digest(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "update.zip"
+            checksum_file = root / "checksums.txt"
+            package.write_bytes(b"verified SCAFA update")
+            digest = hashlib.sha256(package.read_bytes()).hexdigest()
+            checksum_file.write_text(f"{'0' * 64}  {package.name}\\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "manifest does not match GitHub"):
+                app.verify_update_asset(package, checksum_file, package.name, f"sha256:{digest}")
+
+    def test_update_verification_rejects_downloaded_package_mismatch(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "update.zip"
+            checksum_file = root / "checksums.txt"
+            package.write_bytes(b"modified update")
+            expected = hashlib.sha256(b"original update").hexdigest()
+            checksum_file.write_text(f"{expected}  {package.name}\\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "failed SHA-256 verification"):
+                app.verify_update_asset(package, checksum_file, package.name, f"sha256:{expected}")
+
+    def test_update_verification_rejects_unsupported_published_digest_algorithm(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "update.zip"
+            checksum_file = root / "checksums.txt"
+            package.write_bytes(b"verified SCAFA update")
+            digest = hashlib.sha256(package.read_bytes()).hexdigest()
+            checksum_file.write_text(f"{digest}  {package.name}\\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "valid SHA-256 digest"):
+                app.verify_update_asset(package, checksum_file, package.name, f"sha512:{digest}")
+
+    def test_update_verification_keeps_legacy_manifest_fallback_when_api_digest_is_absent(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "update.zip"
+            checksum_file = root / "checksums.txt"
+            package.write_bytes(b"legacy release update")
+            digest = hashlib.sha256(package.read_bytes()).hexdigest()
+            checksum_file.write_text(f"{digest}  {package.name}\\n", encoding="utf-8")
+            self.assertEqual(
+                app.verify_update_asset(package, checksum_file, package.name),
+                digest,
+            )
 
 
 if __name__=="__main__":

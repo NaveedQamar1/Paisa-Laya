@@ -28,6 +28,42 @@ SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
 
+def verify_update_asset(package, checksum_file, asset_name, published_digest=None):
+    """Verify an update against its release checksum manifest and GitHub asset metadata."""
+    expected = None
+    for line in Path(checksum_file).read_text(encoding="utf-8").splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and parts[1].lstrip("*").strip() == asset_name:
+            expected = parts[0].lower()
+            break
+    if not expected or len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
+        raise RuntimeError(f"No valid SHA-256 entry was published for {asset_name}.")
+
+    metadata = str(published_digest or "").strip()
+    if metadata:
+        algorithm, separator, value = metadata.partition(":")
+        value = value.lower()
+        if (
+            not separator
+            or algorithm.lower() != "sha256"
+            or len(value) != 64
+            or any(c not in "0123456789abcdef" for c in value)
+        ):
+            raise RuntimeError("GitHub did not provide a valid SHA-256 digest for the update asset.")
+        if value != expected:
+            raise RuntimeError("The release checksum manifest does not match GitHub's published asset digest.")
+
+    import hashlib
+    digest = hashlib.sha256()
+    with open(package, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest().lower()
+    if actual != expected:
+        raise RuntimeError("The downloaded update failed SHA-256 verification. The installed application has not been changed.")
+    return actual
+
+
 def format_worked_time(hours):
     total_minutes=max(0,int(round(float(hours)*60)))
     whole_hours,minutes=divmod(total_minutes,60)
@@ -695,20 +731,13 @@ class App(tk.Tk):
                         chunk=response.read(1024*1024)
                         if not chunk: break
                         out.write(chunk)
-            expected=None
-            for line in checksum_file.read_text(encoding="utf-8").splitlines():
-                parts=line.strip().split(None,1)
-                if len(parts)==2 and parts[1].lstrip("*").strip()==asset_name:
-                    expected=parts[0].lower(); break
-            if not expected or len(expected)!=64:
-                raise RuntimeError(f"No valid SHA-256 entry was published for {asset_name}.")
-            import hashlib
-            digest=hashlib.sha256()
-            with open(package,"rb") as stream:
-                for chunk in iter(lambda:stream.read(1024*1024),b""): digest.update(chunk)
-            if digest.hexdigest().lower()!=expected:
+            try:
+                verify_update_asset(
+                    package, checksum_file, asset_name, assets[asset_name].get("digest")
+                )
+            except Exception:
                 package.unlink(missing_ok=True)
-                raise RuntimeError("The downloaded update failed SHA-256 verification. The installed application has not been changed.")
+                raise
             helper_name="scafa-updater.exe" if platform=="windows" else "scafa-updater"
             helper_source=Path(sys.executable).resolve().parent/helper_name
             if platform=="macos":
