@@ -484,7 +484,8 @@ def import_punch_rows(db, records):
     inserted = 0
     skipped = 0
     for user_id, timestamp, status in records:
-        uid = str(user_id or "").strip()
+        # Preserve numeric device ID 0; only None and empty text mean a missing ID.
+        uid = str("" if user_id is None else user_id).strip()
         stamp = normalize_punch_timestamp(timestamp)
         if not uid or stamp is None:
             skipped += 1
