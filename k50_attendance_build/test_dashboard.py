@@ -134,5 +134,56 @@ class DashboardRegressionTests(unittest.TestCase):
         )
 
 
+    def test_dashboard_counts_only_employment_active_days_and_keeps_later_inactive_punch_visible(self):
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                "INSERT INTO staff(user_id,name,active) VALUES('103','New Hire',1)"
+            )
+            db.executemany(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES('103',?,?, 'profile')""",
+                [
+                    (0, "0001-01-01"),
+                    (1, "2026-11-11"),
+                    (0, "2026-11-13"),
+                ],
+            )
+
+        ctx = SimpleNamespace(
+            comparison_tree=FakeTree(),
+            dashboard_employee=SimpleNamespace(get=lambda: "New Hire (103)"),
+            latest_punch_label=FakeLabel(),
+            start_date=SimpleNamespace(get=lambda: "2026-11-09"),
+            end_date=SimpleNamespace(get=lambda: "2026-11-13"),
+            card_values=[FakeLabel() for _ in range(6)],
+        )
+        ctx._name = lambda uid: {"103": "New Hire"}.get(str(uid), f"User {uid}")
+        ctx._rules = lambda: app.App._rules(ctx)
+        ctx._attendance_day_status = lambda uid, day, stamps: app.App._attendance_day_status(
+            ctx, uid, day, stamps
+        )
+        rows = [
+            ("103", "2026-11-11 09:45:00", "0"),
+            ("103", "2026-11-11 20:00:00", "1"),
+            ("103", "2026-11-12 09:45:00", "0"),
+            ("103", "2026-11-12 20:00:00", "1"),
+            ("103", "2026-11-13 09:45:00", "0"),
+        ]
+
+        app.App._update_dashboard(ctx, rows)
+
+        values_by_employee = {values[0]: values for values, tags in ctx.comparison_tree.rows}
+        self.assertEqual(
+            values_by_employee["New Hire"],
+            ("New Hire", 2, 2, 0, 0, 0, 2, "100.0%", "09:45"),
+        )
+        self.assertEqual(
+            [label.text for label in ctx.card_values],
+            ["100.0%", "0", "0", "0", "0", "09:45"],
+        )
+        self.assertIn("New Hire  (ID 103)", ctx.latest_punch_label.text)
+        self.assertIn("13 Nov 2026", ctx.latest_punch_label.text)
+
+
 if __name__ == "__main__":
     unittest.main()
