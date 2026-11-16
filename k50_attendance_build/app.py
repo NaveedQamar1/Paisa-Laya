@@ -1,7 +1,7 @@
 import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, subprocess, sys, urllib.request, webbrowser, ssl
 import tempfile
 import certifi
-from database_lock import database_maintenance_lock
+from database_lock import ApplicationAlreadyRunningError, application_instance_lock, database_maintenance_lock
 from employee_history import ensure_device_employee_status_history, get_device_user_id, normalize_device_user_id
 from html import escape
 from datetime import datetime, date, timedelta
@@ -2602,4 +2602,11 @@ class App(tk.Tk):
         doc.build(story,onFirstPage=footer,onLaterPages=footer)
 
 if __name__=="__main__":
-    App().mainloop()
+    try:
+        with application_instance_lock(DB):
+            App().mainloop()
+    except ApplicationAlreadyRunningError:
+        messagebox.showwarning(
+            "SCAFA Workforce is already running",
+            "Another SCAFA Workforce window is already open for this attendance database. Close it before opening another instance.",
+        )

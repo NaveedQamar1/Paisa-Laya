@@ -681,5 +681,62 @@ monitor.sync_database(
             )
 
 
+    def test_application_instance_lock_prevents_second_gui_process_but_allows_monitor_lock(self):
+        ready = self.root / "instance-ready"
+        release = self.root / "instance-release"
+        script = (
+            "import sys, time\\n"
+            "from pathlib import Path\\n"
+            "from database_lock import application_instance_lock\\n"
+            "with application_instance_lock(sys.argv[1]):\\n"
+            "    Path(sys.argv[2]).write_text('ready', encoding='utf-8')\\n"
+            "    release = Path(sys.argv[3])\\n"
+            "    while not release.exists():\\n"
+            "        time.sleep(0.01)\\n"
+        )
+        module_dir = Path(__file__).resolve().parent
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join(
+            part for part in (str(module_dir), env.get("PYTHONPATH", "")) if part
+        )
+        process = subprocess.Popen(
+            [sys.executable, "-c", script, str(app.DB), str(ready), str(release)],
+            cwd=str(module_dir),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            deadline = time.monotonic() + 10
+            while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            if not ready.exists():
+                stdout, stderr = process.communicate(timeout=5)
+                self.fail(f"GUI instance process did not acquire its lock: {stdout} {stderr}")
+
+            with self.assertRaises(app.ApplicationAlreadyRunningError):
+                with app.application_instance_lock(app.DB):
+                    self.fail("A second GUI process acquired the same database instance lock.")
+
+            # The GUI instance lock must not block the independent attendance monitor.
+            with app.database_maintenance_lock(app.DB, timeout=0):
+                pass
+
+            release.touch()
+            stdout, stderr = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0, f"{stdout} {stderr}")
+        finally:
+            if process.poll() is None:
+                release.touch()
+                process.kill()
+                process.communicate()
+
+        # Once the first GUI process exits, a new instance can acquire the lock.
+        with app.application_instance_lock(app.DB):
+            pass
+
+
+
 if __name__ == "__main__":
     unittest.main()
