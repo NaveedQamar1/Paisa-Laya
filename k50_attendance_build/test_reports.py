@@ -236,6 +236,47 @@ class CSVImportRegressionTests(unittest.TestCase):
         self.assertEqual(second, (0, 0))
         self.assertEqual(count, 1)
 
+    def test_exported_csv_can_be_imported_without_losing_punch_status(self):
+        from unittest.mock import Mock
+
+        records = [
+            ("101", "2026-11-15 09:00:00", "0"),
+            ("101", "2026-11-15 17:00:00", "1"),
+        ]
+        with sqlite3.connect(app.DB) as db:
+            inserted, skipped = app.import_punch_rows(db, records)
+            self.assertEqual((inserted, skipped), (2, 0))
+            rows = db.execute(
+                "SELECT user_id,punch_time,status FROM punches ORDER BY punch_time"
+            ).fetchall()
+
+        destination = Path(self.temp.name) / "round-trip.csv"
+        ctx = SimpleNamespace(
+            _rows=lambda: rows,
+            _name=lambda uid: "Ayesha" if str(uid) == "101" else str(uid),
+            refresh=Mock(),
+        )
+        with patch.object(app.filedialog, "asksaveasfilename", return_value=str(destination)), \\
+             patch.object(app.messagebox, "showinfo") as export_info:
+            app.App.export_csv(ctx)
+        export_info.assert_called_once()
+
+        with sqlite3.connect(app.DB) as db:
+            db.execute("DELETE FROM punches")
+        with patch.object(app.filedialog, "askopenfilename", return_value=str(destination)), \\
+             patch.object(app.messagebox, "showinfo") as import_info, \\
+             patch.object(app.messagebox, "showerror") as import_error:
+            app.App.import_csv(ctx)
+
+        import_info.assert_called_once()
+        import_error.assert_not_called()
+        ctx.refresh.assert_called_once()
+        with sqlite3.connect(app.DB) as db:
+            restored = db.execute(
+                "SELECT user_id,punch_time,status FROM punches ORDER BY punch_time"
+            ).fetchall()
+        self.assertEqual(restored, records)
+
     def test_import_preserves_numeric_zero_user_and_punch_status(self):
         records = [
             (0, "2026-11-15 08:00:00", 0),
