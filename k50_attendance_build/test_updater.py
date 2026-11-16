@@ -279,5 +279,38 @@ class UpdaterHelperTests(unittest.TestCase):
             )
 
 
+    def test_zip_extraction_rejects_too_many_members(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "too-many-files.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("one.txt", b"1")
+                zf.writestr("two.txt", b"2")
+            with patch.object(updater, "MAX_UPDATE_FILES", 1):
+                with self.assertRaisesRegex(RuntimeError, "too many files"):
+                    updater.safe_extract_zip(archive, root / "extract")
+
+    def test_zip_extraction_rejects_oversized_member(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "oversized-file.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("large.bin", b"12345")
+            with patch.object(updater, "MAX_UPDATE_FILE_BYTES", 4):
+                with self.assertRaisesRegex(RuntimeError, "maximum allowed size"):
+                    updater.safe_extract_zip(archive, root / "extract")
+
+    def test_zip_extraction_rejects_excessive_total_expanded_size(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "oversized-archive.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("one.bin", b"123")
+                zf.writestr("two.bin", b"456")
+            with patch.object(updater, "MAX_UPDATE_TOTAL_BYTES", 5):
+                with self.assertRaisesRegex(RuntimeError, "expanded update archive"):
+                    updater.safe_extract_zip(archive, root / "extract")
+
+
 if __name__=="__main__":
     unittest.main()

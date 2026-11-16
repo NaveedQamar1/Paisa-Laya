@@ -13,6 +13,12 @@ from pathlib import PurePosixPath
 from pathlib import Path
 
 
+MAX_UPDATE_ARCHIVE_BYTES = 512 * 1024 * 1024
+MAX_UPDATE_FILE_BYTES = 512 * 1024 * 1024
+MAX_UPDATE_TOTAL_BYTES = 1024 * 1024 * 1024
+MAX_UPDATE_FILES = 10000
+
+
 def wait_for_process(pid, timeout=180):
     deadline=time.time()+timeout
     if os.name == "nt":
@@ -84,10 +90,22 @@ def apply_windows(package,target):
 def safe_extract_zip(archive, destination):
     """Extract regular files and safe, relative macOS bundle symlinks."""
     destination=Path(destination).resolve()
-    with zipfile.ZipFile(archive) as zf:
+    archive_path = Path(archive)
+    if archive_path.stat().st_size > MAX_UPDATE_ARCHIVE_BYTES:
+        raise RuntimeError("The update archive exceeds the maximum compressed size.")
+    with zipfile.ZipFile(archive_path) as zf:
         members=[]
         symlinks={}
-        for member in zf.infolist():
+        infos = zf.infolist()
+        if len(infos) > MAX_UPDATE_FILES:
+            raise RuntimeError("The update archive contains too many files.")
+        declared_total = 0
+        for member in infos:
+            if member.file_size > MAX_UPDATE_FILE_BYTES:
+                raise RuntimeError("An update archive file exceeds the maximum allowed size.")
+            declared_total += member.file_size
+            if declared_total > MAX_UPDATE_TOTAL_BYTES:
+                raise RuntimeError("The expanded update archive exceeds the maximum allowed size.")
             normalized=member.filename.replace("\\","/")
             member_path=PurePosixPath(normalized)
             if member_path.is_absolute() or ".." in member_path.parts or (member_path.parts and ":" in member_path.parts[0]):
@@ -117,14 +135,28 @@ def safe_extract_zip(archive, destination):
                 raise RuntimeError("The update archive contains a file nested inside a symbolic link.")
 
         # Write directories and regular files first; create links only after all writes finish.
+        extracted_total = 0
         for member,member_path,mode in members:
             output=destination.joinpath(*member_path.parts)
             if member.is_dir():
                 output.mkdir(parents=True,exist_ok=True)
                 continue
             output.parent.mkdir(parents=True,exist_ok=True)
+            member_written = 0
             with zf.open(member) as source, output.open("wb") as target:
-                shutil.copyfileobj(source,target)
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    member_written += len(chunk)
+                    if member_written > MAX_UPDATE_FILE_BYTES:
+                        raise RuntimeError("An update archive file exceeds the maximum allowed size.")
+                    if member_written + extracted_total > MAX_UPDATE_TOTAL_BYTES:
+                        raise RuntimeError("The expanded update archive exceeds the maximum allowed size.")
+                    target.write(chunk)
+                if member_written != member.file_size:
+                    raise RuntimeError("An update archive file has an inconsistent expanded size.")
+            extracted_total += member_written
             permissions=mode & 0o777
             if permissions:
                 output.chmod(permissions)
