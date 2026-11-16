@@ -33,6 +33,75 @@ class DeviceIOTests(unittest.TestCase):
         ctx.after = lambda _delay, callback: callback()
         return ctx
 
+    def test_fetch_worker_serializes_all_database_writes_with_restore(self):
+        users = [SimpleNamespace(user_id=101, name="Ayesha")]
+        punches = [
+            SimpleNamespace(
+                user_id=101,
+                timestamp=datetime(2026, 11, 16, 9, 0, 0),
+                status=0,
+            )
+        ]
+
+        class FakeConnection:
+            def disable_device(self):
+                pass
+
+            def enable_device(self):
+                pass
+
+            def disconnect(self):
+                pass
+
+            def get_users(self):
+                return users
+
+            def get_attendance(self):
+                return punches
+
+        class FakeZK:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def connect(self):
+                return FakeConnection()
+
+        fake_module = types.ModuleType("zk")
+        fake_module.ZK = FakeZK
+        ctx = self.context()
+        completed = []
+        errors = []
+        ctx._fetch_done = lambda total, inserted, saved: completed.append(
+            (total, inserted, saved)
+        )
+        ctx._fetch_error = errors.append
+
+        with (
+            patch.dict(sys.modules, {"zk": fake_module}),
+            patch.object(
+                app,
+                "database_maintenance_lock",
+                wraps=app.database_maintenance_lock,
+            ) as maintenance_lock,
+        ):
+            app.App._fetch_worker(ctx, "192.168.1.50", 4370, 0)
+
+        maintenance_lock.assert_called_once_with(app.DB, timeout=300)
+        self.assertEqual(completed, [(1, 1, 1)])
+        self.assertEqual(errors, [])
+        with sqlite3.connect(app.DB) as db:
+            self.assertEqual(
+                db.execute("SELECT name FROM staff WHERE user_id='101'").fetchone()[0],
+                "Ayesha",
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT punch_time FROM punches WHERE user_id='101'"
+                ).fetchone()[0],
+                "2026-11-16 09:00:00",
+            )
+
+
     def test_fetch_worker_syncs_staff_and_deduplicates_raw_punches(self):
         users = [
             SimpleNamespace(user_id=101, name="Ayesha"),
