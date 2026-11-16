@@ -24,6 +24,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -54,6 +55,7 @@ jobs:
           - runner: macos-15-intel
             arch: intel
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
