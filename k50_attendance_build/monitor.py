@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from datetime import datetime
 from employee_history import ensure_device_employee_status_history, get_device_user_id
+from database_lock import database_maintenance_lock
 
 BASE = Path.home() / "SCAFAWorkforce"
 LEGACY_BASE = Path.home() / "K50AttendanceManager"
@@ -186,6 +187,14 @@ def sync_device_records(db, users, records):
     return inserted
 
 
+
+def sync_database(users, records):
+    """Commit one device poll while holding the shared maintenance lock."""
+    with database_maintenance_lock(DB, timeout=300):
+        with sqlite3.connect(DB, timeout=20) as db:
+            return sync_device_records(db, users, records)
+
+
 def main():
     BASE.mkdir(parents=True, exist_ok=True)
     last_device = None
@@ -217,8 +226,7 @@ def main():
                     f"Skipped {skipped} malformed attendance records from device {device_key}"
                 )
             last_invalid_count = skipped
-            with sqlite3.connect(DB, timeout=20) as db:
-                inserted = sync_device_records(db, users, records)
+            inserted = sync_database(users, records)
             if last_seen is None:
                 # Persist an empty baseline too. Otherwise the first later punch
                 # would be mistaken for historical data and never notify.
