@@ -35,10 +35,38 @@ def notify(title, message):
 
 
 def record_key(row):
-    stamp = row.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-    uid = str(row.user_id)
-    status = str(getattr(row, "status", ""))
-    return stamp, uid, status
+    """Return a normalized punch identity, or None for malformed device rows."""
+    uid = get_device_user_id(row)
+    timestamp = getattr(row, "timestamp", None)
+    if not uid:
+        return None
+    try:
+        if isinstance(timestamp, datetime):
+            parsed = timestamp
+        elif isinstance(timestamp, str):
+            parsed = datetime.fromisoformat(timestamp.strip())
+        else:
+            return None
+        if parsed.tzinfo is not None:
+            return None
+    except (TypeError, ValueError):
+        return None
+    status_value = getattr(row, "status", None)
+    status = str("" if status_value is None else status_value)
+    return parsed.strftime("%Y-%m-%d %H:%M:%S"), uid, status
+
+
+def valid_device_records(records):
+    """Filter malformed punch rows before sorting so one bad row cannot abort a sync."""
+    valid = []
+    skipped = 0
+    for row in records:
+        if record_key(row) is None:
+            skipped += 1
+        else:
+            valid.append(row)
+    valid.sort(key=record_key)
+    return valid, skipped
 
 
 def load_state(device_key):
@@ -127,7 +155,10 @@ def sync_device_records(db, users, records):
 
     inserted = []
     for row in records:
-        stamp, uid, status = record_key(row)
+        key = record_key(row)
+        if key is None:
+            continue
+        stamp, uid, status = key
         db.execute(
             """INSERT OR IGNORE INTO punches(user_id,punch_time,status)
                VALUES(?,?,?)""",
@@ -153,6 +184,7 @@ def main():
     BASE.mkdir(parents=True, exist_ok=True)
     last_device = None
     last_seen = None
+    last_invalid_count = 0
     while True:
         conn = None
         try:
@@ -169,7 +201,12 @@ def main():
             conn = ZK(ip, port=port, timeout=12, password=key,
                       force_udp=False, ommit_ping=False).connect()
             users = conn.get_users()
-            records = sorted(conn.get_attendance(), key=record_key)
+            records, skipped = valid_device_records(conn.get_attendance())
+            if skipped and skipped != last_invalid_count:
+                log_error(
+                    f"Skipped {skipped} malformed attendance records from device {device_key}"
+                )
+            last_invalid_count = skipped
             with sqlite3.connect(DB, timeout=20) as db:
                 inserted = sync_device_records(db, users, records)
             if last_seen is None:

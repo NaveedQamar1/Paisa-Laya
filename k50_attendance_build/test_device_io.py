@@ -636,5 +636,73 @@ class DeviceIOTests(unittest.TestCase):
 
 
 
+    def test_fetch_worker_skips_malformed_device_rows_without_losing_valid_punches(self):
+        users = [SimpleNamespace(user_id=0, name="Zero ID")]
+        punches = [
+            SimpleNamespace(
+                user_id=0,
+                timestamp=datetime(2026, 11, 16, 9, 0, 0),
+                status=0,
+            ),
+            SimpleNamespace(
+                user_id=None,
+                uid="",
+                timestamp=datetime(2026, 11, 16, 9, 1, 0),
+                status=1,
+            ),
+            SimpleNamespace(user_id=101, timestamp=None, status=1),
+        ]
+
+        class FakeConnection:
+            def disable_device(self):
+                pass
+
+            def enable_device(self):
+                pass
+
+            def disconnect(self):
+                pass
+
+            def get_users(self):
+                return users
+
+            def get_attendance(self):
+                return punches
+
+        class FakeZK:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def connect(self):
+                return FakeConnection()
+
+        fake_module = types.ModuleType("zk")
+        fake_module.ZK = FakeZK
+        ctx = self.context()
+        completed = []
+        errors = []
+        ctx._fetch_done = lambda total, inserted, saved, warning=None: completed.append(
+            (total, inserted, saved, warning)
+        )
+        ctx._fetch_error = errors.append
+
+        with patch.dict(sys.modules, {"zk": fake_module}):
+            app.App._fetch_worker(ctx, "192.168.1.50", 4370, 0)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(completed, [(
+            3, 1, 1,
+            "Skipped 2 malformed attendance records (missing device IDs or invalid timestamps).",
+        )])
+        with sqlite3.connect(app.DB) as db:
+            punches_saved = db.execute(
+                "SELECT user_id,punch_time,status FROM punches"
+            ).fetchall()
+        self.assertEqual(
+            punches_saved,
+            [("0", "2026-11-16 09:00:00", "0")],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

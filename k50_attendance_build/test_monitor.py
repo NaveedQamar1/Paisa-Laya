@@ -193,5 +193,97 @@ class MonitorNotificationTests(unittest.TestCase):
             notify.assert_called_once()
 
 
+    def test_record_key_rejects_missing_device_ids_and_invalid_timestamps(self):
+        self.assertIsNone(monitor.record_key(SimpleNamespace(
+            user_id=None, uid="", timestamp=datetime(2026, 11, 16, 9, 0, 0), status=0
+        )))
+        self.assertIsNone(monitor.record_key(SimpleNamespace(
+            user_id=101, timestamp="not-a-timestamp", status=0
+        )))
+        self.assertEqual(
+            monitor.record_key(SimpleNamespace(
+                user_id=0,
+                uid=999,
+                timestamp="2026-11-16T09:00:00",
+                status=0,
+            )),
+            ("2026-11-16 09:00:00", "0", "0"),
+        )
+
+    def test_valid_device_records_filters_bad_rows_and_sorts_valid_punches(self):
+        valid_late = SimpleNamespace(
+            user_id=101,
+            timestamp=datetime(2026, 11, 16, 17, 0, 0),
+            status=1,
+        )
+        valid_early = SimpleNamespace(
+            user_id=0,
+            uid=999,
+            timestamp=datetime(2026, 11, 16, 9, 0, 0),
+            status=0,
+        )
+        invalid_id = SimpleNamespace(
+            user_id=None,
+            uid="",
+            timestamp=datetime(2026, 11, 16, 10, 0, 0),
+            status=0,
+        )
+        invalid_time = SimpleNamespace(user_id=101, timestamp=None, status=1)
+
+        valid, skipped = monitor.valid_device_records([
+            valid_late, invalid_id, invalid_time, valid_early
+        ])
+
+        self.assertEqual(valid, [valid_early, valid_late])
+        self.assertEqual(skipped, 2)
+
+    def test_device_sync_skips_malformed_punch_rows_and_keeps_valid_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "attendance.db"
+            with sqlite3.connect(database) as db:
+                db.execute(
+                    """CREATE TABLE staff(
+                       user_id TEXT PRIMARY KEY,name TEXT NOT NULL DEFAULT '',
+                       joining_date TEXT NOT NULL DEFAULT '',active INTEGER NOT NULL DEFAULT 1)"""
+                )
+                db.execute(
+                    """CREATE TABLE punches(
+                       user_id TEXT NOT NULL,punch_time TEXT NOT NULL,status TEXT DEFAULT '',
+                       UNIQUE(user_id,punch_time,status))"""
+                )
+                db.execute(
+                    """CREATE TABLE staff_status_history(
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,
+                       active INTEGER NOT NULL,effective_date TEXT NOT NULL,
+                       source TEXT NOT NULL,UNIQUE(user_id,effective_date))"""
+                )
+                users = [SimpleNamespace(user_id=0, name="Zero ID")]
+                valid = SimpleNamespace(
+                    user_id=0,
+                    timestamp=datetime(2026, 11, 16, 9, 0, 0),
+                    status=0,
+                )
+                invalid = SimpleNamespace(
+                    user_id=None,
+                    uid="",
+                    timestamp=datetime(2026, 11, 16, 10, 0, 0),
+                    status=0,
+                )
+
+                inserted = monitor.sync_device_records(db, users, [invalid, valid])
+                punches = db.execute(
+                    "SELECT user_id,punch_time,status FROM punches"
+                ).fetchall()
+
+            self.assertEqual(
+                inserted,
+                [("2026-11-16 09:00:00", "0", "0", "Zero ID")],
+            )
+            self.assertEqual(
+                punches,
+                [("0", "2026-11-16 09:00:00", "0")],
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

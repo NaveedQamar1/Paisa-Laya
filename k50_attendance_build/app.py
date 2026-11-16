@@ -2003,6 +2003,7 @@ class App(tk.Tk):
         conn=None
         fetch_error=None
         cleanup_errors=[]
+        sync_warnings=[]
         synced_ids=set()
         total=inserted=saved_users=0
         try:
@@ -2015,10 +2016,22 @@ class App(tk.Tk):
             rows=conn.get_attendance()
             total=len(rows)
             with sqlite3.connect(DB) as c:
-                for row in rows:
-                    stamp=row.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-                    cur=c.execute("INSERT OR IGNORE INTO punches(user_id,punch_time,status) VALUES(?,?,?)",(str(row.user_id),stamp,str(getattr(row,"status",""))))
-                    inserted+=cur.rowcount
+                inserted, skipped = import_punch_rows(
+                    c,
+                    (
+                        (
+                            get_device_user_id(row),
+                            getattr(row, "timestamp", None),
+                            getattr(row, "status", None),
+                        )
+                        for row in rows
+                    ),
+                )
+            if skipped:
+                sync_warnings.append(
+                    f"Skipped {skipped} malformed attendance records "
+                    "(missing device IDs or invalid timestamps)."
+                )
         except Exception as e:
             fetch_error=str(e)
         finally:
@@ -2047,7 +2060,7 @@ class App(tk.Tk):
                 except Exception as e:
                     cleanup_errors.append(f"Could not disconnect from attendance device: {e}")
 
-        device_warning="; ".join(cleanup_errors) if cleanup_errors else None
+        device_warning="; ".join(cleanup_errors + sync_warnings) if cleanup_errors or sync_warnings else None
         if fetch_error is not None:
             if device_warning:
                 self.after(0,lambda m=fetch_error,w=device_warning:self._fetch_error(m,w))
