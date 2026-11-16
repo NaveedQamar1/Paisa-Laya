@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +14,7 @@ class MonitorStateTests(unittest.TestCase):
     def test_device_sync_initializes_employment_history_from_punch_or_sync_date(self):
         with tempfile.TemporaryDirectory() as tmp:
             database = Path(tmp) / "attendance.db"
-            with sqlite3.connect(database) as db:
+            with closing(sqlite3.connect(database)) as db, db:
                 db.execute(
                     """CREATE TABLE staff(
                        user_id TEXT PRIMARY KEY,name TEXT NOT NULL DEFAULT '',
@@ -73,7 +74,7 @@ class MonitorStateTests(unittest.TestCase):
     def test_device_sync_preserves_zero_device_id_and_missing_id_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
             database = Path(tmp) / "attendance.db"
-            with sqlite3.connect(database) as db:
+            with closing(sqlite3.connect(database)) as db, db:
                 db.execute(
                     """CREATE TABLE staff(
                        user_id TEXT PRIMARY KEY,name TEXT NOT NULL DEFAULT '',
@@ -265,7 +266,7 @@ class MonitorNotificationTests(unittest.TestCase):
     def test_device_sync_skips_malformed_punch_rows_and_keeps_valid_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             database = Path(tmp) / "attendance.db"
-            with sqlite3.connect(database) as db:
+            with closing(sqlite3.connect(database)) as db, db:
                 db.execute(
                     """CREATE TABLE staff(
                        user_id TEXT PRIMARY KEY,name TEXT NOT NULL DEFAULT '',

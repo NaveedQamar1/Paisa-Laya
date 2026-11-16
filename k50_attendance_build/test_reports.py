@@ -117,8 +117,8 @@ class ReportExportTests(unittest.TestCase):
             formula_name if str(uid) == "101" else "Bilal"
         )
         destination = self.root / "formula-safe-attendance.xlsx"
-        with patch.object(app.filedialog, "asksaveasfilename", return_value=str(destination)), \\
-             patch.object(app.messagebox, "showinfo") as showinfo, \\
+        with patch.object(app.filedialog, "asksaveasfilename", return_value=str(destination)), \
+             patch.object(app.messagebox, "showinfo") as showinfo, \
              patch.object(app.messagebox, "showerror") as showerror:
             app.App.export_excel(ctx)
 

@@ -122,7 +122,7 @@ class BackgroundMonitorSetupTests(unittest.TestCase):
             with patch.object(app.sys, "platform", "darwin"), \
                  patch.object(app.sys, "executable", str(root / "SCAFA_Workforce")), \
                  patch.object(app.Path, "home", return_value=root), \
-                 patch.object(app.os, "getuid", return_value=501), \
+                 patch.object(app.os, "getuid", return_value=501, create=True), \
                  patch.object(app.messagebox, "askyesno", return_value=False), \
                  patch.object(app.subprocess, "run", return_value=SimpleNamespace(
                      returncode=1, stderr="Operation not permitted.", stdout=""
@@ -154,7 +154,7 @@ class BackgroundMonitorSetupTests(unittest.TestCase):
             with patch.object(app.sys, "platform", "darwin"), \
                  patch.object(app.sys, "executable", str(root / "SCAFA_Workforce")), \
                  patch.object(app.Path, "home", return_value=root), \
-                 patch.object(app.os, "getuid", return_value=501), \
+                 patch.object(app.os, "getuid", return_value=501, create=True), \
                  patch.object(app.messagebox, "askyesno", return_value=False), \
                  patch.object(app.subprocess, "run", return_value=SimpleNamespace(
                      returncode=0, stderr="", stdout=""

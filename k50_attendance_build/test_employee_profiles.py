@@ -488,6 +488,7 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             )
         ctx = type("Context", (), {})()
         ctx._names_cache = None
+        ctx._store_device_users = lambda users, db=None: app.App._store_device_users(ctx, users, db)
         app.App._store_device_users(ctx, [type("DeviceUser", (), {"user_id": "17", "name": "Ayesha Updated"})()])
         with sqlite3.connect(app.DB) as db:
             row = db.execute(
@@ -604,6 +605,8 @@ class EmployeeProfileSaveTests(unittest.TestCase):
         )
 
         context = type("Context", (), {})()
+        context._names_cache = None
+        context._store_device_users = lambda users, db=None: app.App._store_device_users(context, users, db)
         app.App._store_device_users(
             context,
             [type("DeviceUser", (), {"user_id": "701", "name": "Device Updated Name"})()]

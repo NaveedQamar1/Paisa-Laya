@@ -254,6 +254,8 @@ class DatabaseAdministrationTests(unittest.TestCase):
              patch.object(app.messagebox, "showerror") as showerror:
             app.App.restore_database(self.ctx)
 
+        # Surface any restore error before checking whether the live DB changed.
+        showerror.assert_not_called()
         with sqlite3.connect(app.DB) as restored:
             self.assertEqual(
                 restored.execute("SELECT name FROM staff WHERE user_id='new'").fetchone()[0],

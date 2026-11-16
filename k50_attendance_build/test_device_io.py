@@ -558,6 +558,7 @@ class DeviceIOTests(unittest.TestCase):
             status=SimpleNamespace(set=Mock()),
             _fetch_in_progress=False,
         )
+        ctx._fetch_worker = Mock()
         with patch.object(app.threading, "Thread", side_effect=RuntimeError("thread unavailable")), \
              patch.object(app.messagebox, "showerror") as showerror:
             app.App.fetch(ctx)
