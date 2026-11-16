@@ -547,6 +547,48 @@ class EmployeeProfileSaveTests(unittest.TestCase):
         self.assertEqual(profile, ("Mariam Khan", "Pastry", "Head Chef"))
         self.assertEqual(after, before)
 
+    def test_stale_profile_snapshot_cannot_overwrite_device_synced_name(self):
+        self.save_profile("701", "Original Employee")
+        with sqlite3.connect(app.DB) as db:
+            row = db.execute(
+                """SELECT name,department,designation,joining_date,active
+                   FROM staff WHERE user_id='701'"""
+            ).fetchone()
+            history_before = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='701' ORDER BY effective_date,id"""
+            ).fetchall()
+        expected_profile = (
+            row[0], row[1], row[2], row[3], bool(row[4])
+        )
+
+        context = type("Context", (), {})()
+        app.App._store_device_users(
+            context,
+            [type("DeviceUser", (), {"user_id": "701", "name": "Device Updated Name"})()]
+        )
+
+        with self.assertRaisesRegex(ValueError, "changed after it was loaded"):
+            self.save_profile(
+                "701", "Stale Form Name", current_user_id="701",
+                expected_profile=expected_profile
+            )
+
+        with sqlite3.connect(app.DB) as db:
+            profile = db.execute(
+                """SELECT name,department,designation,joining_date,active
+                   FROM staff WHERE user_id='701'"""
+            ).fetchone()
+            history_after = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='701' ORDER BY effective_date,id"""
+            ).fetchall()
+        self.assertEqual(
+            profile,
+            ("Device Updated Name", "Kitchen", "Chef", "2024-01-01", 1)
+        )
+        self.assertEqual(history_after, history_before)
+
     def test_new_profile_cannot_overwrite_an_existing_device_id(self):
         self.save_profile("701", "Original Employee")
         with self.assertRaisesRegex(ValueError, "already belongs to an employee"):
