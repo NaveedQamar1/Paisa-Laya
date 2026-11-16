@@ -279,6 +279,34 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             ).fetchall()
         self.assertEqual(events, [(0, "0001-01-01"), (1, "2024-02-01"), (0, "2026-06-01")])
 
+    def test_editing_joining_date_moves_device_synced_employment_start(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                "INSERT INTO staff(user_id,name,joining_date,active) VALUES('77','Ayesha','',1)"
+            )
+            app.ensure_device_employee_status_history(
+                db, "77", "2026-11-15", effective_today="2026-11-16"
+            )
+            app.save_employee_profile(
+                db, "77", "Ayesha", joining_date="2024-01-01",
+                current_user_id="77", effective_today="2026-11-16"
+            )
+            events = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='77' ORDER BY effective_date,id"""
+            ).fetchall()
+            self.assertFalse(app.employee_active_on(db, "77", "2023-12-31"))
+            self.assertTrue(app.employee_active_on(db, "77", "2024-01-01"))
+        self.assertEqual(
+            events,
+            [
+                (0, "0001-01-01", "device-sync-baseline"),
+                (1, "2024-01-01", "profile"),
+            ],
+        )
+
+
     def test_joining_date_edit_rejects_collision_without_losing_history(self):
         app.init_db()
         with sqlite3.connect(app.DB) as db:

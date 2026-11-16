@@ -203,7 +203,7 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
     # events remain on their original dates and retain their ordering.
     first = db.execute(
         """SELECT id,active,effective_date,source FROM staff_status_history
-           WHERE user_id=? AND active=1 AND source IN ('profile','migration')
+           WHERE user_id=? AND active=1 AND source IN ('profile','migration','device-sync')
            ORDER BY effective_date,id LIMIT 1""",
         (uid,)
     ).fetchone()
