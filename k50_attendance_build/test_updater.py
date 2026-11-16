@@ -94,6 +94,10 @@ class UpdaterHelperTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Could not stop"):
                     updater.apply_windows(installer,root)
             run.assert_called_once()
+            stop_script = run.call_args.args[0][-1]
+            self.assertIn("Get-ScheduledTask", stop_script)
+            self.assertIn("-ErrorAction Stop", stop_script)
+            self.assertIn("NoMatchingCimInstance", stop_script)
             launch.assert_not_called()
 
     def test_zip_extraction_rejects_parent_directory_paths(self):
