@@ -617,6 +617,22 @@ def write_database_backup(source_path, destination_path):
         temporary.unlink(missing_ok=True)
 
 
+def restore_database_snapshot(source_path, destination_path, *, pages=-1, progress=None):
+    """Copy a validated SQLite snapshot into the live database transactionally."""
+    source_uri = Path(source_path).resolve().as_uri() + "?mode=ro"
+    source = sqlite3.connect(source_uri, uri=True, timeout=20)
+    target = None
+    try:
+        target = sqlite3.connect(destination_path, timeout=20)
+        source.backup(target, pages=pages, progress=progress)
+    finally:
+        try:
+            if target is not None:
+                target.close()
+        finally:
+            source.close()
+
+
 def validate_attendance_backup(db):
     """Reject structurally incomplete backups before they can replace live data."""
     integrity = db.execute("PRAGMA integrity_check").fetchone()
@@ -2192,15 +2208,7 @@ class App(tk.Tk):
                 safety=BASE / f"Pre_Restore_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
                 # If the atomic pre-restore snapshot fails, abort before replacing live data.
                 write_database_backup(DB, safety)
-                source=sqlite3.connect(staged.as_uri() + "?mode=ro", uri=True)
-                try:
-                    target=sqlite3.connect(DB)
-                    try:
-                        source.backup(target)
-                    finally:
-                        target.close()
-                finally:
-                    source.close()
+                restore_database_snapshot(staged, DB)
             self._names_cache=None
             init_db()
             self.refresh()

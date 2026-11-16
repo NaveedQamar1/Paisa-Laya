@@ -294,6 +294,78 @@ class DatabaseAdministrationTests(unittest.TestCase):
         showinfo.assert_called_once()
         showerror.assert_not_called()
 
+    def test_interrupted_restore_copy_keeps_live_database_intact_and_safety_backup(self):
+        self.add_current_record("old", "Keep Existing Staff", "2026-11-14 09:00:00")
+        backup_path = self.root / "restore-source-large.db"
+        app.write_database_backup(app.DB, backup_path)
+        with sqlite3.connect(backup_path) as backup:
+            backup.execute(
+                "UPDATE staff SET name='Restored Replacement' WHERE user_id='old'"
+            )
+            backup.executemany(
+                "INSERT INTO app_settings(setting,value) VALUES(?,?)",
+                [
+                    (f"restore-copy-{index:03d}", "x" * 4096)
+                    for index in range(128)
+                ],
+            )
+
+        real_restore = app.restore_database_snapshot
+        progress_calls = []
+
+        def interrupt_after_first_page(status, remaining, total):
+            progress_calls.append((status, remaining, total))
+            if remaining < total:
+                raise RuntimeError("simulated interrupted restore copy")
+
+        def interrupted_restore(source, destination):
+            return real_restore(
+                source, destination, pages=1, progress=interrupt_after_first_page
+            )
+
+        with (
+            patch.object(app.filedialog, "askopenfilename", return_value=str(backup_path)),
+            patch.object(app.messagebox, "askyesno", return_value=True),
+            patch.object(
+                app, "restore_database_snapshot", side_effect=interrupted_restore
+            ) as restore_copy,
+            patch.object(app.messagebox, "showerror") as showerror,
+            patch.object(app.messagebox, "showinfo") as showinfo,
+        ):
+            app.App.restore_database(self.ctx)
+
+        restore_copy.assert_called_once()
+        self.assertTrue(progress_calls)
+        self.assertGreater(progress_calls[0][2], 1)
+        self.assertLess(progress_calls[0][1], progress_calls[0][2])
+        showerror.assert_called_once()
+        self.assertIn("simulated interrupted restore copy", str(showerror.call_args))
+        showinfo.assert_not_called()
+
+        with sqlite3.connect(app.DB) as current:
+            self.assertEqual(current.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(
+                current.execute("SELECT name FROM staff WHERE user_id='old'").fetchone()[0],
+                "Keep Existing Staff",
+            )
+            self.assertEqual(
+                current.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 1
+            )
+            self.assertIsNone(
+                current.execute(
+                    "SELECT value FROM app_settings WHERE setting='restore-copy-000'"
+                ).fetchone()
+            )
+
+        safety_backups = list(self.root.glob("Pre_Restore_Backup_*.db"))
+        self.assertEqual(len(safety_backups), 1)
+        with sqlite3.connect(safety_backups[0]) as safety:
+            self.assertEqual(
+                safety.execute("SELECT name FROM staff WHERE user_id='old'").fetchone()[0],
+                "Keep Existing Staff",
+            )
+        self.assertEqual(list(self.root.glob("scafa-restore-*")), [])
+
     def test_restore_uses_the_validated_snapshot_if_selected_file_changes_after_confirmation(self):
         self.add_current_record("old", "Old Staff", "2026-11-14 09:00:00")
         backup_path = self.root / "restore-source.db"
