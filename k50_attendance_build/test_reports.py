@@ -235,6 +235,24 @@ class CSVImportRegressionTests(unittest.TestCase):
         self.assertEqual(second, (0, 0))
         self.assertEqual(count, 1)
 
+    def test_import_preserves_numeric_zero_status_and_keeps_none_empty(self):
+        records = [
+            ("101", "2026-11-15 09:00:00", 0),
+            ("101", "2026-11-15 17:00:00", 1),
+            ("102", "2026-11-15 09:00:00", None),
+        ]
+        with sqlite3.connect(app.DB) as db:
+            inserted, skipped = app.import_punch_rows(db, records)
+            rows = db.execute(
+                "SELECT user_id,punch_time,status FROM punches ORDER BY user_id,punch_time"
+            ).fetchall()
+        self.assertEqual((inserted, skipped), (3, 0))
+        self.assertEqual(rows, [
+            ("101", "2026-11-15 09:00:00", "0"),
+            ("101", "2026-11-15 17:00:00", "1"),
+            ("102", "2026-11-15 09:00:00", ""),
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()
