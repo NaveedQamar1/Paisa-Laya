@@ -105,6 +105,66 @@ class ReportExportTests(unittest.TestCase):
         self.assertEqual(employees["102"][6].value, 1)
         workbook.close()
 
+    def test_excel_comparison_excludes_days_outside_employment_interval(self):
+        from openpyxl import load_workbook
+
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                "INSERT INTO staff(user_id,name,active) VALUES('103','New Hire',0)"
+            )
+            db.executemany(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES('103',?,?, 'profile')""",
+                [
+                    (0, "0001-01-01"),
+                    (1, "2026-11-11"),
+                    (0, "2026-11-13"),
+                ],
+            )
+
+        rows = [
+            ("103", "2026-11-11 09:45:00", "0"),
+            ("103", "2026-11-11 18:00:00", "1"),
+            ("103", "2026-11-12 09:45:00", "0"),
+            ("103", "2026-11-12 18:00:00", "1"),
+            ("103", "2026-11-13 09:45:00", "0"),
+        ]
+        destination = self.root / "employment-interval.xlsx"
+        ctx = self.context(rows)
+        ctx.start_date = SimpleNamespace(get=lambda: "2026-11-09")
+        ctx.end_date = SimpleNamespace(get=lambda: "2026-11-13")
+
+        with patch.object(app.filedialog, "asksaveasfilename", return_value=str(destination)), \\
+             patch.object(app.messagebox, "showinfo") as showinfo, \\
+             patch.object(app.messagebox, "showerror") as showerror:
+            app.App.export_excel(ctx)
+
+        showinfo.assert_called_once()
+        showerror.assert_not_called()
+        workbook = load_workbook(destination, data_only=True)
+        comparison = workbook["Employee Comparison"]
+        employees = {
+            str(row[1].value): row
+            for row in comparison.iter_rows(min_row=2)
+        }
+        employee = employees["103"]
+        self.assertEqual(employee[2].value, 2)   # Expected days only while employed.
+        self.assertEqual(employee[3].value, 2)   # Both active days have attendance.
+        self.assertEqual(employee[6].value, 0)   # No absences outside the interval.
+        self.assertEqual(employee[8].value, 2)   # Both attended days were on time.
+        self.assertEqual(employee[9].value, 1.0)
+        self.assertEqual(employee[10].value, "09:45")
+
+        raw = workbook["Raw Punches"]
+        self.assertEqual(raw.max_row, 6)
+        self.assertEqual(
+            [raw.cell(raw.max_row, col).value for col in range(1, 5)],
+            ["103", "New Hire", "2026-11-13 09:45:00", "0"],
+        )
+        self.assertIn("2026-11-13 09:45:00", workbook["Overview"]["B15"].value)
+        workbook.close()
+
+
     def test_collective_pdf_creates_summary_and_individual_employee_pages(self):
         destination = self.root / "attendance.pdf"
         ctx = self.context()
