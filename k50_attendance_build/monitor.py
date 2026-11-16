@@ -6,6 +6,7 @@ import sys
 import time
 from pathlib import Path
 from datetime import datetime
+from employee_history import ensure_device_employee_status_history
 
 BASE = Path.home() / "SCAFAWorkforce"
 LEGACY_BASE = Path.home() / "K50AttendanceManager"
@@ -110,6 +111,44 @@ def initial_seen_punches(inserted):
     return {(stamp, uid, status) for stamp, uid, status, name in inserted}
 
 
+def sync_device_records(db, users, records):
+    """Synchronize device users and punches, then establish missing employment history."""
+    synced_ids = set()
+    for user in users:
+        uid = str(getattr(user, "user_id", None) or getattr(user, "uid", "")).strip()
+        name = str(getattr(user, "name", "") or "").strip()
+        if uid and name:
+            db.execute(
+                """INSERT INTO staff(user_id,name) VALUES(?,?)
+                   ON CONFLICT(user_id) DO UPDATE SET name=excluded.name""",
+                (uid, name),
+            )
+            synced_ids.add(uid)
+
+    inserted = []
+    for row in records:
+        stamp, uid, status = record_key(row)
+        db.execute(
+            """INSERT OR IGNORE INTO punches(user_id,punch_time,status)
+               VALUES(?,?,?)""",
+            (uid, stamp, status),
+        )
+        name_row = db.execute(
+            "SELECT name FROM staff WHERE user_id=?", (uid,)
+        ).fetchone()
+        name = name_row[0] if name_row and name_row[0] else f"User {uid}"
+        inserted.append((stamp, uid, status, name))
+        synced_ids.add(uid)
+
+    for uid in synced_ids:
+        first_punch = db.execute(
+            "SELECT MIN(substr(punch_time,1,10)) FROM punches WHERE user_id=?",
+            (uid,),
+        ).fetchone()[0]
+        ensure_device_employee_status_history(db, uid, first_punch)
+    return inserted
+
+
 def main():
     BASE.mkdir(parents=True, exist_ok=True)
     last_device = None
@@ -131,28 +170,8 @@ def main():
                       force_udp=False, ommit_ping=False).connect()
             users = conn.get_users()
             records = sorted(conn.get_attendance(), key=record_key)
-            inserted = []
             with sqlite3.connect(DB, timeout=20) as db:
-                for user in users:
-                    uid = str(getattr(user, "user_id", None) or getattr(user, "uid", "")).strip()
-                    name = str(getattr(user, "name", "") or "").strip()
-                    if uid and name:
-                        db.execute(
-                            """INSERT INTO staff(user_id,name) VALUES(?,?)
-                               ON CONFLICT(user_id) DO UPDATE SET name=excluded.name""",
-                            (uid, name)
-                        )
-                for row in records:
-                    stamp, uid, status = record_key(row)
-                    db.execute(
-                        """INSERT OR IGNORE INTO punches(user_id,punch_time,status)
-                           VALUES(?,?,?)""", (uid, stamp, status)
-                    )
-                    name_row = db.execute(
-                        "SELECT name FROM staff WHERE user_id=?", (uid,)
-                    ).fetchone()
-                    name = name_row[0] if name_row and name_row[0] else f"User {uid}"
-                    inserted.append((stamp, uid, status, name))
+                inserted = sync_device_records(db, users, records)
             if last_seen is None:
                 # Persist an empty baseline too. Otherwise the first later punch
                 # would be mistaken for historical data and never notify.

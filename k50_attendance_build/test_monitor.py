@@ -1,12 +1,75 @@
+import sqlite3
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import monitor
 
 
 class MonitorStateTests(unittest.TestCase):
+    def test_device_sync_initializes_employment_history_from_punch_or_sync_date(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "attendance.db"
+            with sqlite3.connect(database) as db:
+                db.execute(
+                    """CREATE TABLE staff(
+                       user_id TEXT PRIMARY KEY,name TEXT NOT NULL DEFAULT '',
+                       joining_date TEXT NOT NULL DEFAULT '',active INTEGER NOT NULL DEFAULT 1)"""
+                )
+                db.execute(
+                    """CREATE TABLE punches(
+                       user_id TEXT NOT NULL,punch_time TEXT NOT NULL,status TEXT DEFAULT '',
+                       UNIQUE(user_id,punch_time,status))"""
+                )
+                db.execute(
+                    """CREATE TABLE staff_status_history(
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,
+                       active INTEGER NOT NULL,effective_date TEXT NOT NULL,
+                       source TEXT NOT NULL,UNIQUE(user_id,effective_date))"""
+                )
+                users = [
+                    SimpleNamespace(user_id=101, name="Ayesha"),
+                    SimpleNamespace(user_id=102, name="Bilal"),
+                ]
+                records = [
+                    SimpleNamespace(
+                        user_id=101,
+                        timestamp=datetime(2026, 11, 15, 9, 0, 0),
+                        status=0,
+                    )
+                ]
+
+                inserted = monitor.sync_device_records(db, users, records)
+                today = monitor.datetime.now().date().isoformat()
+                history_101 = db.execute(
+                    """SELECT active,effective_date,source FROM staff_status_history
+                       WHERE user_id='101' ORDER BY effective_date,id"""
+                ).fetchall()
+                history_102 = db.execute(
+                    """SELECT active,effective_date,source FROM staff_status_history
+                       WHERE user_id='102' ORDER BY effective_date,id"""
+                ).fetchall()
+
+            self.assertEqual(inserted, [("2026-11-15 09:00:00", "101", "0", "Ayesha")])
+            self.assertEqual(
+                history_101,
+                [
+                    (0, "0001-01-01", "device-sync-baseline"),
+                    (1, "2026-11-15", "device-sync"),
+                ],
+            )
+            self.assertEqual(
+                history_102,
+                [
+                    (0, "0001-01-01", "device-sync-baseline"),
+                    (1, today, "device-sync"),
+                ],
+            )
+
+
     def test_seen_punches_persist_across_restarts(self):
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "monitor-state.json"
