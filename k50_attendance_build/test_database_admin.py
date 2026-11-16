@@ -1,6 +1,9 @@
 import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -539,6 +542,143 @@ class DatabaseAdministrationTests(unittest.TestCase):
             )
             self.assertEqual(current.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 1)
 
+
+
+    def test_restore_serializes_monitor_sync_across_safety_snapshot_and_replacement(self):
+        self.add_current_record("old", "Old Staff", "2026-11-14 09:00:00")
+        source = self.root / "restore-source.db"
+        app.write_database_backup(app.DB, source)
+        with sqlite3.connect(source) as backup:
+            backup.execute("DELETE FROM punches")
+            backup.execute("DELETE FROM staff_status_history")
+            backup.execute("DELETE FROM staff")
+            backup.execute(
+                "INSERT INTO staff(user_id,name) VALUES('new','Restored Staff')"
+            )
+            backup.execute(
+                "INSERT INTO punches(user_id,punch_time,status) VALUES(?,?,?)",
+                ("new", "2026-11-15 09:00:00", "0"),
+            )
+
+        marker = self.root / "monitor-writer-ready"
+        process_holder = {}
+        real_restore = app.restore_database_snapshot
+        script = """
+import sys
+from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
+
+sys.path.insert(0, sys.argv[2])
+import monitor
+
+monitor.DB = Path(sys.argv[1])
+Path(sys.argv[3]).write_text("ready", encoding="utf-8")
+monitor.sync_database(
+    [SimpleNamespace(user_id="new", name="Restored Staff")],
+    [SimpleNamespace(
+        user_id="new",
+        timestamp=datetime(2026, 11, 16, 10, 0, 0),
+        status=0,
+    )],
+)
+"""
+
+        def start_monitor_writer_then_restore(source_path, destination_path):
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    script,
+                    str(app.DB),
+                    str(Path(__file__).resolve().parent),
+                    str(marker),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            process_holder["process"] = process
+            deadline = time.monotonic() + 10
+            while not marker.exists():
+                if process.poll() is not None:
+                    stdout, stderr = process.communicate()
+                    raise AssertionError(
+                        f"Monitor writer exited before acquiring the lock: {stdout} {stderr}"
+                    )
+                if time.monotonic() >= deadline:
+                    process.kill()
+                    process.communicate()
+                    raise AssertionError("Monitor writer did not reach the synchronization barrier.")
+                time.sleep(0.01)
+
+            # The monitor has reached its real sync entry point. It must wait
+            # while restore owns the maintenance lock.
+            time.sleep(0.15)
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+                raise AssertionError(
+                    f"Monitor sync bypassed the restore lock: {stdout} {stderr}"
+                )
+            return real_restore(source_path, destination_path)
+
+        with (
+            patch.object(app.filedialog, "askopenfilename", return_value=str(source)),
+            patch.object(app.messagebox, "askyesno", return_value=True),
+            patch.object(app.messagebox, "showinfo") as showinfo,
+            patch.object(app.messagebox, "showerror") as showerror,
+            patch.object(
+                app, "restore_database_snapshot",
+                side_effect=start_monitor_writer_then_restore,
+            ),
+        ):
+            app.App.restore_database(self.ctx)
+
+        process = process_holder.get("process")
+        self.assertIsNotNone(process, "The monitor synchronization process was not started.")
+        try:
+            stdout, stderr = process.communicate(timeout=15)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+        self.assertEqual(process.returncode, 0, f"{stdout} {stderr}")
+        showinfo.assert_called_once()
+        showerror.assert_not_called()
+
+        with sqlite3.connect(app.DB) as current:
+            self.assertIsNone(
+                current.execute("SELECT 1 FROM staff WHERE user_id='old'").fetchone()
+            )
+            self.assertIsNotNone(
+                current.execute("SELECT 1 FROM staff WHERE user_id='new'").fetchone()
+            )
+            self.assertEqual(
+                current.execute(
+                    "SELECT COUNT(*) FROM punches WHERE user_id='new' AND punch_time='2026-11-15 09:00:00'"
+                ).fetchone()[0],
+                1,
+            )
+            self.assertEqual(
+                current.execute(
+                    "SELECT COUNT(*) FROM punches WHERE user_id='new' AND punch_time='2026-11-16 10:00:00'"
+                ).fetchone()[0],
+                1,
+            )
+
+        safety_backups = list(self.root.glob("Pre_Restore_Backup_*.db"))
+        self.assertEqual(len(safety_backups), 1)
+        with sqlite3.connect(safety_backups[0]) as safety:
+            self.assertEqual(
+                safety.execute("SELECT name FROM staff WHERE user_id='old'").fetchone()[0],
+                "Old Staff",
+            )
+            self.assertEqual(
+                safety.execute(
+                    "SELECT COUNT(*) FROM punches WHERE user_id='new' AND punch_time='2026-11-16 10:00:00'"
+                ).fetchone()[0],
+                0,
+            )
 
 
 if __name__ == "__main__":
