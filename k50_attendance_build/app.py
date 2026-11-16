@@ -315,7 +315,8 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
 
 
 def save_employee_profile(db, user_id, name, department="", designation="", joining_date="",
-                          active=True, current_user_id=None, effective_today=None):
+                          active=True, current_user_id=None, effective_today=None,
+                          expected_profile=None):
     """Save an employee profile atomically without changing its device-assigned ID."""
     uid = normalize_device_user_id(user_id)
     full_name = str(name or "").strip()
@@ -336,7 +337,9 @@ def save_employee_profile(db, user_id, name, department="", designation="", join
     db.execute("SAVEPOINT employee_profile_save")
     try:
         previous = db.execute(
-            "SELECT active,joining_date FROM staff WHERE user_id=?", (uid,)
+            """SELECT name,department,designation,joining_date,active
+               FROM staff WHERE user_id=?""",
+            (uid,)
         ).fetchone()
         if current_user_id is None and previous is not None:
             raise ValueError(
@@ -357,13 +360,45 @@ def save_employee_profile(db, user_id, name, department="", designation="", join
                 db, uid, joining, new_active, is_new=True, effective_today=effective_today
             )
         else:
-            previous_active = int(previous[0])
-            previous_joining = previous[1] or ""
-            db.execute(
-                """UPDATE staff SET name=?,department=?,designation=?,joining_date=?,active=?
-                   WHERE user_id=?""",
-                (full_name, department, designation, joining, new_active, uid)
+            previous_snapshot = (
+                str(previous[0] or "").strip(),
+                str(previous[1] or "").strip(),
+                str(previous[2] or "").strip(),
+                str(previous[3] or "").strip(),
+                int(bool(previous[4])),
             )
+            if expected_profile is not None:
+                expected_values = tuple(expected_profile)
+                if len(expected_values) != 5:
+                    raise ValueError(
+                        "This employee profile changed after it was loaded. Refresh the directory and select the employee again before saving."
+                    )
+                expected_snapshot = (
+                    str(expected_values[0] or "").strip(),
+                    str(expected_values[1] or "").strip(),
+                    str(expected_values[2] or "").strip(),
+                    str(expected_values[3] or "").strip(),
+                    int(bool(expected_values[4])),
+                )
+                if previous_snapshot != expected_snapshot:
+                    raise ValueError(
+                        "This employee profile changed after it was loaded. Refresh the directory and select the employee again before saving."
+                    )
+            previous_active = int(previous[4])
+            previous_joining = previous[3] or ""
+            cursor = db.execute(
+                """UPDATE staff SET name=?,department=?,designation=?,joining_date=?,active=?
+                   WHERE user_id=? AND name IS ? AND department IS ? AND designation IS ?
+                     AND joining_date IS ? AND active IS ?""",
+                (
+                    full_name, department, designation, joining, new_active, uid,
+                    previous[0], previous[1], previous[2], previous[3], previous[4]
+                )
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    "This employee profile changed while you were editing it. Refresh the directory and select the employee again before saving."
+                )
             if previous_active != new_active or previous_joining != joining:
                 save_profile_status_history(
                     db, uid, joining, new_active,
@@ -1430,9 +1465,11 @@ class App(tk.Tk):
                     tree.focus(selected_uid)
 
         current_profile_uid = {"value": None}
+        current_profile_snapshot = {"value": None}
 
         def clear_form():
             current_profile_uid["value"] = None
+            current_profile_snapshot["value"] = None
             uid_entry.configure(state="normal")
             for key, var in fields.items():
                 var.set("")
@@ -1459,6 +1496,13 @@ class App(tk.Tk):
                 feedback.set("The selected employee is no longer registered. Refresh the directory.")
                 return
             current_profile_uid["value"] = profile["user_id"]
+            current_profile_snapshot["value"] = (
+                str(row[1] or "").strip(),
+                str(row[2] or "").strip(),
+                str(row[3] or "").strip(),
+                str(row[4] or "").strip(),
+                bool(row[5]),
+            )
             uid_entry.configure(state="normal")
             for key, value in zip(("uid", "name", "department", "designation", "joining_date"), profile["fields"]):
                 fields[key].set(value)
@@ -1476,12 +1520,20 @@ class App(tk.Tk):
                         designation=fields["designation"].get(),
                         joining_date=fields["joining_date"].get(),
                         active=active_var.get(),
-                        current_user_id=current_profile_uid["value"]
+                        current_user_id=current_profile_uid["value"],
+                        expected_profile=current_profile_snapshot["value"]
                     )
             except (ValueError, sqlite3.IntegrityError) as exc:
                 messagebox.showwarning("Unable to save employee profile", str(exc), parent=win)
                 return
             current_profile_uid["value"] = uid
+            current_profile_snapshot["value"] = (
+                fields["name"].get().strip(),
+                fields["department"].get().strip(),
+                fields["designation"].get().strip(),
+                fields["joining_date"].get().strip(),
+                bool(active_var.get()),
+            )
             uid_entry.configure(state="readonly")
             self._names_cache = None
             load_rows()
