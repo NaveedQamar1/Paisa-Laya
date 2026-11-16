@@ -340,5 +340,85 @@ class CSVImportRegressionTests(unittest.TestCase):
         ])
 
 
+    def test_csv_spreadsheet_escaping_round_trips_formula_and_apostrophe_values(self):
+        values = (
+            "=1+1",
+            "+SUM(1,2)",
+            "-1",
+            "@SUM(A1:A2)",
+            "  =1+1",
+            "\t=1+1",
+            "'=1+1",
+            "'plain text",
+            "''=1+1",
+            "Ayesha",
+        )
+        for value in values:
+            with self.subTest(value=value):
+                escaped = app.escape_csv_spreadsheet_value(value)
+                self.assertEqual(app.restore_csv_spreadsheet_value(escaped), value)
+        self.assertEqual(app.escape_csv_spreadsheet_value("=1+1"), "'=1+1")
+        self.assertEqual(app.escape_csv_spreadsheet_value("'=1+1"), "''=1+1")
+
+    def test_csv_export_formula_like_ids_and_statuses_are_safe_and_round_trip(self):
+        from unittest.mock import Mock
+
+        user_id = "=101"
+        employee_name = '=HYPERLINK("https://example.com","Open")'
+        punch_status = "=1+1"
+        stamp = "2026-11-15 09:00:00"
+        destination = Path(self.temp.name) / "formula-safe-round-trip.csv"
+        ctx = SimpleNamespace(
+            _rows=lambda: [(user_id, stamp, punch_status)],
+            _name=lambda _uid: employee_name,
+            refresh=Mock(),
+        )
+        with patch.object(app.filedialog, "asksaveasfilename", return_value=str(destination)), \
+             patch.object(app.messagebox, "showinfo") as export_info:
+            app.App.export_csv(ctx)
+        export_info.assert_called_once()
+
+        with destination.open("r", encoding="utf-8-sig", newline="") as handle:
+            exported = list(csv.reader(handle))
+        self.assertEqual(exported[0], list(app.CSV_EXPORT_HEADERS))
+        self.assertEqual(exported[1], [
+            "'=101", "'" + employee_name, stamp, "'=1+1"
+        ])
+
+        with patch.object(app.filedialog, "askopenfilename", return_value=str(destination)), \
+             patch.object(app.messagebox, "showinfo") as import_info, \
+             patch.object(app.messagebox, "showerror") as import_error:
+            app.App.import_csv(ctx)
+        import_info.assert_called_once()
+        import_error.assert_not_called()
+        with sqlite3.connect(app.DB) as db:
+            restored = db.execute(
+                "SELECT user_id,punch_time,status FROM punches"
+            ).fetchall()
+        self.assertEqual(restored, [(user_id, stamp, punch_status)])
+
+    def test_external_csv_with_matching_headers_does_not_unescape_apostrophes(self):
+        from unittest.mock import Mock
+
+        destination = Path(self.temp.name) / "external.csv"
+        stamp = "2026-11-15 09:00:00"
+        with destination.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(app.CSV_EXPORT_HEADERS)
+            writer.writerow(["'=101", "Ayesha", stamp, "'=1+1"])
+        ctx = SimpleNamespace(refresh=Mock())
+        with patch.object(app.filedialog, "askopenfilename", return_value=str(destination)), \
+             patch.object(app.messagebox, "showinfo") as import_info, \
+             patch.object(app.messagebox, "showerror") as import_error:
+            app.App.import_csv(ctx)
+        import_info.assert_called_once()
+        import_error.assert_not_called()
+        with sqlite3.connect(app.DB) as db:
+            restored = db.execute(
+                "SELECT user_id,punch_time,status FROM punches"
+            ).fetchall()
+        self.assertEqual(restored, [("'=101", stamp, "'=1+1")])
+
+
 if __name__ == "__main__":
     unittest.main()

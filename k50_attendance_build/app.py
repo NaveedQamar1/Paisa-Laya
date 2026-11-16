@@ -27,6 +27,42 @@ APP_VERSION = "1.4.0"
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
+CSV_EXPORT_HEADERS = (
+    "Device User ID",
+    "Staff Name",
+    "Attendance date & time",
+    "Punch status",
+)
+
+
+def csv_formula_candidate(value):
+    """Return whether a CSV cell could be interpreted as a spreadsheet formula."""
+    text = "" if value is None else str(value)
+    if not text:
+        return False
+    if text[0] in "\t\r\n":
+        return True
+    return text.lstrip(" \t\r\n").startswith(("=", "+", "-", "@"))
+
+
+def escape_csv_spreadsheet_value(value):
+    """Prefix dangerous CSV values for spreadsheet viewing while preserving reversibility."""
+    text = "" if value is None else str(value)
+    # Double a literal leading apostrophe so spreadsheet software displays it
+    # rather than consuming it as the text-forcing prefix.
+    if text.startswith("'") or csv_formula_candidate(text):
+        return "'" + text
+    return text
+
+
+def restore_csv_spreadsheet_value(value):
+    """Undo only the escaping convention used by SCAFA's BOM-marked CSV exports."""
+    text = "" if value is None else str(value)
+    if text.startswith("''"):
+        return text[1:]
+    if text.startswith("'") and csv_formula_candidate(text[1:]):
+        return text[1:]
+    return text
 
 def verify_update_asset(package, checksum_file, asset_name, published_digest=None):
     """Verify an update against its release checksum manifest and GitHub asset metadata."""
@@ -2053,6 +2089,8 @@ class App(tk.Tk):
         path=filedialog.askopenfilename(title="Import attendance CSV",filetypes=[("CSV files","*.csv"),("All files","*.*")])
         if not path: return
         try:
+            with open(path, "rb") as signature:
+                has_utf8_bom = signature.read(3) == b"\xef\xbb\xbf"
             with open(path,"r",newline="",encoding="utf-8-sig") as f:
                 sample=f.read(4096); f.seek(0)
                 try: dialect=csv.Sniffer().sniff(sample) if sample.strip() else csv.excel
@@ -2063,7 +2101,19 @@ class App(tk.Tk):
                 timecol=next((fields[x] for x in ("date/time","datetime","timestamp","punch time","date time","attendance date & time","attendance date time","time") if x in fields),None)
                 statecol=next((fields[x] for x in ("status","state","punch status") if x in fields),None)
                 if not uidcol or not timecol: raise ValueError("CSV needs User ID/PIN and Date/Time/Timestamp columns.")
-                records=((row.get(uidcol),row.get(timecol),row.get(statecol) if statecol else "") for row in reader)
+                is_scafa_export = (
+                    has_utf8_bom and tuple(reader.fieldnames or ()) == CSV_EXPORT_HEADERS
+                )
+
+                def imported_value(row, column):
+                    value = row.get(column)
+                    return restore_csv_spreadsheet_value(value) if is_scafa_export else value
+
+                records=(
+                    (imported_value(row,uidcol), imported_value(row,timecol),
+                     imported_value(row,statecol) if statecol else "")
+                    for row in reader
+                )
                 with sqlite3.connect(DB) as c:
                     count,skipped=import_punch_rows(c,records)
             self.refresh()
@@ -2145,8 +2195,12 @@ class App(tk.Tk):
         path=filedialog.asksaveasfilename(title="Save punch report",defaultextension=".csv",filetypes=[("CSV report","*.csv")],initialfile=f"SCAFA_Workforce_Punches_{date.today().isoformat()}.csv")
         if not path: return
         with open(path,"w",newline="",encoding="utf-8-sig") as f:
-            w=csv.writer(f); w.writerow(["Device User ID","Staff Name","Attendance date & time","Punch status"])
-            w.writerows((uid,self._name(uid),stamp,state) for uid,stamp,state in rows)
+            w=csv.writer(f)
+            w.writerow(CSV_EXPORT_HEADERS)
+            w.writerows(
+                tuple(escape_csv_spreadsheet_value(value) for value in (uid,self._name(uid),stamp,state))
+                for uid,stamp,state in rows
+            )
         messagebox.showinfo("CSV exported",f"Exported {len(rows)} records.")
 
     def _report_scope_rows(self):
