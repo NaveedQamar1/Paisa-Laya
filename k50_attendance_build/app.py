@@ -489,7 +489,8 @@ def import_punch_rows(db, records):
         if not uid or stamp is None:
             skipped += 1
             continue
-        state = str(status or "").strip()
+        # Numeric status 0 is a valid check-in code; do not collapse it to an empty string.
+        state = str("" if status is None else status).strip()
         inserted += db.execute(
             "INSERT OR IGNORE INTO punches(user_id,punch_time,status) VALUES(?,?,?)",
             (uid, stamp, state),
