@@ -918,8 +918,28 @@ class App(tk.Tk):
                 self.status.set("Background device monitoring enabled • checks every 10 seconds")
                 messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now monitor the device in the background and start automatically when you sign in.")
             else:
-                subprocess.run(["schtasks", "/End", "/TN", task_name], capture_output=True, text=True)
-                subprocess.run(["schtasks", "/Delete", "/TN", task_name, "/F"], capture_output=True, text=True)
+                end_result = subprocess.run(
+                    ["schtasks", "/End", "/TN", task_name], capture_output=True, text=True
+                )
+                delete_result = subprocess.run(
+                    ["schtasks", "/Delete", "/TN", task_name, "/F"], capture_output=True, text=True
+                )
+                if delete_result.returncode:
+                    detail = delete_result.stderr or delete_result.stdout or "Task Scheduler could not remove the monitor task."
+                    self.status.set("Background monitoring could not be disabled")
+                    messagebox.showwarning(
+                        "Could not disable monitoring",
+                        f"The Windows monitor task could not be removed from startup. It may still run.\\n\\n{detail}",
+                    )
+                    return
+                if end_result.returncode:
+                    detail = end_result.stderr or end_result.stdout or "Task Scheduler could not confirm the monitor stopped."
+                    self.status.set("Background monitoring task removed • current stop not confirmed")
+                    messagebox.showwarning(
+                        "Monitoring task removed, but stop was not confirmed",
+                        f"The task was removed from Windows startup, but the current monitor process may still be running. Check Task Manager before assuming it has stopped.\\n\\n{detail}",
+                    )
+                    return
                 self.status.set("Background device monitoring disabled")
                 messagebox.showinfo("Monitoring disabled", "The background attendance-device monitor has been stopped and removed from Windows startup.")
             return
@@ -957,9 +977,28 @@ class App(tk.Tk):
                 messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now check the device in the background and start automatically when you log in.")
             else:
                 uid = os.getuid()
-                subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(plist)], capture_output=True, text=True)
-                if plist.exists():
-                    plist.unlink()
+                stop_result = subprocess.run(
+                    ["launchctl", "bootout", f"gui/{uid}", str(plist)],
+                    capture_output=True, text=True,
+                )
+                if stop_result.returncode:
+                    detail = stop_result.stderr or stop_result.stdout or "launchctl could not confirm the monitor stopped."
+                    self.status.set("Background monitoring stop was not confirmed")
+                    messagebox.showwarning(
+                        "Could not confirm monitoring stopped",
+                        f"The macOS monitor was not confirmed as unloaded. The login item was left in place so it can be inspected or retried.\\n\\n{detail}",
+                    )
+                    return
+                try:
+                    if plist.exists():
+                        plist.unlink()
+                except OSError as exc:
+                    self.status.set("Monitor stopped • login item removal failed")
+                    messagebox.showwarning(
+                        "Monitor stopped, but login item remains",
+                        f"The monitor was unloaded, but its login item could not be removed. It may start again at the next login.\\n\\n{exc}",
+                    )
+                    return
                 self.status.set("Background device monitoring disabled")
                 messagebox.showinfo("Monitoring disabled", "The background K50 monitor has been stopped and removed from login startup.")
             return
