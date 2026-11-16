@@ -189,6 +189,34 @@ class DeviceIOTests(unittest.TestCase):
         )
         self.assertEqual(history, [(0, "2026-10-01", "profile")])
 
+    def test_discovery_rejects_ipv6_fallback_before_scanning(self):
+        class NoIPv4Route:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def connect(self, _destination):
+                raise OSError("no IPv4 route")
+
+        ctx = SimpleNamespace(
+            port=SimpleNamespace(get=lambda: "4370"),
+            key=SimpleNamespace(get=lambda: "0"),
+            ip=SimpleNamespace(get=lambda: "2001:db8::25"),
+            status=SimpleNamespace(set=Mock()),
+        )
+        with patch.object(app.socket, "socket", return_value=NoIPv4Route()), \
+             patch.object(app.threading, "Thread") as worker, \
+             patch.object(app.messagebox, "showerror") as showerror:
+            app.App.discover_device(ctx)
+
+        worker.assert_not_called()
+        showerror.assert_called_once_with(
+            "IPv4 required",
+            "Automatic discovery scans a local IPv4 /24 network. Enter a valid IPv4 address or connect this computer to an IPv4 network.",
+        )
+
     def test_discovery_reports_only_after_protocol_handshake(self):
         address = ipaddress.ip_address("192.168.1.25")
         network = SimpleNamespace(hosts=lambda: [address])

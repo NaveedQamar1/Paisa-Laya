@@ -1760,7 +1760,17 @@ class App(tk.Tk):
             except ValueError:
                 messagebox.showerror("Network unavailable","Could not determine this computer's local network. Enter the device IP manually and try again.")
                 return
-        network=ipaddress.ip_network(f"{local_ip}/24",strict=False)
+        try:
+            local_address=ipaddress.ip_address(local_ip)
+            if local_address.version != 4:
+                raise ValueError()
+            network=ipaddress.ip_network(f"{local_address}/24",strict=False)
+        except ValueError:
+            messagebox.showerror(
+                "IPv4 required",
+                "Automatic discovery scans a local IPv4 /24 network. Enter a valid IPv4 address or connect this computer to an IPv4 network.",
+            )
+            return
         self.status.set(f"Searching {network} for compatible attendance devices on port {port}…")
         threading.Thread(target=self._discover_worker,args=(network,port,key),daemon=True).start()
 
