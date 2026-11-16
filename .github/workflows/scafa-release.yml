@@ -23,6 +23,10 @@ on:
         default: ""
         type: string
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -86,7 +90,7 @@ jobs:
         run: |
           RELEASE_TAG="${{ github.event.inputs.release_tag }}"
           if [ -z "$RELEASE_TAG" ]; then
-            APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
+            APP_VERSION="$(sed -n 's/^APP_VERSION = "\\([^"]*\\)"/\\1/p' k50_attendance_build/app.py | head -n 1)"
             if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
             RELEASE_TAG="scafa-v$APP_VERSION"
           fi
@@ -115,8 +119,6 @@ jobs:
             chmod 755 icon-patch-scripts/postinstall
             chmod 644 icon-patch-scripts/scafa_workforce_icon.icns
             pkgbuild --nopayload --scripts icon-patch-scripts --identifier pk.scafa.workforce.iconpatch --version "$VERSION" --install-location / dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
-            # --nopayload packages store installer scripts in the package's Scripts archive.
-            # Expand the flat package before checking the script and bundled icon resource.
             PATCH_CHECK_DIR="$(mktemp -d)"
             trap 'rm -rf "$PATCH_CHECK_DIR"' EXIT
             pkgutil --expand dist/SCAFA_Workforce_Icon_Patch_Intel.pkg "$PATCH_CHECK_DIR/expanded"
@@ -165,7 +167,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$RELEASE_TAG" ]; then
-            APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
+            APP_VERSION="$(sed -n 's/^APP_VERSION = "\\([^"]*\\)"/\\1/p' k50_attendance_build/app.py | head -n 1)"
             if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
             RELEASE_TAG="scafa-v$APP_VERSION"
           fi
