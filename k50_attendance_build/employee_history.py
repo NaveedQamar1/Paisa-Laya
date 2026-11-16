@@ -13,7 +13,9 @@ def ensure_device_employee_status_history(db, user_id, first_punch_date=None, ef
     if profile is None:
         return False
     if db.execute(
-        "SELECT 1 FROM staff_status_history WHERE user_id=? LIMIT 1", (uid,)
+        """SELECT 1 FROM staff_status_history
+           WHERE user_id=? AND source NOT LIKE '%-baseline' LIMIT 1""",
+        (uid,)
     ).fetchone():
         return False
 

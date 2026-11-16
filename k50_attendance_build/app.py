@@ -83,7 +83,7 @@ def init_db():
                 )
             has_status_event = c.execute(
                 """SELECT 1 FROM staff_status_history
-                   WHERE user_id=? AND source<>'migration-baseline'
+                   WHERE user_id=? AND source NOT LIKE '%-baseline'
                    LIMIT 1""",
                 (str(uid),)
             ).fetchone()

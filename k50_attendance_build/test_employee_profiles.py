@@ -164,6 +164,31 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM staff_status_history WHERE user_id='42' AND active=1"
             ).fetchone()[0], 1)
 
+    def test_migration_repairs_profile_baseline_only_history(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                "INSERT INTO staff(user_id,name,joining_date,active) VALUES('54','Existing Hire','2024-05-10',1)"
+            )
+            db.execute(
+                "INSERT INTO staff_status_history(user_id,active,effective_date,source) VALUES('54',0,'0001-01-01','profile-baseline')"
+            )
+
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            self.assertFalse(app.employee_active_on(db, "54", "2024-05-09"))
+            self.assertTrue(app.employee_active_on(db, "54", "2024-05-10"))
+            history = db.execute(
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='54' ORDER BY effective_date,id"
+            ).fetchall()
+        self.assertEqual(
+            history,
+            [
+                (0, "0001-01-01", "profile-baseline"),
+                (1, "2024-05-10", "migration"),
+            ],
+        )
+
     def test_new_database_has_employee_profile_fields(self):
         app.init_db()
         with sqlite3.connect(app.DB) as db:
@@ -380,6 +405,38 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             self.assertEqual(db.execute(
                 "SELECT COUNT(*) FROM staff_status_history WHERE user_id='53' AND active=1"
             ).fetchone()[0], 1)
+
+    def test_device_sync_repairs_baseline_only_history_without_duplicates(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                "INSERT INTO staff(user_id,name,joining_date,active) VALUES('55','Device Hire','2024-04-01',1)"
+            )
+            db.execute(
+                "INSERT INTO staff_status_history(user_id,active,effective_date,source) VALUES('55',0,'0001-01-01','profile-baseline')"
+            )
+
+            self.assertTrue(
+                app.ensure_device_employee_status_history(
+                    db, "55", "2024-04-05", effective_today="2026-11-16"
+                )
+            )
+            self.assertFalse(
+                app.ensure_device_employee_status_history(
+                    db, "55", "2024-04-05", effective_today="2026-11-16"
+                )
+            )
+            history = db.execute(
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='55' ORDER BY effective_date,id"
+            ).fetchall()
+
+        self.assertEqual(
+            history,
+            [
+                (0, "0001-01-01", "profile-baseline"),
+                (1, "2024-04-01", "device-sync"),
+            ],
+        )
 
     def test_device_name_sync_does_not_overwrite_profile_metadata(self):
         app.init_db()
