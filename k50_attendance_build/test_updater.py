@@ -312,5 +312,61 @@ class UpdaterHelperTests(unittest.TestCase):
                     updater.safe_extract_zip(archive, root / "extract")
 
 
+    def test_macos_update_restores_backup_when_previous_swap_left_app_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed = root / "SCAFA_Workforce.app"
+            backup = root / "SCAFA_Workforce.app.previous"
+            old_executable = backup / "Contents" / "MacOS" / "SCAFA_Workforce"
+            old_executable.parent.mkdir(parents=True)
+            old_executable.write_text("known-good previous application")
+
+            source = root / "package" / "SCAFA_Workforce.app"
+            new_executable = source / "Contents" / "MacOS" / "SCAFA_Workforce"
+            new_executable.parent.mkdir(parents=True)
+            new_executable.write_text("new application")
+            archive = root / "update.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.write(new_executable, new_executable.relative_to(source.parent))
+
+            with self.assertRaisesRegex(RuntimeError, "previous application has been restored"):
+                updater.apply_macos(archive, installed)
+
+            self.assertEqual(
+                (installed / "Contents" / "MacOS" / "SCAFA_Workforce").read_text(),
+                "known-good previous application",
+            )
+            self.assertFalse(backup.exists())
+
+    def test_macos_update_restores_backup_over_partial_bundle_after_interruption(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed = root / "SCAFA_Workforce.app"
+            partial_executable = installed / "Contents" / "MacOS" / "SCAFA_Workforce"
+            partial_executable.parent.mkdir(parents=True)
+            partial_executable.write_text("incomplete application")
+            backup = root / "SCAFA_Workforce.app.previous"
+            old_executable = backup / "Contents" / "MacOS" / "SCAFA_Workforce"
+            old_executable.parent.mkdir(parents=True)
+            old_executable.write_text("known-good previous application")
+
+            source = root / "package" / "SCAFA_Workforce.app"
+            new_executable = source / "Contents" / "MacOS" / "SCAFA_Workforce"
+            new_executable.parent.mkdir(parents=True)
+            new_executable.write_text("new application")
+            archive = root / "update.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.write(new_executable, new_executable.relative_to(source.parent))
+
+            with self.assertRaisesRegex(RuntimeError, "previous application has been restored"):
+                updater.apply_macos(archive, installed)
+
+            self.assertEqual(
+                (installed / "Contents" / "MacOS" / "SCAFA_Workforce").read_text(),
+                "known-good previous application",
+            )
+            self.assertFalse(backup.exists())
+
+
 if __name__=="__main__":
     unittest.main()

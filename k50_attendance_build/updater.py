@@ -182,8 +182,27 @@ def apply_macos(package,target,user_uid=None):
         executable=new_app/"Contents"/"MacOS"/"SCAFA_Workforce"
         if not executable.exists():
             raise RuntimeError("The downloaded macOS app is missing its executable.")
-        if backup.exists():
-            shutil.rmtree(backup)
+        if backup.exists() or backup.is_symlink():
+            if (
+                backup.is_symlink()
+                or not backup.is_dir()
+                or not (backup / "Contents" / "MacOS" / "SCAFA_Workforce").is_file()
+            ):
+                raise RuntimeError(
+                    "An incomplete macOS recovery backup exists and was preserved. "
+                    "Manual recovery is required before another update."
+                )
+            # A prior update may have been interrupted after the old bundle was
+            # renamed. Restore it instead of deleting the only known-good copy.
+            if app_target.is_dir() and not app_target.is_symlink():
+                shutil.rmtree(app_target)
+            else:
+                app_target.unlink(missing_ok=True)
+            backup.rename(app_target)
+            raise RuntimeError(
+                "A previous macOS update was interrupted. The previous application "
+                "has been restored; retry the update."
+            )
         app_target.rename(backup)
         try:
             shutil.copytree(new_app,app_target,symlinks=True)
