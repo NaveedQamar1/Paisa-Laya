@@ -135,6 +135,22 @@ class MonitorStateTests(unittest.TestCase):
                 monitor.save_state("192.168.1.50:4370", seen)
                 self.assertEqual(monitor.load_state("192.168.1.50:4370"), seen)
 
+    def test_malformed_state_document_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "monitor-state.json"
+            invalid_documents = (
+                "[]",
+                "null",
+                "42",
+                '"not-an-object"',
+                '{"device": "192.168.1.50:4370", "seen": "not-a-list"}',
+            )
+            with patch.object(monitor, "STATE", state):
+                for document in invalid_documents:
+                    with self.subTest(document=document):
+                        state.write_text(document, encoding="utf-8")
+                        self.assertIsNone(monitor.load_state("192.168.1.50:4370"))
+
     def test_state_is_not_reused_for_a_different_device(self):
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "monitor-state.json"
