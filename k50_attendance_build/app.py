@@ -765,7 +765,17 @@ class App(tk.Tk):
                 if result.returncode:
                     messagebox.showerror("Could not enable monitoring", result.stderr or result.stdout or "Task Scheduler failed.")
                     return
-                subprocess.run(["schtasks", "/Run", "/TN", task_name], capture_output=True, text=True)
+                start_result = subprocess.run(
+                    ["schtasks", "/Run", "/TN", task_name], capture_output=True, text=True
+                )
+                if start_result.returncode:
+                    detail = start_result.stderr or start_result.stdout or "Task Scheduler could not start the monitor."
+                    self.status.set("Background monitoring scheduled • current start failed")
+                    messagebox.showwarning(
+                        "Monitoring scheduled but not started",
+                        f"The monitor task was created for future sign-ins, but it could not start now.\\n\\n{detail}\\n\\nCheck Task Scheduler or sign out and back in.",
+                    )
+                    return
                 self.status.set("Background device monitoring enabled • checks every 10 seconds")
                 messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now monitor the device in the background and start automatically when you sign in.")
             else:
