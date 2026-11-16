@@ -912,7 +912,7 @@ class App(tk.Tk):
                     self.status.set("Background monitoring scheduled • current start failed")
                     messagebox.showwarning(
                         "Monitoring scheduled but not started",
-                        f"The monitor task was created for future sign-ins, but it could not start now.\\n\\n{detail}\\n\\nCheck Task Scheduler or sign out and back in.",
+                        f"The monitor task was created for future sign-ins, but it could not start now.\n\n{detail}\n\nCheck Task Scheduler or sign out and back in.",
                     )
                     return
                 self.status.set("Background device monitoring enabled • checks every 10 seconds")
@@ -929,7 +929,7 @@ class App(tk.Tk):
                     self.status.set("Background monitoring could not be disabled")
                     messagebox.showwarning(
                         "Could not disable monitoring",
-                        f"The Windows monitor task could not be removed from startup. It may still run.\\n\\n{detail}",
+                        f"The Windows monitor task could not be removed from startup. It may still run.\n\n{detail}",
                     )
                     return
                 if end_result.returncode:
@@ -937,7 +937,7 @@ class App(tk.Tk):
                     self.status.set("Background monitoring task removed • current stop not confirmed")
                     messagebox.showwarning(
                         "Monitoring task removed, but stop was not confirmed",
-                        f"The task was removed from Windows startup, but the current monitor process may still be running. Check Task Manager before assuming it has stopped.\\n\\n{detail}",
+                        f"The task was removed from Windows startup, but the current monitor process may still be running. Check Task Manager before assuming it has stopped.\n\n{detail}",
                     )
                     return
                 self.status.set("Background device monitoring disabled")
@@ -986,7 +986,7 @@ class App(tk.Tk):
                     self.status.set("Background monitoring stop was not confirmed")
                     messagebox.showwarning(
                         "Could not confirm monitoring stopped",
-                        f"The macOS monitor was not confirmed as unloaded. The login item was left in place so it can be inspected or retried.\\n\\n{detail}",
+                        f"The macOS monitor was not confirmed as unloaded. The login item was left in place so it can be inspected or retried.\n\n{detail}",
                     )
                     return
                 try:
@@ -996,7 +996,7 @@ class App(tk.Tk):
                     self.status.set("Monitor stopped • login item removal failed")
                     messagebox.showwarning(
                         "Monitor stopped, but login item remains",
-                        f"The monitor was unloaded, but its login item could not be removed. It may start again at the next login.\\n\\n{exc}",
+                        f"The monitor was unloaded, but its login item could not be removed. It may start again at the next login.\n\n{exc}",
                     )
                     return
                 self.status.set("Background device monitoring disabled")
@@ -2203,7 +2203,7 @@ class App(tk.Tk):
                 with sqlite3.connect(DB) as c:
                     count,skipped=import_punch_rows(c,records)
             self.refresh()
-            messagebox.showinfo("Import complete",f"Imported {count} new records.\\nSkipped {skipped} rows with missing IDs or invalid timestamps.")
+            messagebox.showinfo("Import complete",f"Imported {count} new records.\nSkipped {skipped} rows with missing IDs or invalid timestamps.")
         except Exception as e: messagebox.showerror("Import failed",str(e))
 
     def backup_database(self):

@@ -61,12 +61,12 @@ class BackgroundMonitorSetupTests(unittest.TestCase):
                 SimpleNamespace(returncode=1, stderr="Task is not running.", stdout=""),
                 SimpleNamespace(returncode=0, stderr="", stdout=""),
             ]
-            with patch.object(app.sys, "platform", "win32"), \\
-                 patch.object(app.sys, "executable", str(root / "SCAFA_Workforce.exe")), \\
-                 patch.object(app.Path, "home", return_value=root), \\
-                 patch.object(app.messagebox, "askyesno", return_value=False), \\
-                 patch.object(app.subprocess, "run", side_effect=results) as run, \\
-                 patch.object(app.messagebox, "showwarning") as showwarning, \\
+            with patch.object(app.sys, "platform", "win32"), \
+                 patch.object(app.sys, "executable", str(root / "SCAFA_Workforce.exe")), \
+                 patch.object(app.Path, "home", return_value=root), \
+                 patch.object(app.messagebox, "askyesno", return_value=False), \
+                 patch.object(app.subprocess, "run", side_effect=results) as run, \
+                 patch.object(app.messagebox, "showwarning") as showwarning, \
                  patch.object(app.messagebox, "showinfo") as showinfo:
                 app.App.configure_background_monitoring(ctx)
 
@@ -91,12 +91,12 @@ class BackgroundMonitorSetupTests(unittest.TestCase):
                 SimpleNamespace(returncode=0, stderr="", stdout=""),
                 SimpleNamespace(returncode=1, stderr="Access is denied.", stdout=""),
             ]
-            with patch.object(app.sys, "platform", "win32"), \\
-                 patch.object(app.sys, "executable", str(root / "SCAFA_Workforce.exe")), \\
-                 patch.object(app.Path, "home", return_value=root), \\
-                 patch.object(app.messagebox, "askyesno", return_value=False), \\
-                 patch.object(app.subprocess, "run", side_effect=results), \\
-                 patch.object(app.messagebox, "showwarning") as showwarning, \\
+            with patch.object(app.sys, "platform", "win32"), \
+                 patch.object(app.sys, "executable", str(root / "SCAFA_Workforce.exe")), \
+                 patch.object(app.Path, "home", return_value=root), \
+                 patch.object(app.messagebox, "askyesno", return_value=False), \
+                 patch.object(app.subprocess, "run", side_effect=results), \
+                 patch.object(app.messagebox, "showwarning") as showwarning, \
                  patch.object(app.messagebox, "showinfo") as showinfo:
                 app.App.configure_background_monitoring(ctx)
 
@@ -119,15 +119,15 @@ class BackgroundMonitorSetupTests(unittest.TestCase):
                 key=SimpleNamespace(get=lambda: "0"),
                 status=SimpleNamespace(set=Mock()),
             )
-            with patch.object(app.sys, "platform", "darwin"), \\
-                 patch.object(app.sys, "executable", str(root / "SCAFA_Workforce")), \\
-                 patch.object(app.Path, "home", return_value=root), \\
-                 patch.object(app.os, "getuid", return_value=501), \\
-                 patch.object(app.messagebox, "askyesno", return_value=False), \\
+            with patch.object(app.sys, "platform", "darwin"), \
+                 patch.object(app.sys, "executable", str(root / "SCAFA_Workforce")), \
+                 patch.object(app.Path, "home", return_value=root), \
+                 patch.object(app.os, "getuid", return_value=501), \
+                 patch.object(app.messagebox, "askyesno", return_value=False), \
                  patch.object(app.subprocess, "run", return_value=SimpleNamespace(
                      returncode=1, stderr="Operation not permitted.", stdout=""
-                 )), \\
-                 patch.object(app.messagebox, "showwarning") as showwarning, \\
+                 )), \
+                 patch.object(app.messagebox, "showwarning") as showwarning, \
                  patch.object(app.messagebox, "showinfo") as showinfo:
                 app.App.configure_background_monitoring(ctx)
 
@@ -151,15 +151,15 @@ class BackgroundMonitorSetupTests(unittest.TestCase):
                 key=SimpleNamespace(get=lambda: "0"),
                 status=SimpleNamespace(set=Mock()),
             )
-            with patch.object(app.sys, "platform", "darwin"), \\
-                 patch.object(app.sys, "executable", str(root / "SCAFA_Workforce")), \\
-                 patch.object(app.Path, "home", return_value=root), \\
-                 patch.object(app.os, "getuid", return_value=501), \\
-                 patch.object(app.messagebox, "askyesno", return_value=False), \\
+            with patch.object(app.sys, "platform", "darwin"), \
+                 patch.object(app.sys, "executable", str(root / "SCAFA_Workforce")), \
+                 patch.object(app.Path, "home", return_value=root), \
+                 patch.object(app.os, "getuid", return_value=501), \
+                 patch.object(app.messagebox, "askyesno", return_value=False), \
                  patch.object(app.subprocess, "run", return_value=SimpleNamespace(
                      returncode=0, stderr="", stdout=""
-                 )), \\
-                 patch.object(app.messagebox, "showwarning") as showwarning, \\
+                 )), \
+                 patch.object(app.messagebox, "showwarning") as showwarning, \
                  patch.object(app.messagebox, "showinfo") as showinfo:
                 app.App.configure_background_monitoring(ctx)
 
@@ -182,12 +182,12 @@ class BackgroundMonitorSetupTests(unittest.TestCase):
                 SimpleNamespace(returncode=0, stderr="", stdout=""),
                 SimpleNamespace(returncode=0, stderr="", stdout=""),
             ]
-            with patch.object(app.sys, "platform", "win32"), \\
-                 patch.object(app.sys, "executable", str(root / "SCAFA_Workforce.exe")), \\
-                 patch.object(app.Path, "home", return_value=root), \\
-                 patch.object(app.messagebox, "askyesno", return_value=False), \\
-                 patch.object(app.subprocess, "run", side_effect=results), \\
-                 patch.object(app.messagebox, "showwarning") as showwarning, \\
+            with patch.object(app.sys, "platform", "win32"), \
+                 patch.object(app.sys, "executable", str(root / "SCAFA_Workforce.exe")), \
+                 patch.object(app.Path, "home", return_value=root), \
+                 patch.object(app.messagebox, "askyesno", return_value=False), \
+                 patch.object(app.subprocess, "run", side_effect=results), \
+                 patch.object(app.messagebox, "showwarning") as showwarning, \
                  patch.object(app.messagebox, "showinfo") as showinfo:
                 app.App.configure_background_monitoring(ctx)
 
