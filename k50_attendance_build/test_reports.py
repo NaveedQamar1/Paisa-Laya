@@ -382,7 +382,8 @@ class CSVImportRegressionTests(unittest.TestCase):
             exported = list(csv.reader(handle))
         self.assertEqual(exported[0], list(app.CSV_EXPORT_HEADERS))
         self.assertEqual(exported[1], [
-            "'=101", "'" + employee_name, stamp, "'=1+1"
+            "'=101", "'" + employee_name, stamp, "'=1+1",
+            app.CSV_EXPORT_FORMAT_MARKER,
         ])
 
         with patch.object(app.filedialog, "askopenfilename", return_value=str(destination)), \
@@ -397,14 +398,18 @@ class CSVImportRegressionTests(unittest.TestCase):
             ).fetchall()
         self.assertEqual(restored, [(user_id, stamp, punch_status)])
 
-    def test_external_csv_with_matching_headers_does_not_unescape_apostrophes(self):
+    def test_external_utf8_bom_csv_with_legacy_headers_does_not_unescape_apostrophes(self):
         from unittest.mock import Mock
 
-        destination = Path(self.temp.name) / "external.csv"
+        destination = Path(self.temp.name) / "external-legacy-bom.csv"
         stamp = "2026-11-15 09:00:00"
-        with destination.open("w", encoding="utf-8", newline="") as handle:
+        legacy_headers = (
+            "Device User ID", "Staff Name",
+            "Attendance date & time", "Punch status",
+        )
+        with destination.open("w", encoding="utf-8-sig", newline="") as handle:
             writer = csv.writer(handle)
-            writer.writerow(app.CSV_EXPORT_HEADERS)
+            writer.writerow(legacy_headers)
             writer.writerow(["'=101", "Ayesha", stamp, "'=1+1"])
         ctx = SimpleNamespace(refresh=Mock())
         with patch.object(app.filedialog, "askopenfilename", return_value=str(destination)), \
@@ -418,6 +423,28 @@ class CSVImportRegressionTests(unittest.TestCase):
                 "SELECT user_id,punch_time,status FROM punches"
             ).fetchall()
         self.assertEqual(restored, [("'=101", stamp, "'=1+1")])
+
+    def test_external_csv_with_current_headers_but_missing_format_marker_does_not_unescape(self):
+        from unittest.mock import Mock
+
+        destination = Path(self.temp.name) / "external-unmarked.csv"
+        stamp = "2026-11-15 10:00:00"
+        with destination.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(app.CSV_EXPORT_HEADERS)
+            writer.writerow(["'=102", "Bilal", stamp, "'=2+2", ""])
+        ctx = SimpleNamespace(refresh=Mock())
+        with patch.object(app.filedialog, "askopenfilename", return_value=str(destination)), \
+             patch.object(app.messagebox, "showinfo") as import_info, \
+             patch.object(app.messagebox, "showerror") as import_error:
+            app.App.import_csv(ctx)
+        import_info.assert_called_once()
+        import_error.assert_not_called()
+        with sqlite3.connect(app.DB) as db:
+            restored = db.execute(
+                "SELECT user_id,punch_time,status FROM punches"
+            ).fetchall()
+        self.assertEqual(restored, [("'=102", stamp, "'=2+2")])
 
 
 if __name__ == "__main__":

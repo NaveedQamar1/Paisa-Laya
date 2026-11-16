@@ -27,11 +27,14 @@ APP_VERSION = "1.4.0"
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
+CSV_EXPORT_FORMAT_COLUMN = "SCAFA Export Format"
+CSV_EXPORT_FORMAT_MARKER = "scafa-workforce-csv-v1"
 CSV_EXPORT_HEADERS = (
     "Device User ID",
     "Staff Name",
     "Attendance date & time",
     "Punch status",
+    CSV_EXPORT_FORMAT_COLUMN,
 )
 
 
@@ -2102,8 +2105,6 @@ class App(tk.Tk):
         path=filedialog.askopenfilename(title="Import attendance CSV",filetypes=[("CSV files","*.csv"),("All files","*.*")])
         if not path: return
         try:
-            with open(path, "rb") as signature:
-                has_utf8_bom = signature.read(3) == b"\xef\xbb\xbf"
             with open(path,"r",newline="",encoding="utf-8-sig") as f:
                 sample=f.read(4096); f.seek(0)
                 try: dialect=csv.Sniffer().sniff(sample) if sample.strip() else csv.excel
@@ -2114,13 +2115,19 @@ class App(tk.Tk):
                 timecol=next((fields[x] for x in ("date/time","datetime","timestamp","punch time","date time","attendance date & time","attendance date time","time") if x in fields),None)
                 statecol=next((fields[x] for x in ("status","state","punch status") if x in fields),None)
                 if not uidcol or not timecol: raise ValueError("CSV needs User ID/PIN and Date/Time/Timestamp columns.")
+                formatcol=fields.get(CSV_EXPORT_FORMAT_COLUMN.lower())
                 is_scafa_export = (
-                    has_utf8_bom and tuple(reader.fieldnames or ()) == CSV_EXPORT_HEADERS
+                    tuple(reader.fieldnames or ()) == CSV_EXPORT_HEADERS
+                    and formatcol is not None
                 )
 
                 def imported_value(row, column):
                     value = row.get(column)
-                    return restore_csv_spreadsheet_value(value) if is_scafa_export else value
+                    marked_export = (
+                        is_scafa_export
+                        and row.get(formatcol) == CSV_EXPORT_FORMAT_MARKER
+                    )
+                    return restore_csv_spreadsheet_value(value) if marked_export else value
 
                 records=(
                     (imported_value(row,uidcol), imported_value(row,timecol),
@@ -2212,6 +2219,7 @@ class App(tk.Tk):
             w.writerow(CSV_EXPORT_HEADERS)
             w.writerows(
                 tuple(escape_csv_spreadsheet_value(value) for value in (uid,self._name(uid),stamp,state))
+                + (CSV_EXPORT_FORMAT_MARKER,)
                 for uid,stamp,state in rows
             )
         messagebox.showinfo("CSV exported",f"Exported {len(rows)} records.")
