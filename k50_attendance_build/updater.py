@@ -300,6 +300,163 @@ def safe_extract_zip(archive, destination):
             os.symlink(link_target,output)
 
 
+
+MACOS_MONITOR_LABEL = "pk.scafa.workforce.monitor"
+
+
+def _macos_user_context(user_uid=None):
+    """Resolve the original login user's home and LaunchAgent plist safely."""
+    if not hasattr(os, "getuid"):
+        raise RuntimeError("The macOS monitor identity cannot be resolved on this platform.")
+    current_uid = os.getuid()
+    try:
+        uid = current_uid if user_uid is None else int(user_uid)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("The original macOS user ID is invalid.") from exc
+    if uid <= 0:
+        raise RuntimeError("A valid non-root macOS login user ID is required for monitor management.")
+    if uid != current_uid and (not hasattr(os, "geteuid") or os.geteuid() != 0):
+        raise RuntimeError("The updater cannot manage a LaunchAgent belonging to another user.")
+    try:
+        import pwd
+        home = Path(pwd.getpwuid(uid).pw_dir)
+    except (ImportError, KeyError, OSError) as exc:
+        raise RuntimeError("Could not resolve the original user's macOS home directory.") from exc
+    plist = home / "Library" / "LaunchAgents" / (MACOS_MONITOR_LABEL + ".plist")
+    return uid, plist
+
+
+def _run_macos_launchctl(*arguments):
+    """Run launchctl without a shell and return its checked status for diagnosis."""
+    try:
+        return subprocess.run(
+            ["/bin/launchctl", *arguments],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"Could not execute macOS launchctl: {exc}") from exc
+
+
+def _macos_launchctl_detail(result):
+    return (result.stderr or result.stdout or f"exit code {result.returncode}").strip()
+
+
+def _macos_service_is_missing(result):
+    detail = _macos_launchctl_detail(result).lower()
+    return any(
+        marker in detail
+        for marker in ("could not find service", "service not found", "no such process")
+    )
+
+
+def _validate_macos_agent_plist(plist, user_uid):
+    plist = Path(plist)
+    try:
+        metadata = plist.lstat()
+    except OSError as exc:
+        raise RuntimeError(f"The original user's LaunchAgent plist is unavailable: {exc}") from exc
+    if plist.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+        raise RuntimeError("The original user's LaunchAgent plist is not a regular file.")
+    if hasattr(metadata, "st_uid") and metadata.st_uid != user_uid:
+        raise RuntimeError("The original user's LaunchAgent plist is not owned by that user.")
+    return plist
+
+
+def stop_macos_monitor(user_uid=None):
+    """Unload the original user's monitor and return its plist only if it was loaded."""
+    if sys.platform != "darwin":
+        return None
+    uid, plist = _macos_user_context(user_uid)
+    domain = f"gui/{uid}"
+    service = f"{domain}/{MACOS_MONITOR_LABEL}"
+
+    domain_result = _run_macos_launchctl("print", domain)
+    if domain_result.returncode:
+        if not plist.exists():
+            # No configured monitor and no GUI session (as on a headless CI runner).
+            return None
+        raise RuntimeError(
+            "Could not access the original user's macOS GUI session before updating: "
+            + _macos_launchctl_detail(domain_result)
+        )
+
+    service_result = _run_macos_launchctl("print", service)
+    if service_result.returncode:
+        if _macos_service_is_missing(service_result):
+            return None
+        raise RuntimeError(
+            "Could not determine whether the original user's attendance monitor is loaded: "
+            + _macos_launchctl_detail(service_result)
+        )
+
+    if not plist.exists():
+        raise RuntimeError(
+            "The attendance monitor is loaded, but its LaunchAgent plist is missing. "
+            "The update was stopped to avoid leaving an orphaned monitor."
+        )
+    _validate_macos_agent_plist(plist, uid)
+
+    stopped = _run_macos_launchctl("bootout", service)
+    if stopped.returncode:
+        raise RuntimeError(
+            "Could not stop the original user's macOS attendance monitor: "
+            + _macos_launchctl_detail(stopped)
+        )
+
+    confirmation = _run_macos_launchctl("print", service)
+    if confirmation.returncode and _macos_service_is_missing(confirmation):
+        return plist
+    if confirmation.returncode:
+        raise RuntimeError(
+            "Could not confirm that the original user's attendance monitor stopped: "
+            + _macos_launchctl_detail(confirmation)
+        )
+    raise RuntimeError("The original user's attendance monitor is still loaded after bootout.")
+
+
+def start_macos_monitor(plist, user_uid=None):
+    """Restore a previously loaded LaunchAgent and confirm it is registered."""
+    if plist is None or sys.platform != "darwin":
+        return
+    uid, expected_plist = _macos_user_context(user_uid)
+    plist = Path(plist)
+    if plist != expected_plist:
+        raise RuntimeError("Refusing to bootstrap a LaunchAgent outside the original user's home.")
+    _validate_macos_agent_plist(plist, uid)
+    domain = f"gui/{uid}"
+    service = f"{domain}/{MACOS_MONITOR_LABEL}"
+
+    domain_result = _run_macos_launchctl("print", domain)
+    if domain_result.returncode:
+        raise RuntimeError(
+            "Could not access the original user's macOS GUI session to restore monitoring: "
+            + _macos_launchctl_detail(domain_result)
+        )
+    started = _run_macos_launchctl("bootstrap", domain, str(plist))
+    if started.returncode:
+        raise RuntimeError(
+            "Could not restart the original user's macOS attendance monitor: "
+            + _macos_launchctl_detail(started)
+        )
+    confirmation = _run_macos_launchctl("print", service)
+    if confirmation.returncode:
+        raise RuntimeError(
+            "The macOS attendance monitor bootstrap returned success, but its loaded state "
+            "could not be confirmed: " + _macos_launchctl_detail(confirmation)
+        )
+
+
+def _remove_macos_bundle(path):
+    path = Path(path)
+    if path.is_symlink() or not path.is_dir():
+        path.unlink(missing_ok=True)
+    elif path.exists():
+        shutil.rmtree(path)
+
+
 def apply_macos(package,target,user_uid=None):
     archive=Path(package); app_target=Path(target)
     if not archive.is_file() or app_target.suffix!=".app":
@@ -325,38 +482,61 @@ def apply_macos(package,target,user_uid=None):
                     "An incomplete macOS recovery backup exists and was preserved. "
                     "Manual recovery is required before another update."
                 )
+
+            monitor_plist = stop_macos_monitor(user_uid)
             # A prior update may have been interrupted after the old bundle was
             # renamed. Restore it instead of deleting the only known-good copy.
-            if app_target.is_dir() and not app_target.is_symlink():
-                shutil.rmtree(app_target)
-            else:
-                app_target.unlink(missing_ok=True)
+            _remove_macos_bundle(app_target)
             backup.rename(app_target)
+            try:
+                start_macos_monitor(monitor_plist, user_uid)
+            except Exception as restart_error:
+                raise RuntimeError(
+                    "The previous application was restored, but its attendance monitor "
+                    f"could not be restarted: {restart_error}"
+                ) from restart_error
             raise RuntimeError(
                 "A previous macOS update was interrupted. The previous application "
                 "has been restored; retry the update."
             )
-        app_target.rename(backup)
+
+        # Stop only a monitor that is actually loaded. A previously unloaded or
+        # disabled LaunchAgent must remain unloaded after the update.
+        monitor_plist = stop_macos_monitor(user_uid)
+        backup_created = False
         try:
+            app_target.rename(backup)
+            backup_created = True
             shutil.copytree(new_app,app_target,symlinks=True)
-        except Exception:
-            if app_target.exists(): shutil.rmtree(app_target)
-            backup.rename(app_target)
-            raise
-        try:
+            if monitor_plist is not None:
+                start_macos_monitor(monitor_plist, user_uid)
             if user_uid is not None and hasattr(os, "geteuid") and os.geteuid() == 0:
                 subprocess.run(["/bin/launchctl", "asuser", str(user_uid),
                                 "/usr/bin/open", str(app_target)],check=True)
             else:
                 subprocess.run(["/usr/bin/open", str(app_target)],check=True)
-        except Exception:
-            shutil.rmtree(app_target,ignore_errors=True)
-            backup.rename(app_target)
+        except Exception as update_error:
+            try:
+                # If the new agent was partially or fully bootstrapped, unload it
+                # before restoring the old bundle it references.
+                if monitor_plist is not None:
+                    stop_macos_monitor(user_uid)
+                if backup_created and (backup.exists() or backup.is_symlink()):
+                    _remove_macos_bundle(app_target)
+                    backup.rename(app_target)
+                if monitor_plist is not None:
+                    start_macos_monitor(monitor_plist, user_uid)
+            except Exception as recovery_error:
+                raise RuntimeError(
+                    f"{update_error} The previous application bundle is preserved at "
+                    f"{backup}; automatic rollback or monitor recovery also failed: "
+                    f"{recovery_error}"
+                ) from update_error
             raise
+
         shutil.rmtree(backup,ignore_errors=True)
     finally:
         shutil.rmtree(work,ignore_errors=True)
-
 
 def main():
     parser=argparse.ArgumentParser()

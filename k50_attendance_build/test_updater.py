@@ -11,6 +11,14 @@ import app
 
 
 class UpdaterHelperTests(unittest.TestCase):
+    def setUp(self):
+        # Unit tests must never stop a real LaunchAgent on the developer or CI host.
+        self._stop_monitor_patch = patch.object(
+            updater, "stop_macos_monitor", return_value=None
+        )
+        self._stop_monitor_patch.start()
+        self.addCleanup(self._stop_monitor_patch.stop)
+
     def test_wait_for_already_exited_process_returns(self):
         with patch.object(updater.os, "kill", side_effect=ProcessLookupError):
             updater.wait_for_process(99999999, timeout=0.1)
@@ -451,6 +459,169 @@ class UpdaterHelperTests(unittest.TestCase):
                 zf.writestr(link, "x" * (updater.MAX_UPDATE_SYMLINK_BYTES + 1))
             with self.assertRaisesRegex(RuntimeError, "oversized symbolic link"):
                 updater.safe_extract_zip(archive, root / "extract")
+
+
+    def _make_macos_update_fixture(self, root):
+        installed = root / "SCAFA_Workforce.app"
+        old_executable = installed / "Contents" / "MacOS" / "SCAFA_Workforce"
+        old_executable.parent.mkdir(parents=True)
+        old_executable.write_text("old application")
+        source = root / "package" / "SCAFA_Workforce.app"
+        new_executable = source / "Contents" / "MacOS" / "SCAFA_Workforce"
+        new_executable.parent.mkdir(parents=True)
+        new_executable.write_text("new application")
+        archive = root / "update.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.write(new_executable, new_executable.relative_to(source.parent))
+        return installed, archive, old_executable
+
+    def test_macos_update_stops_and_restarts_only_the_previously_loaded_monitor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed, archive, _old_executable = self._make_macos_update_fixture(root)
+            plist = root / "pk.scafa.workforce.monitor.plist"
+            plist.write_text("launch agent")
+            with patch.object(updater, "stop_macos_monitor", return_value=plist) as stop, \
+                 patch.object(updater, "start_macos_monitor") as start, \
+                 patch.object(updater.subprocess, "run", return_value=unittest.mock.Mock(returncode=0)) as launch:
+                updater.apply_macos(archive, installed, user_uid=501)
+            stop.assert_called_once_with(501)
+            start.assert_called_once_with(plist, 501)
+            launch.assert_called_once()
+            self.assertEqual(
+                (installed / "Contents" / "MacOS" / "SCAFA_Workforce").read_text(),
+                "new application",
+            )
+            self.assertFalse(installed.with_name("SCAFA_Workforce.app.previous").exists())
+
+    def test_macos_update_does_not_start_a_previously_unloaded_monitor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed, archive, _old_executable = self._make_macos_update_fixture(root)
+            with patch.object(updater, "start_macos_monitor") as start, \
+                 patch.object(updater.subprocess, "run", return_value=unittest.mock.Mock(returncode=0)):
+                updater.apply_macos(archive, installed, user_uid=501)
+            start.assert_not_called()
+
+    def test_macos_monitor_restart_failure_rolls_back_the_application(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed, archive, old_executable = self._make_macos_update_fixture(root)
+            plist = root / "pk.scafa.workforce.monitor.plist"
+            plist.write_text("launch agent")
+            with patch.object(
+                updater, "stop_macos_monitor", side_effect=[plist, None]
+            ) as stop, patch.object(
+                updater, "start_macos_monitor",
+                side_effect=[RuntimeError("monitor bootstrap failed"), None],
+            ) as start, patch.object(
+                updater.subprocess, "run",
+                return_value=unittest.mock.Mock(returncode=0),
+            ) as launch:
+                with self.assertRaisesRegex(RuntimeError, "monitor bootstrap failed"):
+                    updater.apply_macos(archive, installed, user_uid=501)
+            self.assertEqual(old_executable.read_text(), "old application")
+            self.assertFalse(installed.with_name("SCAFA_Workforce.app.previous").exists())
+            self.assertEqual(stop.call_count, 2)
+            self.assertEqual(start.call_count, 2)
+            launch.assert_not_called()
+
+    def test_macos_update_aborts_before_replacement_when_monitor_cannot_be_stopped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed, archive, old_executable = self._make_macos_update_fixture(root)
+            with patch.object(
+                updater, "stop_macos_monitor",
+                side_effect=RuntimeError("could not unload LaunchAgent"),
+            ), patch.object(updater.subprocess, "run") as launch:
+                with self.assertRaisesRegex(RuntimeError, "could not unload LaunchAgent"):
+                    updater.apply_macos(archive, installed, user_uid=501)
+            self.assertEqual(old_executable.read_text(), "old application")
+            self.assertFalse(installed.with_name("SCAFA_Workforce.app.previous").exists())
+            launch.assert_not_called()
+
+
+class MacOSLaunchAgentTests(unittest.TestCase):
+    def setUp(self):
+        self.platform_patch = patch.object(updater.sys, "platform", "darwin")
+        self.platform_patch.start()
+        self.addCleanup(self.platform_patch.stop)
+
+    def _agent_fixture(self, root):
+        plist = root / "pk.scafa.workforce.monitor.plist"
+        plist.write_text("launch agent")
+        metadata = plist.stat()
+        uid = getattr(metadata, "st_uid", 501)
+        return uid, plist
+
+    def _result(self, code=0, stdout="", stderr=""):
+        return unittest.mock.Mock(returncode=code, stdout=stdout, stderr=stderr)
+
+    def test_stop_returns_none_when_no_gui_session_or_agent_is_configured(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plist = Path(tmp) / "missing.plist"
+            with patch.object(updater, "_macos_user_context", return_value=(501, plist)), \
+                 patch.object(
+                     updater.subprocess, "run",
+                     return_value=self._result(1, stderr="Could not find domain specified."),
+                 ) as run:
+                self.assertIsNone(updater.stop_macos_monitor(501))
+            run.assert_called_once_with(
+                ["/bin/launchctl", "print", "gui/501"],
+                capture_output=True, text=True, check=False, timeout=30,
+            )
+
+    def test_stop_unloads_and_confirms_a_loaded_launch_agent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            uid, plist = self._agent_fixture(Path(tmp))
+            service = f"gui/{uid}/{updater.MACOS_MONITOR_LABEL}"
+            responses = [
+                self._result(),
+                self._result(),
+                self._result(),
+                self._result(1, stderr='Could not find service "pk.scafa.workforce.monitor"'),
+            ]
+            with patch.object(updater, "_macos_user_context", return_value=(uid, plist)), \
+                 patch.object(updater.subprocess, "run", side_effect=responses) as run:
+                self.assertEqual(updater.stop_macos_monitor(uid), plist)
+            self.assertEqual(run.call_count, 4)
+            self.assertEqual(run.call_args_list[2].args[0], ["/bin/launchctl", "bootout", service])
+
+    def test_stop_fails_closed_if_launch_agent_cannot_be_unloaded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            uid, plist = self._agent_fixture(Path(tmp))
+            responses = [self._result(), self._result(), self._result(1, stderr="Operation not permitted")]
+            with patch.object(updater, "_macos_user_context", return_value=(uid, plist)), \
+                 patch.object(updater.subprocess, "run", side_effect=responses):
+                with self.assertRaisesRegex(RuntimeError, "Could not stop"):
+                    updater.stop_macos_monitor(uid)
+
+    def test_start_bootstraps_original_users_agent_and_verifies_loaded_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            uid, plist = self._agent_fixture(Path(tmp))
+            domain = f"gui/{uid}"
+            service = f"{domain}/{updater.MACOS_MONITOR_LABEL}"
+            responses = [self._result(), self._result(), self._result()]
+            with patch.object(updater, "_macos_user_context", return_value=(uid, plist)), \
+                 patch.object(updater.subprocess, "run", side_effect=responses) as run:
+                updater.start_macos_monitor(plist, uid)
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual(
+                run.call_args_list[1].args[0],
+                ["/bin/launchctl", "bootstrap", domain, str(plist)],
+            )
+            self.assertEqual(run.call_args_list[2].args[0], ["/bin/launchctl", "print", service])
+
+    def test_loaded_agent_without_its_plist_blocks_the_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plist = Path(tmp) / "missing.plist"
+            with patch.object(updater, "_macos_user_context", return_value=(501, plist)), \
+                 patch.object(
+                     updater.subprocess, "run",
+                     side_effect=[self._result(), self._result()],
+                 ):
+                with self.assertRaisesRegex(RuntimeError, "plist is missing"):
+                    updater.stop_macos_monitor(501)
 
 
 if __name__=="__main__":
