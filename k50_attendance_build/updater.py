@@ -16,6 +16,7 @@ from pathlib import Path
 MAX_UPDATE_ARCHIVE_BYTES = 512 * 1024 * 1024
 MAX_UPDATE_FILE_BYTES = 512 * 1024 * 1024
 MAX_UPDATE_TOTAL_BYTES = 1024 * 1024 * 1024
+MAX_UPDATE_SYMLINK_BYTES = 4096
 MAX_UPDATE_FILES = 10000
 
 
@@ -116,8 +117,16 @@ def safe_extract_zip(archive, destination):
                 raise RuntimeError("The update archive attempts to write outside its extraction folder.")
             mode=(member.external_attr >> 16) & 0xFFFF
             if stat.S_IFMT(mode)==stat.S_IFLNK:
+                if member.file_size > MAX_UPDATE_SYMLINK_BYTES:
+                    raise RuntimeError("The update archive contains an oversized symbolic link.")
                 try:
-                    link_target=zf.read(member).decode("utf-8")
+                    with zf.open(member) as link_stream:
+                        link_data = link_stream.read(MAX_UPDATE_SYMLINK_BYTES + 1)
+                        if len(link_data) > MAX_UPDATE_SYMLINK_BYTES or link_stream.read(1):
+                            raise RuntimeError("The update archive contains an oversized symbolic link.")
+                    link_target=link_data.decode("utf-8")
+                except RuntimeError:
+                    raise
                 except Exception as exc:
                     raise RuntimeError("The update archive contains an invalid symbolic link.") from exc
                 if not link_target or os.path.isabs(link_target):

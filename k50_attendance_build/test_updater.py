@@ -368,5 +368,18 @@ class UpdaterHelperTests(unittest.TestCase):
             self.assertFalse(backup.exists())
 
 
+    def test_zip_extraction_rejects_oversized_symbolic_link_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "oversized-symlink.zip"
+            link = zipfile.ZipInfo("SCAFA_Workforce.app/Contents/Resources/link")
+            link.create_system = 3
+            link.external_attr = (stat.S_IFLNK | 0o777) << 16
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr(link, "x" * (updater.MAX_UPDATE_SYMLINK_BYTES + 1))
+            with self.assertRaisesRegex(RuntimeError, "oversized symbolic link"):
+                updater.safe_extract_zip(archive, root / "extract")
+
+
 if __name__=="__main__":
     unittest.main()
