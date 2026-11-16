@@ -72,10 +72,16 @@ def valid_device_records(records):
 def load_state(device_key):
     try:
         state = json.loads(STATE.read_text(encoding="utf-8"))
-        if state.get("device") == device_key and isinstance(state.get("seen"), list):
+        # Valid JSON can still have the wrong root type (for example, a list or
+        # null). Treat an unusable state document as a fresh baseline instead of
+        # letting AttributeError abort every monitor poll.
+        if not isinstance(state, dict):
+            return None
+        seen = state.get("seen")
+        if state.get("device") == device_key and isinstance(seen, list):
             return {
                 tuple(str(part) for part in item)
-                for item in state["seen"]
+                for item in seen
                 if isinstance(item, (list, tuple)) and len(item) == 3
             }
     except (OSError, ValueError, TypeError):
