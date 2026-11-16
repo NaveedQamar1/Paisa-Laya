@@ -124,9 +124,9 @@ class ReportExportTests(unittest.TestCase):
 
         rows = [
             ("103", "2026-11-11 09:45:00", "0"),
-            ("103", "2026-11-11 18:00:00", "1"),
+            ("103", "2026-11-11 20:00:00", "1"),
             ("103", "2026-11-12 09:45:00", "0"),
-            ("103", "2026-11-12 18:00:00", "1"),
+            ("103", "2026-11-12 20:00:00", "1"),
             ("103", "2026-11-13 09:45:00", "0"),
         ]
         destination = self.root / "employment-interval.xlsx"
@@ -134,8 +134,8 @@ class ReportExportTests(unittest.TestCase):
         ctx.start_date = SimpleNamespace(get=lambda: "2026-11-09")
         ctx.end_date = SimpleNamespace(get=lambda: "2026-11-13")
 
-        with patch.object(app.filedialog, "asksaveasfilename", return_value=str(destination)), \\
-             patch.object(app.messagebox, "showinfo") as showinfo, \\
+        with patch.object(app.filedialog, "asksaveasfilename", return_value=str(destination)), \
+             patch.object(app.messagebox, "showinfo") as showinfo, \
              patch.object(app.messagebox, "showerror") as showerror:
             app.App.export_excel(ctx)
 
