@@ -85,7 +85,7 @@ class DashboardRegressionTests(unittest.TestCase):
         )
         rows = [
             ("103", "2026-11-09 09:45:00", "0"),
-            ("103", "2026-11-09 18:00:00", "1"),
+            ("103", "2026-11-09 20:00:00", "1"),
         ]
 
         app.App._update_dashboard(ctx, rows)
