@@ -1,6 +1,7 @@
 import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, subprocess, sys, urllib.request, webbrowser, ssl
 import tempfile
 import certifi
+from database_lock import database_maintenance_lock
 from employee_history import ensure_device_employee_status_history, get_device_user_id, normalize_device_user_id
 from html import escape
 from datetime import datetime, date, timedelta
@@ -2205,12 +2206,16 @@ class App(tk.Tk):
                     "Restoring replaces the current attendance data and settings. "
                     "A safety backup of the current database will be created first. Continue?"):
                     return
-                safety=BASE / f"Pre_Restore_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-                # If the atomic pre-restore snapshot fails, abort before replacing live data.
-                write_database_backup(DB, safety)
-                restore_database_snapshot(staged, DB)
+                # Hold the same cross-process lock as the attendance monitor from
+                # the safety snapshot through replacement and schema migration. This
+                # prevents a monitor commit from landing between backup and restore.
+                with database_maintenance_lock(DB, timeout=300):
+                    safety=BASE / f"Pre_Restore_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+                    # If the atomic pre-restore snapshot fails, abort before replacing live data.
+                    write_database_backup(DB, safety)
+                    restore_database_snapshot(staged, DB)
+                    init_db()
             self._names_cache=None
-            init_db()
             self.refresh()
             messagebox.showinfo("Restore complete",f"Database restored successfully.\nSafety backup: {safety}")
             self.status.set("Database restored • current database safety backup retained")
