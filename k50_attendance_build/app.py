@@ -1970,7 +1970,7 @@ class App(tk.Tk):
             messagebox.showerror("Backup failed",f"Could not back up the database:\n{e}")
 
     def restore_database(self):
-        """Validate a backup, preserve the current database, then restore safely."""
+        """Validate an immutable SQLite snapshot before replacing the live database."""
         path=filedialog.askopenfilename(
             title="Select SCAFA Workforce database backup",
             filetypes=[("SQLite database","*.db *.sqlite *.sqlite3"),("All files","*.*")])
@@ -1980,19 +1980,33 @@ class App(tk.Tk):
             if paths_refer_to_same_file(path, DB):
                 messagebox.showerror("Invalid backup","Choose a backup file, not the database currently in use.")
                 return
-            with sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro",uri=True) as check:
-                validate_attendance_backup(check)
-            if not messagebox.askyesno(
-                "Confirm database restore",
-                "Restoring replaces the current attendance data and settings. "
-                "A safety backup of the current database will be created first. Continue?"):
-                return
-            safety=BASE / f"Pre_Restore_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-            # Reuse the validated, atomic snapshot writer for the safety copy.
-            # If this fails, abort before replacing the live attendance database.
-            write_database_backup(DB, safety)
-            with sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro",uri=True) as source, sqlite3.connect(DB) as target:
-                source.backup(target)
+            # Stage the selected file once. Validation and restoration both use this
+            # private snapshot, so a changed/replaced source path cannot bypass checks.
+            with tempfile.TemporaryDirectory(prefix="scafa-restore-", dir=str(BASE)) as staging_dir:
+                staged=Path(staging_dir) / "validated-restore.db"
+                write_database_backup(path, staged)
+                check=sqlite3.connect(staged.as_uri() + "?mode=ro", uri=True)
+                try:
+                    validate_attendance_backup(check)
+                finally:
+                    check.close()
+                if not messagebox.askyesno(
+                    "Confirm database restore",
+                    "Restoring replaces the current attendance data and settings. "
+                    "A safety backup of the current database will be created first. Continue?"):
+                    return
+                safety=BASE / f"Pre_Restore_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+                # If the atomic pre-restore snapshot fails, abort before replacing live data.
+                write_database_backup(DB, safety)
+                source=sqlite3.connect(staged.as_uri() + "?mode=ro", uri=True)
+                try:
+                    target=sqlite3.connect(DB)
+                    try:
+                        source.backup(target)
+                    finally:
+                        target.close()
+                finally:
+                    source.close()
             self._names_cache=None
             init_db()
             self.refresh()

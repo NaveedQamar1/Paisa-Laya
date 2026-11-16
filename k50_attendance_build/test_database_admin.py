@@ -294,6 +294,54 @@ class DatabaseAdministrationTests(unittest.TestCase):
         showinfo.assert_called_once()
         showerror.assert_not_called()
 
+    def test_restore_uses_the_validated_snapshot_if_selected_file_changes_after_confirmation(self):
+        self.add_current_record("old", "Old Staff", "2026-11-14 09:00:00")
+        backup_path = self.root / "restore-source.db"
+        replacement_path = self.root / "replacement.db"
+
+        def create_backup(path, user_id, name, stamp):
+            with sqlite3.connect(path) as backup:
+                backup.execute(
+                    "CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')"
+                )
+                backup.execute(
+                    "CREATE TABLE punches(user_id TEXT NOT NULL, punch_time TEXT NOT NULL, status TEXT DEFAULT '', UNIQUE(user_id,punch_time,status))"
+                )
+                backup.execute("INSERT INTO staff(user_id,name) VALUES(?,?)", (user_id, name))
+                backup.execute(
+                    "INSERT INTO punches(user_id,punch_time,status) VALUES(?,?,?)",
+                    (user_id, stamp, ""),
+                )
+
+        create_backup(backup_path, "new", "Original Backup", "2026-11-15 10:00:00")
+        create_backup(replacement_path, "injected", "Replacement File", "2026-11-16 10:00:00")
+
+        def replace_selected_file_after_validation(*_args, **_kwargs):
+            os.replace(replacement_path, backup_path)
+            return True
+
+        with (
+            patch.object(app.filedialog, "askopenfilename", return_value=str(backup_path)),
+            patch.object(app.messagebox, "askyesno", side_effect=replace_selected_file_after_validation),
+            patch.object(app.messagebox, "showinfo") as showinfo,
+            patch.object(app.messagebox, "showerror") as showerror,
+        ):
+            app.App.restore_database(self.ctx)
+
+        with sqlite3.connect(app.DB) as restored:
+            self.assertEqual(
+                restored.execute("SELECT user_id,name FROM staff").fetchall(),
+                [("new", "Original Backup")],
+            )
+            self.assertEqual(
+                restored.execute("SELECT user_id,punch_time,status FROM punches").fetchall(),
+                [("new", "2026-11-15 10:00:00", "")],
+            )
+        self.assertEqual(list(self.root.glob("scafa-restore-*")), [])
+        self.assertEqual(list(self.root.glob("Pre_Restore_Backup_*.db"))[0].exists(), True)
+        showinfo.assert_called_once()
+        showerror.assert_not_called()
+
     def test_restore_rejects_database_without_required_tables(self):
         self.add_current_record("101", "Keep This Staff", "2026-11-15 09:00:00")
         invalid_path = self.root / "not-an-attendance-backup.db"
