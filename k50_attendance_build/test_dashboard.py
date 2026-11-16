@@ -95,7 +95,9 @@ class DashboardRegressionTests(unittest.TestCase):
             values_by_employee["New Device Hire"],
             ("New Device Hire", 1, 1, 0, 0, 0, 1, "100.0%", "09:45"),
         )
-        self.assertEqual(ctx.card_values[0].text, "100.0%")
+        # All-staff cards also include Ayesha's active scheduled day with no punches.
+        # The selected employee row remains 100%; the combined rate is 1/2.
+        self.assertEqual(ctx.card_values[0].text, "50.0%")
 
     def test_dashboard_excludes_inactive_employee_days_and_keeps_latest_punch(self):
         ctx = SimpleNamespace(
