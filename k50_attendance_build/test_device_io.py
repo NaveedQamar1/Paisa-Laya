@@ -246,6 +246,60 @@ class DeviceIOTests(unittest.TestCase):
 
 
 
+
+    def test_fetch_prevents_overlapping_sync_workers(self):
+        ctx = SimpleNamespace(
+            ip=SimpleNamespace(get=lambda: "192.168.1.50"),
+            port=SimpleNamespace(get=lambda: "4370"),
+            key=SimpleNamespace(get=lambda: "0"),
+            status=SimpleNamespace(set=Mock()),
+            _fetch_in_progress=False,
+        )
+
+        with patch.object(app.threading, "Thread") as worker, \
+             patch.object(app.messagebox, "showwarning") as showwarning:
+            app.App.fetch(ctx)
+            self.assertTrue(ctx._fetch_in_progress)
+            app.App.fetch(ctx)
+
+        worker.assert_called_once()
+        worker.return_value.start.assert_called_once()
+        showwarning.assert_called_once_with(
+            "Attendance sync already running",
+            "An attendance sync is already in progress. Wait for it to finish before starting another.",
+        )
+
+    def test_fetch_completion_and_error_callbacks_clear_in_progress_guard(self):
+        ctx = SimpleNamespace(
+            _fetch_in_progress=True,
+            refresh=Mock(),
+            status=SimpleNamespace(set=Mock()),
+        )
+        with patch.object(app.messagebox, "showinfo"):
+            app.App._fetch_done(ctx, 0, 0, 0)
+        self.assertFalse(ctx._fetch_in_progress)
+
+        ctx._fetch_in_progress=True
+        with patch.object(app.messagebox, "showerror"):
+            app.App._fetch_error(ctx, "simulated connection failure")
+        self.assertFalse(ctx._fetch_in_progress)
+
+    def test_fetch_thread_start_failure_releases_in_progress_guard(self):
+        ctx = SimpleNamespace(
+            ip=SimpleNamespace(get=lambda: "192.168.1.50"),
+            port=SimpleNamespace(get=lambda: "4370"),
+            key=SimpleNamespace(get=lambda: "0"),
+            status=SimpleNamespace(set=Mock()),
+            _fetch_in_progress=False,
+        )
+        with patch.object(app.threading, "Thread", side_effect=RuntimeError("thread unavailable")), \
+             patch.object(app.messagebox, "showerror") as showerror:
+            app.App.fetch(ctx)
+
+        self.assertFalse(ctx._fetch_in_progress)
+        self.assertEqual(ctx.status.set.call_args.args[0], "Could not start attendance sync.")
+        showerror.assert_called_once_with("Could not start attendance sync", "thread unavailable")
+
     def test_fetch_worker_reenables_and_disconnects_device_after_read_failures(self):
         for failure_stage in ("get_users", "get_attendance"):
             with self.subTest(failure_stage=failure_stage):

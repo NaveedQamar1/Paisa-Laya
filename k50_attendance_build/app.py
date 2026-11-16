@@ -1808,6 +1808,12 @@ class App(tk.Tk):
         messagebox.showerror("Discovery failed",msg)
 
     def fetch(self):
+        if getattr(self, "_fetch_in_progress", False):
+            messagebox.showwarning(
+                "Attendance sync already running",
+                "An attendance sync is already in progress. Wait for it to finish before starting another.",
+            )
+            return
         ip=self.ip.get().strip()
         try:
             parsed_ip=ipaddress.ip_address(ip)
@@ -1821,8 +1827,14 @@ class App(tk.Tk):
         if not 1 <= port <= 65535:
             messagebox.showerror("Invalid settings","Port must be between 1 and 65535.")
             return
+        self._fetch_in_progress=True
         self.status.set("Connecting to device…")
-        threading.Thread(target=self._fetch_worker,args=(ip,port,key),daemon=True).start()
+        try:
+            threading.Thread(target=self._fetch_worker,args=(ip,port,key),daemon=True).start()
+        except Exception as exc:
+            self._fetch_in_progress=False
+            self.status.set("Could not start attendance sync.")
+            messagebox.showerror("Could not start attendance sync",str(exc))
 
     def _fetch_worker(self,ip,port,key):
         conn=None
@@ -1867,6 +1879,7 @@ class App(tk.Tk):
             self.after(0,lambda t=total,i=inserted,s=saved_users:self._fetch_done(t,i,s))
 
     def _fetch_done(self,total,inserted,saved_users=0,device_warning=None):
+        self._fetch_in_progress=False
         self.refresh()
         summary=f"Staff names fetched: {saved_users}\nAttendance records read: {total}\nNew attendance records saved: {inserted}"
         if device_warning:
@@ -1880,6 +1893,7 @@ class App(tk.Tk):
             messagebox.showinfo("Sync complete",summary)
 
     def _fetch_error(self,msg,device_warning=None):
+        self._fetch_in_progress=False
         if device_warning:
             self.status.set("Device connection failed; attendance device needs attention.")
             detail=f"\n\nDevice cleanup warning: {device_warning}\n\nCheck the device before the next fetch."
