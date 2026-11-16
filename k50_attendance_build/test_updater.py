@@ -22,11 +22,79 @@ class UpdaterHelperTests(unittest.TestCase):
             installer.write_text("installer")
             executable=root/"SCAFA_Workforce.exe"
             executable.write_text("application")
-            with patch.object(updater.subprocess,"run",return_value=unittest.mock.Mock(returncode=0)) as run, \
-                 patch.object(updater.subprocess,"Popen") as launch:
+            with patch.object(
+                updater.subprocess,
+                "run",
+                side_effect=[
+                    unittest.mock.Mock(returncode=0, stdout="NOT_RUNNING\n", stderr=""),
+                    unittest.mock.Mock(returncode=0),
+                ],
+            ) as run, patch.object(updater.subprocess,"Popen") as launch:
                 updater.apply_windows(installer,root)
-            run.assert_called_once()
+            self.assertEqual(run.call_count, 2)
+            self.assertIn("Get-ScheduledTask", run.call_args_list[0].args[0][-1])
+            self.assertEqual(run.call_args_list[1].args[0][0], str(installer))
             launch.assert_called_once_with([str(executable)],cwd=str(root))
+
+    def test_windows_update_stops_and_restarts_a_running_monitor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            installer=root/"setup.exe"
+            installer.write_text("installer")
+            executable=root/"SCAFA_Workforce.exe"
+            executable.write_text("application")
+            with patch.object(
+                updater.subprocess,
+                "run",
+                side_effect=[
+                    unittest.mock.Mock(returncode=0, stdout="RUNNING\n", stderr=""),
+                    unittest.mock.Mock(returncode=0),
+                    unittest.mock.Mock(returncode=0, stdout="STARTED\n", stderr=""),
+                ],
+            ) as run, patch.object(updater.subprocess,"Popen") as launch:
+                updater.apply_windows(installer,root)
+            self.assertEqual(run.call_count, 3)
+            self.assertIn("Stop-ScheduledTask", run.call_args_list[0].args[0][-1])
+            self.assertEqual(run.call_args_list[1].args[0][0], str(installer))
+            self.assertIn("Start-ScheduledTask", run.call_args_list[2].args[0][-1])
+            launch.assert_called_once_with([str(executable)],cwd=str(root))
+
+    def test_windows_update_restarts_monitor_when_installer_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            installer=root/"setup.exe"
+            installer.write_text("installer")
+            with patch.object(
+                updater.subprocess,
+                "run",
+                side_effect=[
+                    unittest.mock.Mock(returncode=0, stdout="RUNNING\n", stderr=""),
+                    unittest.mock.Mock(returncode=5),
+                    unittest.mock.Mock(returncode=0, stdout="STARTED\n", stderr=""),
+                ],
+            ) as run, patch.object(updater.subprocess,"Popen") as launch:
+                with self.assertRaisesRegex(RuntimeError, "exit code 5"):
+                    updater.apply_windows(installer,root)
+            self.assertEqual(run.call_count, 3)
+            self.assertIn("Start-ScheduledTask", run.call_args_list[2].args[0][-1])
+            launch.assert_not_called()
+
+    def test_windows_update_aborts_if_running_monitor_cannot_be_stopped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            installer=root/"setup.exe"
+            installer.write_text("installer")
+            with patch.object(
+                updater.subprocess,
+                "run",
+                return_value=unittest.mock.Mock(
+                    returncode=1, stdout="", stderr="Access is denied."
+                ),
+            ) as run, patch.object(updater.subprocess,"Popen") as launch:
+                with self.assertRaisesRegex(RuntimeError, "Could not stop"):
+                    updater.apply_windows(installer,root)
+            run.assert_called_once()
+            launch.assert_not_called()
 
     def test_zip_extraction_rejects_parent_directory_paths(self):
         import zipfile
