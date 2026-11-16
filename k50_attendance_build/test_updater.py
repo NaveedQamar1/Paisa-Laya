@@ -222,7 +222,7 @@ class UpdaterHelperTests(unittest.TestCase):
             checksum_file = root / "checksums.txt"
             package.write_bytes(b"verified SCAFA update")
             digest = hashlib.sha256(package.read_bytes()).hexdigest()
-            checksum_file.write_text(f"{digest}  {package.name}\\n", encoding="utf-8")
+            checksum_file.write_text(f"{digest}  {package.name}\n", encoding="utf-8")
             self.assertEqual(
                 app.verify_update_asset(package, checksum_file, package.name, f"sha256:{digest}"),
                 digest,
@@ -236,7 +236,7 @@ class UpdaterHelperTests(unittest.TestCase):
             checksum_file = root / "checksums.txt"
             package.write_bytes(b"verified SCAFA update")
             digest = hashlib.sha256(package.read_bytes()).hexdigest()
-            checksum_file.write_text(f"{'0' * 64}  {package.name}\\n", encoding="utf-8")
+            checksum_file.write_text(f"{'0' * 64}  {package.name}\n", encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "manifest does not match GitHub"):
                 app.verify_update_asset(package, checksum_file, package.name, f"sha256:{digest}")
 
@@ -248,7 +248,7 @@ class UpdaterHelperTests(unittest.TestCase):
             checksum_file = root / "checksums.txt"
             package.write_bytes(b"modified update")
             expected = hashlib.sha256(b"original update").hexdigest()
-            checksum_file.write_text(f"{expected}  {package.name}\\n", encoding="utf-8")
+            checksum_file.write_text(f"{expected}  {package.name}\n", encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "failed SHA-256 verification"):
                 app.verify_update_asset(package, checksum_file, package.name, f"sha256:{expected}")
 
@@ -260,7 +260,7 @@ class UpdaterHelperTests(unittest.TestCase):
             checksum_file = root / "checksums.txt"
             package.write_bytes(b"verified SCAFA update")
             digest = hashlib.sha256(package.read_bytes()).hexdigest()
-            checksum_file.write_text(f"{digest}  {package.name}\\n", encoding="utf-8")
+            checksum_file.write_text(f"{digest}  {package.name}\n", encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "valid SHA-256 digest"):
                 app.verify_update_asset(package, checksum_file, package.name, f"sha512:{digest}")
 
@@ -272,7 +272,7 @@ class UpdaterHelperTests(unittest.TestCase):
             checksum_file = root / "checksums.txt"
             package.write_bytes(b"legacy release update")
             digest = hashlib.sha256(package.read_bytes()).hexdigest()
-            checksum_file.write_text(f"{digest}  {package.name}\\n", encoding="utf-8")
+            checksum_file.write_text(f"{digest}  {package.name}\n", encoding="utf-8")
             self.assertEqual(
                 app.verify_update_asset(package, checksum_file, package.name),
                 digest,
