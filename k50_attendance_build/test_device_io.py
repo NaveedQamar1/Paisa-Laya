@@ -125,11 +125,18 @@ class DeviceIOTests(unittest.TestCase):
         users = [
             SimpleNamespace(user_id=0, uid=999, name="Zero ID"),
             SimpleNamespace(user_id=None, uid=7, name="Fallback ID"),
+            SimpleNamespace(user_id="   ", uid=8, name="Whitespace Primary"),
         ]
         punches = [
             SimpleNamespace(
                 user_id=0,
                 timestamp=datetime(2026, 11, 15, 8, 0, 0),
+                status=0,
+            ),
+            SimpleNamespace(
+                user_id="   ",
+                uid=8,
+                timestamp=datetime(2026, 11, 15, 8, 30, 0),
                 status=0,
             ),
         ]
@@ -170,7 +177,7 @@ class DeviceIOTests(unittest.TestCase):
         with patch.dict(sys.modules, {"zk": fake_module}):
             app.App._fetch_worker(ctx, "192.168.1.50", 4370, 0)
 
-        self.assertEqual(completed, [(1, 1, 2)])
+        self.assertEqual(completed, [(2, 2, 3)])
         self.assertEqual(errors, [])
         with sqlite3.connect(app.DB) as db:
             staff = db.execute(
@@ -183,8 +190,14 @@ class DeviceIOTests(unittest.TestCase):
                 """SELECT active,effective_date,source FROM staff_status_history
                    WHERE user_id='0' ORDER BY effective_date,id"""
             ).fetchall()
-        self.assertEqual(staff, [("0", "Zero ID"), ("7", "Fallback ID")])
-        self.assertEqual(punch_rows, [("0", "2026-11-15 08:00:00", "0")])
+        self.assertEqual(staff, [("0", "Zero ID"), ("7", "Fallback ID"), ("8", "Whitespace Primary")])
+        self.assertEqual(
+            punch_rows,
+            [
+                ("0", "2026-11-15 08:00:00", "0"),
+                ("8", "2026-11-15 08:30:00", "0"),
+            ],
+        )
         self.assertEqual(
             history,
             [

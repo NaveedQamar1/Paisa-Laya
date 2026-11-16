@@ -8,11 +8,11 @@ def normalize_device_user_id(value):
 
 
 def get_device_user_id(user):
-    """Read the primary device ID, falling back only when it is actually absent."""
-    value = getattr(user, "user_id", None)
-    if value is None or value == "":
-        value = getattr(user, "uid", "")
-    return normalize_device_user_id(value)
+    """Read the primary device ID, falling back when it is absent or blank."""
+    uid = normalize_device_user_id(getattr(user, "user_id", None))
+    if not uid:
+        uid = normalize_device_user_id(getattr(user, "uid", ""))
+    return uid
 
 
 def ensure_device_employee_status_history(db, user_id, first_punch_date=None, effective_today=None):

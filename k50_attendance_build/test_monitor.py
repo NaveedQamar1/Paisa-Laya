@@ -209,6 +209,15 @@ class MonitorNotificationTests(unittest.TestCase):
             )),
             ("2026-11-16 09:00:00", "0", "0"),
         )
+        self.assertEqual(
+            monitor.record_key(SimpleNamespace(
+                user_id="   ",
+                uid=8,
+                timestamp="2026-11-16T09:30:00",
+                status=0,
+            )),
+            ("2026-11-16 09:30:00", "8", "0"),
+        )
 
     def test_valid_device_records_filters_bad_rows_and_sorts_valid_punches(self):
         valid_late = SimpleNamespace(
