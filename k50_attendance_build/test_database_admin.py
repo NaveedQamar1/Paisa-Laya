@@ -684,16 +684,17 @@ monitor.sync_database(
     def test_application_instance_lock_prevents_second_gui_process_but_allows_monitor_lock(self):
         ready = self.root / "instance-ready"
         release = self.root / "instance-release"
-        script = (
-            "import sys, time\\n"
-            "from pathlib import Path\\n"
-            "from database_lock import application_instance_lock\\n"
-            "with application_instance_lock(sys.argv[1]):\\n"
-            "    Path(sys.argv[2]).write_text('ready', encoding='utf-8')\\n"
-            "    release = Path(sys.argv[3])\\n"
-            "    while not release.exists():\\n"
-            "        time.sleep(0.01)\\n"
-        )
+        script = """\
+import sys, time
+from pathlib import Path
+from database_lock import application_instance_lock
+
+with application_instance_lock(sys.argv[1]):
+    Path(sys.argv[2]).write_text("ready", encoding="utf-8")
+    release = Path(sys.argv[3])
+    while not release.exists():
+        time.sleep(0.01)
+"""
         module_dir = Path(__file__).resolve().parent
         env = os.environ.copy()
         env["PYTHONPATH"] = os.pathsep.join(
