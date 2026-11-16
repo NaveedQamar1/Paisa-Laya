@@ -2181,7 +2181,7 @@ class App(tk.Tk):
                 skipinitialspace=False
                 if sample.strip():
                     try:
-                        detected=csv.Sniffer().sniff(sample, delimiters=",;\\t|")
+                        detected=csv.Sniffer().sniff(sample, delimiters=",;\t|")
                         delimiter=detected.delimiter
                         skipinitialspace=detected.skipinitialspace
                     except csv.Error:
