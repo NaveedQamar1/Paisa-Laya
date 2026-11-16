@@ -105,6 +105,49 @@ class ReportExportTests(unittest.TestCase):
         self.assertEqual(employees["102"][6].value, 1)
         workbook.close()
 
+    def test_excel_export_keeps_formula_like_employee_data_as_literal_text(self):
+        from openpyxl import load_workbook
+
+        formula_name = '=HYPERLINK("https://example.com","Open")'
+        formula_status = "=1+1"
+        ctx = self.context([
+            ("101", "2026-11-09 09:45:00", formula_status),
+        ])
+        ctx._name = lambda uid: (
+            formula_name if str(uid) == "101" else "Bilal"
+        )
+        destination = self.root / "formula-safe-attendance.xlsx"
+        with patch.object(app.filedialog, "asksaveasfilename", return_value=str(destination)), \\
+             patch.object(app.messagebox, "showinfo") as showinfo, \\
+             patch.object(app.messagebox, "showerror") as showerror:
+            app.App.export_excel(ctx)
+
+        showinfo.assert_called_once()
+        showerror.assert_not_called()
+        workbook = load_workbook(destination, data_only=False)
+        raw = workbook["Raw Punches"]
+        summary = workbook["Attendance Summary"]
+        comparison = workbook["Employee Comparison"]
+        overview = workbook["Overview"]
+
+        self.assertEqual(raw["B2"].value, formula_name)
+        self.assertEqual(raw["B2"].data_type, "s")
+        self.assertEqual(raw["D2"].value, formula_status)
+        self.assertEqual(raw["D2"].data_type, "s")
+        self.assertEqual(summary["B5"].value, formula_name)
+        self.assertEqual(summary["B5"].data_type, "s")
+        self.assertEqual(comparison["A2"].value, formula_name)
+        self.assertEqual(comparison["A2"].data_type, "s")
+        self.assertTrue(overview["B15"].value.startswith(formula_name))
+        self.assertEqual(overview["B15"].data_type, "s")
+        self.assertFalse(any(
+            cell.data_type == "f"
+            for worksheet in workbook.worksheets
+            for row in worksheet.iter_rows()
+            for cell in row
+        ))
+        workbook.close()
+
     def test_excel_comparison_excludes_days_outside_employment_interval(self):
         from openpyxl import load_workbook
 
