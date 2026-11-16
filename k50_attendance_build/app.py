@@ -2371,6 +2371,14 @@ class App(tk.Tk):
             raw.page_setup.orientation="landscape"; raw.page_setup.paperSize=raw.PAPERSIZE_A4
             raw.page_setup.fitToWidth=1; raw.page_setup.fitToHeight=0
             wb.active=0
+            # This workbook stores calculated values rather than worksheet formulas.
+            # openpyxl treats strings beginning with "=" as formulas; restore those cells
+            # to literal text so imported employee/device data cannot execute in Excel.
+            for worksheet in wb.worksheets:
+                for row in worksheet.iter_rows():
+                    for cell in row:
+                        if cell.data_type == "f":
+                            cell.data_type = "s"
             wb.save(path)
             messagebox.showinfo("Excel exported",f"Editable Excel workbook saved to:\n{path}\n\nIncludes daily attendance summary and raw punch records.")
         except Exception as e:
