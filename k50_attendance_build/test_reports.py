@@ -203,6 +203,7 @@ class CSVImportRegressionTests(unittest.TestCase):
             ).fetchall()
         self.assertEqual((inserted, skipped), (2, 0))
         self.assertEqual(rows, [
+            ("0", "2026-11-15 08:00:00", "0"),
             ("101", "2026-11-15 09:00:00", "0"),
             ("102", "2026-11-15 17:30:00", "1"),
         ])
@@ -235,8 +236,9 @@ class CSVImportRegressionTests(unittest.TestCase):
         self.assertEqual(second, (0, 0))
         self.assertEqual(count, 1)
 
-    def test_import_preserves_numeric_zero_status_and_keeps_none_empty(self):
+    def test_import_preserves_numeric_zero_user_and_punch_status(self):
         records = [
+            (0, "2026-11-15 08:00:00", 0),
             ("101", "2026-11-15 09:00:00", 0),
             ("101", "2026-11-15 17:00:00", 1),
             ("102", "2026-11-15 09:00:00", None),
@@ -246,7 +248,7 @@ class CSVImportRegressionTests(unittest.TestCase):
             rows = db.execute(
                 "SELECT user_id,punch_time,status FROM punches ORDER BY user_id,punch_time"
             ).fetchall()
-        self.assertEqual((inserted, skipped), (3, 0))
+        self.assertEqual((inserted, skipped), (4, 0))
         self.assertEqual(rows, [
             ("101", "2026-11-15 09:00:00", "0"),
             ("101", "2026-11-15 17:00:00", "1"),
