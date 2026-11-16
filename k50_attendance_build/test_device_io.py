@@ -459,6 +459,26 @@ class DeviceIOTests(unittest.TestCase):
                 ctx._fetch_done.assert_not_called()
                 with sqlite3.connect(app.DB) as db:
                     self.assertEqual(db.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 0)
+                    if failure_stage == "get_attendance":
+                        today = app.date.today().isoformat()
+                        history = db.execute(
+                            """SELECT active,effective_date,source FROM staff_status_history
+                               WHERE user_id='101' ORDER BY effective_date,id"""
+                        ).fetchall()
+                        self.assertEqual(
+                            history,
+                            [
+                                (0, "0001-01-01", "device-sync-baseline"),
+                                (1, today, "device-sync"),
+                            ],
+                        )
+                        self.assertFalse(app.employee_active_on(db, "101", "0001-01-02"))
+                        self.assertTrue(app.employee_active_on(db, "101", today))
+                    else:
+                        self.assertEqual(
+                            db.execute("SELECT COUNT(*) FROM staff_status_history").fetchone()[0],
+                            0,
+                        )
 
 
 

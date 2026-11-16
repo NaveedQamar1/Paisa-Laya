@@ -1928,12 +1928,17 @@ class App(tk.Tk):
         conn=None
         fetch_error=None
         cleanup_errors=[]
+        synced_ids=set()
         total=inserted=saved_users=0
         try:
             from zk import ZK
             conn=ZK(ip,port=port,timeout=12,password=key,force_udp=False, ommit_ping=False).connect()
             conn.disable_device()
             device_users=conn.get_users()
+            synced_ids = {
+                str(getattr(user, "user_id", None) or getattr(user, "uid", "")).strip()
+                for user in device_users
+            } - {""}
             saved_users=self._store_device_users(device_users)
             rows=conn.get_attendance()
             total=len(rows)
@@ -1942,19 +1947,24 @@ class App(tk.Tk):
                     stamp=row.timestamp.strftime("%Y-%m-%d %H:%M:%S")
                     cur=c.execute("INSERT OR IGNORE INTO punches(user_id,punch_time,status) VALUES(?,?,?)",(str(row.user_id),stamp,str(getattr(row,"status",""))))
                     inserted+=cur.rowcount
-                synced_ids = {
-                    str(getattr(user, "user_id", None) or getattr(user, "uid", "")).strip()
-                    for user in device_users
-                }
-                for uid in synced_ids - {""}:
-                    first_punch = c.execute(
-                        "SELECT MIN(substr(punch_time,1,10)) FROM punches WHERE user_id=?",
-                        (uid,)
-                    ).fetchone()[0]
-                    ensure_device_employee_status_history(c, uid, first_punch)
         except Exception as e:
             fetch_error=str(e)
         finally:
+            # Even when attendance retrieval fails, newly discovered employees need
+            # a dated baseline. Otherwise the dashboard's active-status fallback
+            # can count them as absent before they were first seen.
+            if synced_ids:
+                try:
+                    with sqlite3.connect(DB) as c:
+                        for uid in synced_ids:
+                            first_punch = c.execute(
+                                "SELECT MIN(substr(punch_time,1,10)) FROM punches WHERE user_id=?",
+                                (uid,)
+                            ).fetchone()[0]
+                            ensure_device_employee_status_history(c, uid, first_punch)
+                except Exception as e:
+                    history_error = f"Could not initialize employment history for synced device users: {e}"
+                    fetch_error = f"{fetch_error}; {history_error}" if fetch_error else history_error
             if conn:
                 try:
                     conn.enable_device()
