@@ -1618,17 +1618,21 @@ class App(tk.Tk):
         name=self._staff_names().get(str(uid), "")
         return name if name else f"User {uid}"
 
-    def _store_device_users(self, users):
+    def _store_device_users(self, users, db=None):
+        """Store device names under the restore/sync maintenance lock."""
+        if db is None:
+            with database_maintenance_lock(DB, timeout=300):
+                with sqlite3.connect(DB) as connection:
+                    return self._store_device_users(users, connection)
         saved=0
-        with sqlite3.connect(DB) as c:
-            for user in users:
-                uid=get_device_user_id(user)
-                name=str(getattr(user,"name","") or "").strip()
-                if not uid or not name:
-                    continue
-                c.execute("""INSERT INTO staff(user_id,name) VALUES(?,?)
-                             ON CONFLICT(user_id) DO UPDATE SET name=excluded.name""",(uid,name))
-                saved+=1
+        for user in users:
+            uid=get_device_user_id(user)
+            name=str(getattr(user,"name","") or "").strip()
+            if not uid or not name:
+                continue
+            db.execute("""INSERT INTO staff(user_id,name) VALUES(?,?)
+                         ON CONFLICT(user_id) DO UPDATE SET name=excluded.name""",(uid,name))
+            saved+=1
         self._names_cache=None
         return saved
 
@@ -2025,6 +2029,8 @@ class App(tk.Tk):
         cleanup_errors=[]
         sync_warnings=[]
         synced_ids=set()
+        device_users=[]
+        rows=None
         total=inserted=saved_users=0
         try:
             from zk import ZK
@@ -2032,44 +2038,48 @@ class App(tk.Tk):
             conn.disable_device()
             device_users=conn.get_users()
             synced_ids = {get_device_user_id(user) for user in device_users} - {""}
-            saved_users=self._store_device_users(device_users)
-            rows=conn.get_attendance()
-            total=len(rows)
-            with sqlite3.connect(DB) as c:
-                inserted, skipped = import_punch_rows(
-                    c,
-                    (
-                        (
-                            get_device_user_id(row),
-                            getattr(row, "timestamp", None),
-                            getattr(row, "status", None),
-                        )
-                        for row in rows
-                    ),
-                )
-            if skipped:
-                sync_warnings.append(
-                    f"Skipped {skipped} malformed attendance records "
-                    "(missing device IDs or invalid timestamps)."
-                )
-        except Exception as e:
-            fetch_error=str(e)
-        finally:
-            # Even when attendance retrieval fails, newly discovered employees need
-            # a dated baseline. Otherwise the dashboard's active-status fallback
-            # can count them as absent before they were first seen.
-            if synced_ids:
-                try:
+            try:
+                rows=conn.get_attendance()
+                total=len(rows)
+            except Exception as e:
+                # Save any users already fetched and initialize their dated
+                # baseline even when the device's attendance read fails.
+                fetch_error=str(e)
+
+            # Commit names, punches and employment baselines as one coordinated
+            # database phase. Network I/O stays outside the maintenance lock, so
+            # restore waits only for the actual SQLite transaction.
+            if device_users or rows is not None:
+                with database_maintenance_lock(DB, timeout=300):
                     with sqlite3.connect(DB) as c:
+                        saved_users=self._store_device_users(device_users, c)
+                        skipped=0
+                        if rows is not None:
+                            inserted, skipped = import_punch_rows(
+                                c,
+                                (
+                                    (
+                                        get_device_user_id(row),
+                                        getattr(row, "timestamp", None),
+                                        getattr(row, "status", None),
+                                    )
+                                    for row in rows
+                                ),
+                            )
                         for uid in synced_ids:
                             first_punch = c.execute(
                                 "SELECT MIN(substr(punch_time,1,10)) FROM punches WHERE user_id=?",
                                 (uid,)
                             ).fetchone()[0]
                             ensure_device_employee_status_history(c, uid, first_punch)
-                except Exception as e:
-                    history_error = f"Could not initialize employment history for synced device users: {e}"
-                    fetch_error = f"{fetch_error}; {history_error}" if fetch_error else history_error
+                if skipped:
+                    sync_warnings.append(
+                        f"Skipped {skipped} malformed attendance records "
+                        "(missing device IDs or invalid timestamps)."
+                    )
+        except Exception as e:
+            fetch_error=f"{fetch_error}; {e}" if fetch_error else str(e)
+        finally:
             if conn:
                 try:
                     conn.enable_device()
