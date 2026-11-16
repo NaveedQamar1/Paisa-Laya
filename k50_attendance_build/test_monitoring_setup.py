@@ -130,8 +130,8 @@ class BackgroundMonitorSetupTests(unittest.TestCase):
                  patch.object(app.messagebox, "showwarning") as showwarning, \
                  patch.object(app.messagebox, "showinfo") as showinfo:
                 app.App.configure_background_monitoring(ctx)
+                self.assertTrue(plist.exists())
 
-        self.assertTrue(plist.exists())
         self.assertIn("not confirmed", ctx.status.set.call_args.args[0])
         showwarning.assert_called_once()
         self.assertIn("Operation not permitted.", showwarning.call_args.args[1])

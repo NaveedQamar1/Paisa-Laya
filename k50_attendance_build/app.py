@@ -2177,9 +2177,22 @@ class App(tk.Tk):
         try:
             with open(path,"r",newline="",encoding="utf-8-sig") as f:
                 sample=f.read(4096); f.seek(0)
-                try: dialect=csv.Sniffer().sniff(sample) if sample.strip() else csv.excel
-                except csv.Error: dialect=csv.excel
-                reader=csv.DictReader(f,dialect=dialect)
+                delimiter=","
+                skipinitialspace=False
+                if sample.strip():
+                    try:
+                        detected=csv.Sniffer().sniff(sample, delimiters=",;\\t|")
+                        delimiter=detected.delimiter
+                        skipinitialspace=detected.skipinitialspace
+                    except csv.Error:
+                        pass
+                # Sniffer can mistake formula-protection apostrophes for a quote
+                # character and even infer '=' as a delimiter. Keep the standard
+                # CSV double-quote convention and restrict delimiter detection.
+                reader=csv.DictReader(
+                    f, delimiter=delimiter, quotechar='"', doublequote=True,
+                    skipinitialspace=skipinitialspace
+                )
                 fields={x.strip().lower():x for x in (reader.fieldnames or [])}
                 uidcol=next((fields[x] for x in ("user id","userid","pin","employee id","device user id") if x in fields),None)
                 timecol=next((fields[x] for x in ("date/time","datetime","timestamp","punch time","date time","attendance date & time","attendance date time","time") if x in fields),None)

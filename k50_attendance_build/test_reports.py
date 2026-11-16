@@ -65,12 +65,15 @@ class ReportExportTests(unittest.TestCase):
 
         with destination.open("r", encoding="utf-8-sig", newline="") as handle:
             exported = list(csv.reader(handle))
+        self.assertEqual(exported[0], list(app.CSV_EXPORT_HEADERS))
         self.assertEqual(
-            exported[0],
-            ["Device User ID", "Staff Name", "Attendance date & time", "Punch status"],
+            exported[1],
+            ["101", "Ayesha", "2026-11-09 09:45:00", "0", app.CSV_EXPORT_FORMAT_MARKER],
         )
-        self.assertEqual(exported[1], ["101", "Ayesha", "2026-11-09 09:45:00", "0"])
-        self.assertEqual(exported[2], ["101", "Ayesha", "2026-11-09 18:00:00", "1"])
+        self.assertEqual(
+            exported[2],
+            ["101", "Ayesha", "2026-11-09 18:00:00", "1", app.CSV_EXPORT_FORMAT_MARKER],
+        )
         showinfo.assert_called_once()
 
     def test_excel_export_contains_summary_raw_punches_and_employee_comparison(self):
@@ -174,6 +177,8 @@ class ReportExportTests(unittest.TestCase):
         ]
         destination = self.root / "employment-interval.xlsx"
         ctx = self.context(rows)
+        default_name = ctx._name
+        ctx._name = lambda uid: "New Hire" if str(uid) == "103" else default_name(uid)
         ctx.start_date = SimpleNamespace(get=lambda: "2026-11-09")
         ctx.end_date = SimpleNamespace(get=lambda: "2026-11-13")
 
