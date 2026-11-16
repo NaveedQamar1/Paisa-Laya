@@ -29,7 +29,7 @@ class DeviceIOTests(unittest.TestCase):
 
     def context(self):
         ctx = SimpleNamespace(_names_cache=None)
-        ctx._store_device_users = lambda users: app.App._store_device_users(ctx, users)
+        ctx._store_device_users = lambda users, db=None: app.App._store_device_users(ctx, users, db)
         ctx.after = lambda _delay, callback: callback()
         return ctx
 
@@ -515,9 +515,14 @@ class DeviceIOTests(unittest.TestCase):
             status=SimpleNamespace(set=Mock()),
             _fetch_in_progress=False,
         )
+        # App.fetch is exercised with a lightweight context instead of a Tk App.
+        # Supply its worker explicitly so a missing fixture cannot open a modal
+        # error dialog and hang the headless Windows/macOS CI runner.
+        ctx._fetch_worker = Mock()
 
         with patch.object(app.threading, "Thread") as worker, \
-             patch.object(app.messagebox, "showwarning") as showwarning:
+             patch.object(app.messagebox, "showwarning") as showwarning, \
+             patch.object(app.messagebox, "showerror") as showerror:
             app.App.fetch(ctx)
             self.assertTrue(ctx._fetch_in_progress)
             app.App.fetch(ctx)
@@ -528,6 +533,7 @@ class DeviceIOTests(unittest.TestCase):
             "Attendance sync already running",
             "An attendance sync is already in progress. Wait for it to finish before starting another.",
         )
+        showerror.assert_not_called()
 
     def test_fetch_completion_and_error_callbacks_clear_in_progress_guard(self):
         ctx = SimpleNamespace(
