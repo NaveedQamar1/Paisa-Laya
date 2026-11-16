@@ -75,16 +75,134 @@ def show_error(message):
         pass
 
 
+WINDOWS_MONITOR_TASK_NAME = "SCAFA Workforce Attendance Monitor"
+
+WINDOWS_MONITOR_STOP_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+$taskName = 'SCAFA Workforce Attendance Monitor'
+$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($null -eq $task) {
+    Write-Output 'MISSING'
+    exit 0
+}
+$state = [string]$task.State
+if ($state -ne 'Running') {
+    if ($state -eq 'Disabled') { Write-Output 'DISABLED' }
+    else { Write-Output 'NOT_RUNNING' }
+    exit 0
+}
+Stop-ScheduledTask -InputObject $task -ErrorAction Stop
+$deadline = (Get-Date).AddSeconds(30)
+do {
+    Start-Sleep -Milliseconds 200
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    $state = [string]$task.State
+} while ($state -eq 'Running' -and (Get-Date) -lt $deadline)
+if ($state -eq 'Running') {
+    throw 'The attendance monitor task did not stop within 30 seconds.'
+}
+Write-Output 'RUNNING'
+"""
+
+WINDOWS_MONITOR_START_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+$taskName = 'SCAFA Workforce Attendance Monitor'
+$task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+if ([string]$task.State -eq 'Disabled') {
+    throw 'The attendance monitor task is disabled and was not restarted.'
+}
+Start-ScheduledTask -InputObject $task -ErrorAction Stop
+$deadline = (Get-Date).AddSeconds(30)
+do {
+    Start-Sleep -Milliseconds 200
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    $state = [string]$task.State
+} while ($state -ne 'Running' -and (Get-Date) -lt $deadline)
+if ($state -ne 'Running') {
+    throw 'The attendance monitor task did not restart within 30 seconds.'
+}
+Write-Output 'STARTED'
+"""
+
+
+def _run_windows_monitor_command(script, operation):
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(
+            f"Could not {operation} the Windows attendance monitor"
+            + (f": {detail}" if detail else ".")
+        )
+    output = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+    return output[-1].upper() if output else ""
+
+
+def stop_windows_monitor():
+    """Stop a running scheduled monitor before replacing its executable."""
+    state = _run_windows_monitor_command(
+        WINDOWS_MONITOR_STOP_SCRIPT, "stop"
+    )
+    if state == "RUNNING":
+        return True
+    if state in {"MISSING", "NOT_RUNNING", "DISABLED"}:
+        return False
+    raise RuntimeError(
+        f"Could not confirm the Windows attendance monitor state: {state or 'no response'}."
+    )
+
+
+def start_windows_monitor():
+    """Restart a monitor that was running before an update."""
+    state = _run_windows_monitor_command(
+        WINDOWS_MONITOR_START_SCRIPT, "restart"
+    )
+    if state != "STARTED":
+        raise RuntimeError(
+            f"Could not confirm that the Windows attendance monitor restarted: {state or 'no response'}."
+        )
+
+
 def apply_windows(package,target):
     installer=Path(package)
     if not installer.is_file():
         raise FileNotFoundError("The downloaded Windows installer is missing.")
-    result=subprocess.run([str(installer),"/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CLOSEAPPLICATIONS"],check=False)
-    if result.returncode:
-        raise RuntimeError(f"The Windows installer returned exit code {result.returncode}.")
-    installed_app=Path(target)/"SCAFA_Workforce.exe"
-    if not installed_app.is_file():
-        raise RuntimeError("The installer completed, but SCAFA_Workforce.exe was not found at the expected installation path.")
+
+    # The scheduled monitor is a separate process and is not covered reliably by
+    # closing the GUI application. Stop it before replacing scafa-monitor.exe.
+    monitor_was_running = stop_windows_monitor()
+    try:
+        result=subprocess.run([str(installer),"/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CLOSEAPPLICATIONS"],check=False)
+        if result.returncode:
+            raise RuntimeError(f"The Windows installer returned exit code {result.returncode}.")
+        installed_app=Path(target)/"SCAFA_Workforce.exe"
+        if not installed_app.is_file():
+            raise RuntimeError("The installer completed, but SCAFA_Workforce.exe was not found at the expected installation path.")
+    except Exception as update_error:
+        if monitor_was_running:
+            try:
+                start_windows_monitor()
+            except Exception as restart_error:
+                raise RuntimeError(
+                    f"{update_error} The attendance monitor was running before the update, "
+                    f"but could not be restarted: {restart_error}"
+                ) from update_error
+        raise
+
+    if monitor_was_running:
+        start_windows_monitor()
     subprocess.Popen([str(installed_app)],cwd=str(Path(target)))
 
 
