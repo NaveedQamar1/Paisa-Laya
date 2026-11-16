@@ -90,7 +90,7 @@ jobs:
         run: |
           RELEASE_TAG="${{ github.event.inputs.release_tag }}"
           if [ -z "$RELEASE_TAG" ]; then
-            APP_VERSION="$(sed -n 's/^APP_VERSION = "\\([^"]*\\)"/\\1/p' k50_attendance_build/app.py | head -n 1)"
+            APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
             if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
             RELEASE_TAG="scafa-v$APP_VERSION"
           fi
@@ -167,7 +167,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$RELEASE_TAG" ]; then
-            APP_VERSION="$(sed -n 's/^APP_VERSION = "\\([^"]*\\)"/\\1/p' k50_attendance_build/app.py | head -n 1)"
+            APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
             if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
             RELEASE_TAG="scafa-v$APP_VERSION"
           fi
