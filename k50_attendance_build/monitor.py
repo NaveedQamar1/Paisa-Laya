@@ -193,6 +193,10 @@ def main():
     last_invalid_count = 0
     while True:
         conn = None
+        # Keep the worker alive when its configuration is temporarily unavailable.
+        # Without a default, an early read/parse/key error leaves interval undefined
+        # and the retry sleep raises UnboundLocalError, terminating the monitor.
+        interval = 10
         try:
             cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
             ip = str(cfg["ip"]).strip()
