@@ -2011,7 +2011,7 @@ class App(tk.Tk):
                 reader=csv.DictReader(f,dialect=dialect)
                 fields={x.strip().lower():x for x in (reader.fieldnames or [])}
                 uidcol=next((fields[x] for x in ("user id","userid","pin","employee id","device user id") if x in fields),None)
-                timecol=next((fields[x] for x in ("date/time","datetime","timestamp","punch time","date time","time") if x in fields),None)
+                timecol=next((fields[x] for x in ("date/time","datetime","timestamp","punch time","date time","attendance date & time","attendance date time","time") if x in fields),None)
                 statecol=next((fields[x] for x in ("status","state","punch status") if x in fields),None)
                 if not uidcol or not timecol: raise ValueError("CSV needs User ID/PIN and Date/Time/Timestamp columns.")
                 records=((row.get(uidcol),row.get(timecol),row.get(statecol) if statecol else "") for row in reader)
