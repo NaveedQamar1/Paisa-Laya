@@ -421,7 +421,7 @@ def employee_profile_selection_data(selected_user_id, row):
 
 def add_employee_leave(db, user_id, start_date, end_date, label="Annual Leave"):
     """Add a bounded leave period without allowing ambiguous overlapping records."""
-    uid = str(user_id or "").strip()
+    uid = normalize_device_user_id(user_id)
     if not uid:
         raise ValueError("Select an employee before adding leave.")
     try:
