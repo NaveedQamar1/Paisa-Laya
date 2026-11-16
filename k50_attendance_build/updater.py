@@ -80,10 +80,16 @@ WINDOWS_MONITOR_TASK_NAME = "SCAFA Workforce Attendance Monitor"
 WINDOWS_MONITOR_STOP_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
 $taskName = 'SCAFA Workforce Attendance Monitor'
-$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-if ($null -eq $task) {
-    Write-Output 'MISSING'
-    exit 0
+try {
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+} catch {
+    # Only a genuine missing task is safe to treat as "monitor not configured".
+    # Access, service, or permission errors must abort the update before files change.
+    if ($_.FullyQualifiedErrorId -like 'NoMatchingCimInstance*') {
+        Write-Output 'MISSING'
+        exit 0
+    }
+    throw
 }
 $state = [string]$task.State
 if ($state -ne 'Running') {
