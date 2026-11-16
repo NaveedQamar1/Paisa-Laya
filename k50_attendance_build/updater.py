@@ -457,12 +457,88 @@ def _remove_macos_bundle(path):
         shutil.rmtree(path)
 
 
+def _macos_bundle_is_valid(path):
+    path = Path(path)
+    return (
+        not path.is_symlink()
+        and path.is_dir()
+        and (path / "Contents" / "MacOS" / "SCAFA_Workforce").is_file()
+    )
+
+
+def _macos_update_state_path(app_target):
+    app_target = Path(app_target)
+    return app_target.with_name(app_target.name + ".update-state")
+
+
+def _read_macos_update_state(path):
+    path = Path(path)
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError("The macOS update state marker is not a regular file.")
+    try:
+        state = path.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError) as exc:
+        raise RuntimeError(f"Could not read the macOS update state marker: {exc}") from exc
+    if state not in {
+        "in_progress:loaded",
+        "in_progress:unloaded",
+        "complete:loaded",
+        "complete:unloaded",
+    }:
+        raise RuntimeError("The macOS update state marker is invalid; manual recovery is required.")
+    return state
+
+
+def _write_macos_update_state(path, state):
+    if state not in {
+        "in_progress:loaded",
+        "in_progress:unloaded",
+        "complete:loaded",
+        "complete:unloaded",
+    }:
+        raise ValueError("Invalid macOS update state.")
+    path = Path(path)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=path.name + ".", suffix=".tmp", dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="ascii") as temporary:
+            temporary.write(state + "\n")
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, path)
+    finally:
+        Path(temporary_name).unlink(missing_ok=True)
+
+
+def _restore_macos_previous_bundle(app_target, backup, state_path, user_uid, monitor_state=None):
+    # Stop any monitor that may still reference the bundle being replaced.
+    currently_loaded = stop_macos_monitor(user_uid)
+    if monitor_state == "loaded":
+        uid, restore_plist = _macos_user_context(user_uid)
+        _validate_macos_agent_plist(restore_plist, uid)
+    elif monitor_state == "unloaded":
+        restore_plist = None
+    else:
+        # Legacy backups have no transaction marker; preserve the state observed now.
+        restore_plist = currently_loaded
+
+    _remove_macos_bundle(app_target)
+    backup.rename(app_target)
+    if restore_plist is not None:
+        start_macos_monitor(restore_plist, user_uid)
+    Path(state_path).unlink(missing_ok=True)
+
+
 def apply_macos(package,target,user_uid=None):
     archive=Path(package); app_target=Path(target)
     if not archive.is_file() or app_target.suffix!=".app":
         raise RuntimeError("The macOS update package or installed application path is invalid.")
     work=Path(tempfile.mkdtemp(prefix="scafa-update-"))
     backup=app_target.with_name(app_target.name+".previous")
+    state_path=_macos_update_state_path(app_target)
     try:
         safe_extract_zip(archive,work)
         candidates=list(work.rglob("SCAFA_Workforce.app"))
@@ -470,31 +546,55 @@ def apply_macos(package,target,user_uid=None):
             raise RuntimeError("The downloaded archive does not contain SCAFA_Workforce.app.")
         new_app=candidates[0]
         executable=new_app/"Contents"/"MacOS"/"SCAFA_Workforce"
-        if not executable.exists():
+        if not executable.is_file():
             raise RuntimeError("The downloaded macOS app is missing its executable.")
-        if backup.exists() or backup.is_symlink():
-            if (
-                backup.is_symlink()
-                or not backup.is_dir()
-                or not (backup / "Contents" / "MacOS" / "SCAFA_Workforce").is_file()
-            ):
+
+        state = _read_macos_update_state(state_path)
+        backup_present = backup.exists() or backup.is_symlink()
+        if state is not None:
+            phase, monitor_state = state.split(":", 1)
+            if phase == "complete" and _macos_bundle_is_valid(app_target):
+                if backup_present:
+                    if not _macos_bundle_is_valid(backup):
+                        raise RuntimeError(
+                            "The completed macOS update has an invalid leftover backup; "
+                            "the backup was preserved for manual recovery."
+                        )
+                    # A completed update may leave its old bundle behind if cleanup
+                    # was interrupted. Retire it; never roll back a completed update.
+                    _remove_macos_bundle(backup)
+                state_path.unlink(missing_ok=True)
+            elif backup_present and _macos_bundle_is_valid(backup):
+                _restore_macos_previous_bundle(
+                    app_target, backup, state_path, user_uid, monitor_state
+                )
+                raise RuntimeError(
+                    "A previous macOS update was interrupted. The previous application "
+                    "has been restored; retry the update."
+                )
+            else:
+                raise RuntimeError(
+                    "The macOS update was interrupted but its recovery backup is unavailable. "
+                    "The installed files were preserved; manual recovery is required."
+                )
+        elif backup_present:
+            if not _macos_bundle_is_valid(backup):
                 raise RuntimeError(
                     "An incomplete macOS recovery backup exists and was preserved. "
                     "Manual recovery is required before another update."
                 )
-
-            monitor_plist = stop_macos_monitor(user_uid)
-            # A prior update may have been interrupted after the old bundle was
-            # renamed. Restore it instead of deleting the only known-good copy.
-            _remove_macos_bundle(app_target)
-            backup.rename(app_target)
-            try:
-                start_macos_monitor(monitor_plist, user_uid)
-            except Exception as restart_error:
+            if _macos_bundle_is_valid(app_target):
+                # Older updater versions did not record whether a leftover .previous
+                # bundle came from a completed update or an interrupted replacement.
+                # Do not guess and risk silently downgrading a working installation.
                 raise RuntimeError(
-                    "The previous application was restored, but its attendance monitor "
-                    f"could not be restarted: {restart_error}"
-                ) from restart_error
+                    "A legacy macOS recovery backup exists beside a valid application "
+                    "without an update-state marker. Both bundles were preserved; "
+                    "manual recovery is required before another update."
+                )
+            _restore_macos_previous_bundle(
+                app_target, backup, state_path, user_uid
+            )
             raise RuntimeError(
                 "A previous macOS update was interrupted. The previous application "
                 "has been restored; retry the update."
@@ -503,6 +603,22 @@ def apply_macos(package,target,user_uid=None):
         # Stop only a monitor that is actually loaded. A previously unloaded or
         # disabled LaunchAgent must remain unloaded after the update.
         monitor_plist = stop_macos_monitor(user_uid)
+        monitor_state = "loaded" if monitor_plist is not None else "unloaded"
+        try:
+            _write_macos_update_state(
+                state_path, "in_progress:" + monitor_state
+            )
+        except Exception:
+            if monitor_plist is not None:
+                try:
+                    start_macos_monitor(monitor_plist, user_uid)
+                except Exception as restart_error:
+                    raise RuntimeError(
+                        "Could not record the macOS update state or restore the "
+                        f"attendance monitor: {restart_error}"
+                    )
+            raise
+
         backup_created = False
         try:
             app_target.rename(backup)
@@ -515,6 +631,12 @@ def apply_macos(package,target,user_uid=None):
                                 "/usr/bin/open", str(app_target)],check=True)
             else:
                 subprocess.run(["/usr/bin/open", str(app_target)],check=True)
+            # Mark completion only after the new bundle, monitor and app launch all
+            # succeed. If backup deletion later fails, the next update can safely
+            # distinguish that stale backup from an interrupted replacement.
+            _write_macos_update_state(
+                state_path, "complete:" + monitor_state
+            )
         except Exception as update_error:
             try:
                 # If the new agent was partially or fully bootstrapped, unload it
@@ -526,6 +648,7 @@ def apply_macos(package,target,user_uid=None):
                     backup.rename(app_target)
                 if monitor_plist is not None:
                     start_macos_monitor(monitor_plist, user_uid)
+                state_path.unlink(missing_ok=True)
             except Exception as recovery_error:
                 raise RuntimeError(
                     f"{update_error} The previous application bundle is preserved at "
@@ -534,7 +657,18 @@ def apply_macos(package,target,user_uid=None):
                 ) from update_error
             raise
 
-        shutil.rmtree(backup,ignore_errors=True)
+        try:
+            _remove_macos_bundle(backup)
+        except OSError:
+            # Keep the "complete" marker. The next updater invocation will retry
+            # cleanup instead of mistaking this backup for an interrupted update.
+            pass
+        else:
+            try:
+                state_path.unlink(missing_ok=True)
+            except OSError:
+                # A leftover complete marker is safe and is removed on the next run.
+                pass
     finally:
         shutil.rmtree(work,ignore_errors=True)
 

@@ -429,6 +429,9 @@ class UpdaterHelperTests(unittest.TestCase):
             old_executable = backup / "Contents" / "MacOS" / "SCAFA_Workforce"
             old_executable.parent.mkdir(parents=True)
             old_executable.write_text("known-good previous application")
+            installed.with_name(installed.name + ".update-state").write_text(
+                "in_progress:unloaded"
+            )
 
             source = root / "package" / "SCAFA_Workforce.app"
             new_executable = source / "Contents" / "MacOS" / "SCAFA_Workforce"
@@ -446,6 +449,65 @@ class UpdaterHelperTests(unittest.TestCase):
                 "known-good previous application",
             )
             self.assertFalse(backup.exists())
+
+
+    def test_macos_update_cleanup_failure_does_not_roll_back_on_next_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed, archive, _old_executable = self._make_macos_update_fixture(root)
+            backup = installed.with_name(installed.name + ".previous")
+            state_path = installed.with_name(installed.name + ".update-state")
+            original_remove = updater._remove_macos_bundle
+            failed = {"once": False}
+
+            def fail_backup_cleanup_once(path):
+                if Path(path) == backup and not failed["once"]:
+                    failed["once"] = True
+                    raise PermissionError("simulated backup cleanup failure")
+                return original_remove(path)
+
+            with patch.object(
+                updater, "_remove_macos_bundle", side_effect=fail_backup_cleanup_once
+            ), patch.object(
+                updater.subprocess, "run",
+                return_value=unittest.mock.Mock(returncode=0),
+            ):
+                updater.apply_macos(archive, installed)
+                self.assertTrue(backup.is_dir())
+                self.assertEqual(
+                    state_path.read_text(encoding="ascii").strip(),
+                    "complete:unloaded",
+                )
+                # A second update must retire the known-complete backup, not restore
+                # the older application and report a false interrupted update.
+                updater.apply_macos(archive, installed)
+
+            self.assertEqual(
+                (installed / "Contents" / "MacOS" / "SCAFA_Workforce").read_text(),
+                "new application",
+            )
+            self.assertFalse(backup.exists())
+            self.assertFalse(state_path.exists())
+
+
+    def test_macos_update_preserves_ambiguous_legacy_backup_without_downgrade(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed, archive, _old_executable = self._make_macos_update_fixture(root)
+            backup = installed.with_name(installed.name + ".previous")
+            old_executable = backup / "Contents" / "MacOS" / "SCAFA_Workforce"
+            old_executable.parent.mkdir(parents=True)
+            old_executable.write_text("older application")
+
+            with self.assertRaisesRegex(RuntimeError, "legacy macOS recovery backup"):
+                updater.apply_macos(archive, installed)
+
+            self.assertEqual(
+                (installed / "Contents" / "MacOS" / "SCAFA_Workforce").read_text(),
+                "old application",
+            )
+            self.assertEqual(old_executable.read_text(), "older application")
+            self.assertTrue(backup.is_dir())
 
 
     def test_zip_extraction_rejects_oversized_symbolic_link_target(self):
