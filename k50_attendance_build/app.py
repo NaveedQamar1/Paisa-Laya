@@ -145,6 +145,53 @@ def employee_active_from_events(events, day, fallback_active=True):
     return bool(fallback_active)
 
 
+def ensure_device_employee_status_history(db, user_id, first_punch_date=None, effective_today=None):
+    """Give a device-synced employee a dated status baseline without inventing prior attendance."""
+    uid = str(user_id or "").strip()
+    if not uid:
+        return False
+    profile = db.execute(
+        "SELECT active,joining_date FROM staff WHERE user_id=?", (uid,)
+    ).fetchone()
+    if profile is None:
+        return False
+    if db.execute(
+        "SELECT 1 FROM staff_status_history WHERE user_id=? LIMIT 1", (uid,)
+    ).fetchone():
+        return False
+
+    today = effective_today or date.today().isoformat()
+    effective = today
+    joining = str(profile[1] or "").strip()
+    if joining:
+        try:
+            datetime.strptime(joining, "%Y-%m-%d")
+            effective = joining
+        except ValueError:
+            pass
+    elif first_punch_date:
+        try:
+            effective = datetime.strptime(
+                str(first_punch_date), "%Y-%m-%d"
+            ).date().isoformat()
+        except ValueError:
+            pass
+
+    db.execute(
+        """INSERT OR IGNORE INTO staff_status_history
+           (user_id,active,effective_date,source)
+           VALUES(?,0,'0001-01-01','device-sync-baseline')""",
+        (uid,)
+    )
+    db.execute(
+        """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+           VALUES(?,?,?,'device-sync')
+           ON CONFLICT(user_id,effective_date) DO NOTHING""",
+        (uid, int(bool(profile[0])), effective)
+    )
+    return True
+
+
 def count_expected_present_days(employee_performance):
     """Count present days only from eligible scheduled-day performance totals."""
     return sum(stats["present"] for _, stats in employee_performance)
@@ -1895,6 +1942,16 @@ class App(tk.Tk):
                     stamp=row.timestamp.strftime("%Y-%m-%d %H:%M:%S")
                     cur=c.execute("INSERT OR IGNORE INTO punches(user_id,punch_time,status) VALUES(?,?,?)",(str(row.user_id),stamp,str(getattr(row,"status",""))))
                     inserted+=cur.rowcount
+                synced_ids = {
+                    str(getattr(user, "user_id", None) or getattr(user, "uid", "")).strip()
+                    for user in device_users
+                }
+                for uid in synced_ids - {""}:
+                    first_punch = c.execute(
+                        "SELECT MIN(substr(punch_time,1,10)) FROM punches WHERE user_id=?",
+                        (uid,)
+                    ).fetchone()[0]
+                    ensure_device_employee_status_history(c, uid, first_punch)
         except Exception as e:
             fetch_error=str(e)
         finally:

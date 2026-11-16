@@ -61,6 +61,42 @@ class DashboardRegressionTests(unittest.TestCase):
         app.BASE = self.old_base
         self.temp.cleanup()
 
+    def test_dashboard_does_not_count_device_employee_before_first_punch(self):
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                "INSERT INTO staff(user_id,name,active) VALUES('103','New Device Hire',1)"
+            )
+            app.ensure_device_employee_status_history(
+                db, "103", "2026-11-09", effective_today="2026-11-16"
+            )
+
+        ctx = SimpleNamespace(
+            comparison_tree=FakeTree(),
+            dashboard_employee=SimpleNamespace(get=lambda: "All staff"),
+            latest_punch_label=FakeLabel(),
+            start_date=SimpleNamespace(get=lambda: "2026-11-08"),
+            end_date=SimpleNamespace(get=lambda: "2026-11-09"),
+            card_values=[FakeLabel() for _ in range(6)],
+        )
+        ctx._name = lambda uid: {"103": "New Device Hire"}.get(str(uid), f"User {uid}")
+        ctx._rules = lambda: app.App._rules(ctx)
+        ctx._attendance_day_status = lambda uid, day, stamps: app.App._attendance_day_status(
+            ctx, uid, day, stamps
+        )
+        rows = [
+            ("103", "2026-11-09 09:45:00", "0"),
+            ("103", "2026-11-09 18:00:00", "1"),
+        ]
+
+        app.App._update_dashboard(ctx, rows)
+
+        values_by_employee = {values[0]: values for values, tags in ctx.comparison_tree.rows}
+        self.assertEqual(
+            values_by_employee["New Device Hire"],
+            ("New Device Hire", 1, 1, 0, 0, 0, 1, "100.0%", "09:45"),
+        )
+        self.assertEqual(ctx.card_values[0].text, "100.0%")
+
     def test_dashboard_excludes_inactive_employee_days_and_keeps_latest_punch(self):
         ctx = SimpleNamespace(
             comparison_tree=FakeTree(),

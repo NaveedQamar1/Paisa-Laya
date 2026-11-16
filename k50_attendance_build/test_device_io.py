@@ -1,5 +1,5 @@
 from contextlib import nullcontext
-from datetime import datetime
+from datetime import datetime, timedelta
 import ipaddress
 import sqlite3
 import sys
@@ -118,6 +118,84 @@ class DeviceIOTests(unittest.TestCase):
             [
                 ("101", "2026-11-15 09:00:00", "0"),
                 ("101", "2026-11-15 17:00:00", "1"),
+            ],
+        )
+
+    def test_new_device_users_get_status_history_from_first_punch_or_sync_date(self):
+        users = [
+            SimpleNamespace(user_id=101, name="Ayesha"),
+            SimpleNamespace(user_id=102, name="Bilal"),
+        ]
+        punches = [
+            SimpleNamespace(
+                user_id=101,
+                timestamp=datetime(2026, 11, 15, 9, 0, 0),
+                status=0,
+            ),
+        ]
+
+        class FakeConnection:
+            def disable_device(self):
+                pass
+
+            def enable_device(self):
+                pass
+
+            def disconnect(self):
+                pass
+
+            def get_users(self):
+                return users
+
+            def get_attendance(self):
+                return punches
+
+        connection = FakeConnection()
+
+        class FakeZK:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def connect(self):
+                return connection
+
+        fake_module = types.ModuleType("zk")
+        fake_module.ZK = FakeZK
+        ctx = self.context()
+        ctx._fetch_done = Mock()
+        ctx._fetch_error = Mock()
+
+        with patch.dict(sys.modules, {"zk": fake_module}):
+            app.App._fetch_worker(ctx, "192.168.1.50", 4370, 0)
+
+        today = app.date.today().isoformat()
+        previous_day = (app.date.fromisoformat(today) - timedelta(days=1)).isoformat()
+        with sqlite3.connect(app.DB) as db:
+            history_101 = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='101' ORDER BY effective_date,id"""
+            ).fetchall()
+            history_102 = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='102' ORDER BY effective_date,id"""
+            ).fetchall()
+            self.assertFalse(app.employee_active_on(db, "101", "2026-11-14"))
+            self.assertTrue(app.employee_active_on(db, "101", "2026-11-15"))
+            self.assertFalse(app.employee_active_on(db, "102", previous_day))
+            self.assertTrue(app.employee_active_on(db, "102", today))
+
+        self.assertEqual(
+            history_101,
+            [
+                (0, "0001-01-01", "device-sync-baseline"),
+                (1, "2026-11-15", "device-sync"),
+            ],
+        )
+        self.assertEqual(
+            history_102,
+            [
+                (0, "0001-01-01", "device-sync-baseline"),
+                (1, today, "device-sync"),
             ],
         )
 
