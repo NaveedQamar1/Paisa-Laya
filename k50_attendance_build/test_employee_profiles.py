@@ -526,6 +526,24 @@ class EmployeeDirectoryFilterTests(unittest.TestCase):
         self.assertEqual(app.retain_visible_employee_selection("701", visible), "701")
         self.assertIsNone(app.retain_visible_employee_selection(None, visible))
 
+    def test_employee_selection_requires_a_matching_existing_row(self):
+        row = self.rows[0]
+        self.assertIsNone(app.employee_profile_selection_data(None, row))
+        self.assertIsNone(app.employee_profile_selection_data("701", None))
+        self.assertIsNone(app.employee_profile_selection_data("702", row))
+        self.assertIsNone(app.employee_profile_selection_data("701", row[:5]))
+
+    def test_employee_selection_normalizes_existing_profile_for_the_form(self):
+        row = self.rows[1]
+        self.assertEqual(
+            app.employee_profile_selection_data("702", row),
+            {
+                "user_id": "702",
+                "fields": ("702", "Bilal Ahmed", "Kitchen", "Commis", "2023-02-01"),
+                "active": False,
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

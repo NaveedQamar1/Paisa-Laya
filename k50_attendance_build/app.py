@@ -366,6 +366,20 @@ def retain_visible_employee_selection(current_user_id, visible_rows):
     return selected_id if selected_id in visible_ids else None
 
 
+def employee_profile_selection_data(selected_user_id, row):
+    """Return form data only when the selected employee still matches the database row."""
+    selected_id = str(selected_user_id or "").strip()
+    if not selected_id or row is None or len(row) < 6:
+        return None
+    if str(row[0]) != selected_id:
+        return None
+    return {
+        "user_id": selected_id,
+        "fields": tuple(str(value or "") for value in row[:5]),
+        "active": bool(row[5]),
+    }
+
+
 def add_employee_leave(db, user_id, start_date, end_date, label="Annual Leave"):
     """Add a bounded leave period without allowing ambiguous overlapping records."""
     uid = str(user_id or "").strip()
@@ -1394,6 +1408,8 @@ class App(tk.Tk):
         def select_employee(_event=None):
             selected = tree.selection()
             if not selected:
+                clear_form()
+                feedback.set("Select an employee or add a profile.")
                 return
             uid = selected[0]
             with sqlite3.connect(DB) as db:
@@ -1401,13 +1417,18 @@ class App(tk.Tk):
                     "SELECT user_id,name,department,designation,joining_date,active FROM staff WHERE user_id=?",
                     (uid,)
                 ).fetchone()
-            if not row:
+            profile = employee_profile_selection_data(uid, row)
+            if profile is None:
+                # The row may have been deleted after the directory was populated.
+                # Never leave stale details editable after a selection disappears.
+                clear_form()
+                feedback.set("The selected employee is no longer registered. Refresh the directory.")
                 return
-            current_profile_uid["value"] = str(row[0])
+            current_profile_uid["value"] = profile["user_id"]
             uid_entry.configure(state="normal")
-            for key, value in zip(("uid", "name", "department", "designation", "joining_date"), row[:5]):
-                fields[key].set(str(value or ""))
-            active_var.set(bool(row[5]))
+            for key, value in zip(("uid", "name", "department", "designation", "joining_date"), profile["fields"]):
+                fields[key].set(value)
+            active_var.set(profile["active"])
             uid_entry.configure(state="readonly")
             feedback.set("Profile loaded. The device-assigned ID is protected; edit the remaining details and save.")
 
