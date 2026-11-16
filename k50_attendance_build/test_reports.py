@@ -203,7 +203,6 @@ class CSVImportRegressionTests(unittest.TestCase):
             ).fetchall()
         self.assertEqual((inserted, skipped), (2, 0))
         self.assertEqual(rows, [
-            ("0", "2026-11-15 08:00:00", "0"),
             ("101", "2026-11-15 09:00:00", "0"),
             ("102", "2026-11-15 17:30:00", "1"),
         ])
@@ -256,15 +255,15 @@ class CSVImportRegressionTests(unittest.TestCase):
             _name=lambda uid: "Ayesha" if str(uid) == "101" else str(uid),
             refresh=Mock(),
         )
-        with patch.object(app.filedialog, "asksaveasfilename", return_value=str(destination)), \\
+        with patch.object(app.filedialog, "asksaveasfilename", return_value=str(destination)), \
              patch.object(app.messagebox, "showinfo") as export_info:
             app.App.export_csv(ctx)
         export_info.assert_called_once()
 
         with sqlite3.connect(app.DB) as db:
             db.execute("DELETE FROM punches")
-        with patch.object(app.filedialog, "askopenfilename", return_value=str(destination)), \\
-             patch.object(app.messagebox, "showinfo") as import_info, \\
+        with patch.object(app.filedialog, "askopenfilename", return_value=str(destination)), \
+             patch.object(app.messagebox, "showinfo") as import_info, \
              patch.object(app.messagebox, "showerror") as import_error:
             app.App.import_csv(ctx)
 
@@ -291,6 +290,7 @@ class CSVImportRegressionTests(unittest.TestCase):
             ).fetchall()
         self.assertEqual((inserted, skipped), (4, 0))
         self.assertEqual(rows, [
+            ("0", "2026-11-15 08:00:00", "0"),
             ("101", "2026-11-15 09:00:00", "0"),
             ("101", "2026-11-15 17:00:00", "1"),
             ("102", "2026-11-15 09:00:00", ""),
