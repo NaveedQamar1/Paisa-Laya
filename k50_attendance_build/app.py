@@ -1,7 +1,7 @@
 import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, subprocess, sys, urllib.request, webbrowser, ssl
 import tempfile
 import certifi
-from employee_history import ensure_device_employee_status_history
+from employee_history import ensure_device_employee_status_history, get_device_user_id, normalize_device_user_id
 from html import escape
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -317,7 +317,7 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
 def save_employee_profile(db, user_id, name, department="", designation="", joining_date="",
                           active=True, current_user_id=None, effective_today=None):
     """Save an employee profile atomically without changing its device-assigned ID."""
-    uid = str(user_id or "").strip()
+    uid = normalize_device_user_id(user_id)
     full_name = str(name or "").strip()
     joining = str(joining_date or "").strip()
     if not uid or not full_name:
@@ -407,7 +407,7 @@ def retain_visible_employee_selection(current_user_id, visible_rows):
 
 def employee_profile_selection_data(selected_user_id, row):
     """Return form data only when the selected employee still matches the database row."""
-    selected_id = str(selected_user_id or "").strip()
+    selected_id = normalize_device_user_id(selected_user_id)
     if not selected_id or row is None or len(row) < 6:
         return None
     if str(row[0]) != selected_id:
@@ -1514,7 +1514,7 @@ class App(tk.Tk):
         saved=0
         with sqlite3.connect(DB) as c:
             for user in users:
-                uid=str(getattr(user,"user_id",None) or getattr(user,"uid","")).strip()
+                uid=get_device_user_id(user)
                 name=str(getattr(user,"name","") or "").strip()
                 if not uid or not name:
                     continue
@@ -1922,10 +1922,7 @@ class App(tk.Tk):
             conn=ZK(ip,port=port,timeout=12,password=key,force_udp=False, ommit_ping=False).connect()
             conn.disable_device()
             device_users=conn.get_users()
-            synced_ids = {
-                str(getattr(user, "user_id", None) or getattr(user, "uid", "")).strip()
-                for user in device_users
-            } - {""}
+            synced_ids = {get_device_user_id(user) for user in device_users} - {""}
             saved_users=self._store_device_users(device_users)
             rows=conn.get_attendance()
             total=len(rows)

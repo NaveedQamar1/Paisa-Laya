@@ -502,6 +502,31 @@ class EmployeeProfileSaveTests(unittest.TestCase):
             (1, "2024-01-01", "profile"),
         ])
 
+    def test_numeric_zero_device_id_is_valid_for_profile_selection_and_leave(self):
+        self.assertEqual(self.save_profile(0, "Zero ID"), "0")
+        self.assertEqual(
+            self.save_profile(0, "Zero ID Updated", current_user_id=0),
+            "0",
+        )
+        with sqlite3.connect(app.DB) as db:
+            row = db.execute(
+                "SELECT user_id,name,department,designation,joining_date,active FROM staff WHERE user_id='0'"
+            ).fetchone()
+            self.assertEqual(row[1], "Zero ID Updated")
+            self.assertEqual(
+                app.employee_profile_selection_data(0, row),
+                {
+                    "user_id": "0",
+                    "fields": ("0", "Zero ID Updated", "Kitchen", "Chef", "2024-01-01"),
+                    "active": True,
+                },
+            )
+            app.add_employee_leave(db, 0, "2026-11-16", "2026-11-17", "Training")
+            leave = db.execute(
+                "SELECT user_id,start_date,end_date,label FROM staff_leave"
+            ).fetchone()
+        self.assertEqual(leave, ("0", "2026-11-16", "2026-11-17", "Training"))
+
     def test_edit_profile_updates_metadata_without_rewriting_status_history(self):
         self.save_profile("701", "Mariam")
         with sqlite3.connect(app.DB) as db:

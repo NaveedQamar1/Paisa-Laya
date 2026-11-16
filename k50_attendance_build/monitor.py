@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 from datetime import datetime
-from employee_history import ensure_device_employee_status_history
+from employee_history import ensure_device_employee_status_history, get_device_user_id
 
 BASE = Path.home() / "SCAFAWorkforce"
 LEGACY_BASE = Path.home() / "K50AttendanceManager"
@@ -115,7 +115,7 @@ def sync_device_records(db, users, records):
     """Synchronize device users and punches, then establish missing employment history."""
     synced_ids = set()
     for user in users:
-        uid = str(getattr(user, "user_id", None) or getattr(user, "uid", "")).strip()
+        uid = get_device_user_id(user)
         name = str(getattr(user, "name", "") or "").strip()
         if uid and name:
             db.execute(

@@ -2,9 +2,22 @@
 from datetime import date, datetime
 
 
+def normalize_device_user_id(value):
+    """Normalize a device ID without treating numeric zero as a missing value."""
+    return str("" if value is None else value).strip()
+
+
+def get_device_user_id(user):
+    """Read the primary device ID, falling back only when it is actually absent."""
+    value = getattr(user, "user_id", None)
+    if value is None or value == "":
+        value = getattr(user, "uid", "")
+    return normalize_device_user_id(value)
+
+
 def ensure_device_employee_status_history(db, user_id, first_punch_date=None, effective_today=None):
     """Give a device-synced employee a dated status baseline without inventing prior attendance."""
-    uid = str(user_id or "").strip()
+    uid = normalize_device_user_id(user_id)
     if not uid:
         return False
     profile = db.execute(

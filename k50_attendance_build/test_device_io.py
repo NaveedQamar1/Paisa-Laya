@@ -121,6 +121,78 @@ class DeviceIOTests(unittest.TestCase):
             ],
         )
 
+    def test_fetch_worker_preserves_zero_device_id_and_uses_uid_only_when_missing(self):
+        users = [
+            SimpleNamespace(user_id=0, uid=999, name="Zero ID"),
+            SimpleNamespace(user_id=None, uid=7, name="Fallback ID"),
+        ]
+        punches = [
+            SimpleNamespace(
+                user_id=0,
+                timestamp=datetime(2026, 11, 15, 8, 0, 0),
+                status=0,
+            ),
+        ]
+
+        class FakeConnection:
+            def disable_device(self):
+                pass
+
+            def enable_device(self):
+                pass
+
+            def disconnect(self):
+                pass
+
+            def get_users(self):
+                return users
+
+            def get_attendance(self):
+                return punches
+
+        class FakeZK:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def connect(self):
+                return FakeConnection()
+
+        fake_module = types.ModuleType("zk")
+        fake_module.ZK = FakeZK
+        ctx = self.context()
+        completed = []
+        errors = []
+        ctx._fetch_done = lambda total, inserted, saved: completed.append(
+            (total, inserted, saved)
+        )
+        ctx._fetch_error = errors.append
+
+        with patch.dict(sys.modules, {"zk": fake_module}):
+            app.App._fetch_worker(ctx, "192.168.1.50", 4370, 0)
+
+        self.assertEqual(completed, [(1, 1, 2)])
+        self.assertEqual(errors, [])
+        with sqlite3.connect(app.DB) as db:
+            staff = db.execute(
+                "SELECT user_id,name FROM staff ORDER BY user_id"
+            ).fetchall()
+            punch_rows = db.execute(
+                "SELECT user_id,punch_time,status FROM punches"
+            ).fetchall()
+            history = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='0' ORDER BY effective_date,id"""
+            ).fetchall()
+        self.assertEqual(staff, [("0", "Zero ID"), ("7", "Fallback ID")])
+        self.assertEqual(punch_rows, [("0", "2026-11-15 08:00:00", "0")])
+        self.assertEqual(
+            history,
+            [
+                (0, "0001-01-01", "device-sync-baseline"),
+                (1, "2026-11-15", "device-sync"),
+            ],
+        )
+
     def test_new_device_users_get_status_history_from_first_punch_or_sync_date(self):
         users = [
             SimpleNamespace(user_id=101, name="Ayesha"),

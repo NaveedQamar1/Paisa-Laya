@@ -70,6 +70,60 @@ class MonitorStateTests(unittest.TestCase):
             )
 
 
+    def test_device_sync_preserves_zero_device_id_and_missing_id_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "attendance.db"
+            with sqlite3.connect(database) as db:
+                db.execute(
+                    """CREATE TABLE staff(
+                       user_id TEXT PRIMARY KEY,name TEXT NOT NULL DEFAULT '',
+                       joining_date TEXT NOT NULL DEFAULT '',active INTEGER NOT NULL DEFAULT 1)"""
+                )
+                db.execute(
+                    """CREATE TABLE punches(
+                       user_id TEXT NOT NULL,punch_time TEXT NOT NULL,status TEXT DEFAULT '',
+                       UNIQUE(user_id,punch_time,status))"""
+                )
+                db.execute(
+                    """CREATE TABLE staff_status_history(
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,
+                       active INTEGER NOT NULL,effective_date TEXT NOT NULL,
+                       source TEXT NOT NULL,UNIQUE(user_id,effective_date))"""
+                )
+                users = [
+                    SimpleNamespace(user_id=0, uid=999, name="Zero ID"),
+                    SimpleNamespace(user_id=None, uid=7, name="Fallback ID"),
+                ]
+                records = [
+                    SimpleNamespace(
+                        user_id=0,
+                        timestamp=datetime(2026, 11, 15, 8, 0, 0),
+                        status=0,
+                    )
+                ]
+
+                inserted = monitor.sync_device_records(db, users, records)
+                staff = db.execute(
+                    "SELECT user_id,name FROM staff ORDER BY user_id"
+                ).fetchall()
+                history = db.execute(
+                    """SELECT active,effective_date,source FROM staff_status_history
+                       WHERE user_id='0' ORDER BY effective_date,id"""
+                ).fetchall()
+
+            self.assertEqual(
+                inserted,
+                [("2026-11-15 08:00:00", "0", "0", "Zero ID")],
+            )
+            self.assertEqual(staff, [("0", "Zero ID"), ("7", "Fallback ID")])
+            self.assertEqual(
+                history,
+                [
+                    (0, "0001-01-01", "device-sync-baseline"),
+                    (1, "2026-11-15", "device-sync"),
+                ],
+            )
+
     def test_seen_punches_persist_across_restarts(self):
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "monitor-state.json"
