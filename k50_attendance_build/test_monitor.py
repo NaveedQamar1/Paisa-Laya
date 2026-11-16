@@ -309,6 +309,39 @@ class MonitorNotificationTests(unittest.TestCase):
                 [("0", "2026-11-16 09:00:00", "0")],
             )
 
+    def test_monitor_retries_when_configuration_is_missing_or_invalid(self):
+        cases = (
+            ("missing file", FileNotFoundError("device configuration is not ready")),
+            ("malformed JSON", "{"),
+            ("missing device IP", "{}"),
+        )
+        for label, config_result in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                def read_config(*_args, **_kwargs):
+                    if isinstance(config_result, BaseException):
+                        raise config_result
+                    return config_result
+
+                stop_after_retry = RuntimeError("stop after retry sleep")
+                with (
+                    patch.object(monitor, "BASE", Path(tmp)),
+                    patch.object(
+                        monitor, "CONFIG",
+                        SimpleNamespace(read_text=read_config),
+                    ),
+                    patch.object(monitor, "log_error") as log_error,
+                    patch.object(
+                        monitor.time, "sleep", side_effect=stop_after_retry
+                    ) as sleep,
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError, "stop after retry sleep"
+                    ):
+                        monitor.main()
+
+                log_error.assert_called_once()
+                sleep.assert_called_once_with(10)
+
 
 if __name__ == "__main__":
     unittest.main()
