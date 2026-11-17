@@ -125,6 +125,92 @@ class MonitorStateTests(unittest.TestCase):
                 ],
             )
 
+    def test_monitor_migrates_legacy_staff_names_as_profile_managed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "attendance.db"
+            with closing(sqlite3.connect(database)) as db, db:
+                db.execute(
+                    """CREATE TABLE staff(
+                       user_id TEXT PRIMARY KEY,name TEXT NOT NULL DEFAULT '',
+                       joining_date TEXT NOT NULL DEFAULT '',active INTEGER NOT NULL DEFAULT 1)"""
+                )
+                db.execute(
+                    """CREATE TABLE punches(
+                       user_id TEXT NOT NULL,punch_time TEXT NOT NULL,status TEXT DEFAULT '',
+                       UNIQUE(user_id,punch_time,status))"""
+                )
+                db.execute(
+                    """CREATE TABLE staff_status_history(
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,
+                       active INTEGER NOT NULL,effective_date TEXT NOT NULL,
+                       source TEXT NOT NULL,UNIQUE(user_id,effective_date))"""
+                )
+                db.execute(
+                    "INSERT INTO staff(user_id,name) VALUES('101','Curated Employee')"
+                )
+
+                monitor.sync_device_records(
+                    db,
+                    [SimpleNamespace(user_id=101, name="Device Name")],
+                    [],
+                )
+                row = db.execute(
+                    "SELECT name,name_source FROM staff WHERE user_id='101'"
+                ).fetchone()
+
+            self.assertEqual(row, ("Curated Employee", "profile"))
+
+    def test_monitor_refreshes_device_managed_names_without_touching_profiles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "attendance.db"
+            with closing(sqlite3.connect(database)) as db, db:
+                db.execute(
+                    """CREATE TABLE staff(
+                       user_id TEXT PRIMARY KEY,name TEXT NOT NULL DEFAULT '',
+                       joining_date TEXT NOT NULL DEFAULT '',active INTEGER NOT NULL DEFAULT 1,
+                       name_source TEXT NOT NULL DEFAULT 'profile')"""
+                )
+                db.execute(
+                    """CREATE TABLE punches(
+                       user_id TEXT NOT NULL,punch_time TEXT NOT NULL,status TEXT DEFAULT '',
+                       UNIQUE(user_id,punch_time,status))"""
+                )
+                db.execute(
+                    """CREATE TABLE staff_status_history(
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,
+                       active INTEGER NOT NULL,effective_date TEXT NOT NULL,
+                       source TEXT NOT NULL,UNIQUE(user_id,effective_date))"""
+                )
+                db.executemany(
+                    "INSERT INTO staff(user_id,name,name_source) VALUES(?,?,?)",
+                    [
+                        ("101", "Curated Employee", "profile"),
+                        ("102", "Old Device Name", "device"),
+                    ],
+                )
+
+                monitor.sync_device_records(
+                    db,
+                    [
+                        SimpleNamespace(user_id=101, name="New Device Name"),
+                        SimpleNamespace(user_id=102, name="Updated Device Name"),
+                        SimpleNamespace(user_id=103, name="New Employee"),
+                    ],
+                    [],
+                )
+                rows = db.execute(
+                    "SELECT user_id,name,name_source FROM staff ORDER BY user_id"
+                ).fetchall()
+
+            self.assertEqual(
+                rows,
+                [
+                    ("101", "Curated Employee", "profile"),
+                    ("102", "Updated Device Name", "device"),
+                    ("103", "New Employee", "device"),
+                ],
+            )
+
     def test_seen_punches_persist_across_restarts(self):
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "monitor-state.json"
