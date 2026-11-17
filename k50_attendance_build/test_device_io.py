@@ -33,6 +33,32 @@ class DeviceIOTests(unittest.TestCase):
         ctx.after = lambda _delay, callback: callback()
         return ctx
 
+    def test_fetch_done_reports_device_users_processed_not_names_synced(self):
+        ctx = self.context()
+        ctx.refresh = Mock()
+        ctx.status = SimpleNamespace(set=Mock())
+
+        with patch.object(app.messagebox, "showinfo") as showinfo:
+            app.App._fetch_done(ctx, 3, 2, 4)
+
+        success_status = ctx.status.set.call_args.args[0]
+        success_summary = showinfo.call_args.args[1]
+        self.assertIn("4 device users processed", success_status)
+        self.assertIn("Device users processed: 4", success_summary)
+        self.assertNotIn("staff names synced", success_status.lower())
+        self.assertNotIn("Staff names fetched", success_summary)
+
+        ctx.status.set.reset_mock()
+        with patch.object(app.messagebox, "showwarning") as showwarning:
+            app.App._fetch_done(ctx, 3, 2, 4, "test device warning")
+
+        warning_status = ctx.status.set.call_args.args[0]
+        warning_summary = showwarning.call_args.args[1]
+        self.assertIn("4 device users processed", warning_status)
+        self.assertIn("Device users processed: 4", warning_summary)
+        self.assertIn("test device warning", warning_summary)
+
+
     def test_fetch_worker_serializes_all_database_writes_with_restore(self):
         users = [SimpleNamespace(user_id=101, name="Ayesha")]
         punches = [
