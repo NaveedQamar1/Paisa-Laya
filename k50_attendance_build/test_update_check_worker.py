@@ -72,6 +72,11 @@ class UpdateCheckWorkerTests(unittest.TestCase):
                     self.window.check_for_updates()
                     target = self.thread_class.call_args.kwargs["target"]
                     target()
+            elif platform == "win32":
+                with patch.object(app.platform_module, "machine", return_value=machine):
+                    self.window.check_for_updates()
+                    target = self.thread_class.call_args.kwargs["target"]
+                    target()
             else:
                 self.window.check_for_updates()
                 target = self.thread_class.call_args.kwargs["target"]
@@ -167,6 +172,49 @@ class UpdateCheckWorkerTests(unittest.TestCase):
         self.update_no_update.assert_called_once_with("1.4.0")
         self.update_offer.assert_not_called()
         self.update_failed.assert_not_called()
+        self.assertFalse("_pending_release" in self.window.__dict__)
+
+
+    def test_arm64_macos_selects_only_the_arm64_release_asset(self):
+        asset_name = "SCAFA_Workforce_macOS_apple-silicon.zip"
+        release = self.release("scafa-v1.5.0", (asset_name, "checksums.txt"))
+
+        self.run_worker(release, platform="darwin", machine="arm64")
+
+        self.assertEqual(
+            self.window._pending_release,
+            (release, asset_name, "macos"),
+        )
+        self.deliver_ui_callback()
+        self.update_offer.assert_called_once_with("1.5.0")
+        self.update_failed.assert_not_called()
+
+    def test_unknown_macos_architecture_fails_closed(self):
+        release = self.release(
+            "scafa-v1.5.0",
+            ("SCAFA_Workforce_macOS_intel.zip", "checksums.txt"),
+        )
+
+        self.run_worker(release, platform="darwin", machine="mips64")
+        self.deliver_ui_callback()
+
+        self.update_failed.assert_called_once()
+        self.assertIn("macOS architecture", self.update_failed.call_args.args[0])
+        self.update_offer.assert_not_called()
+        self.assertFalse("_pending_release" in self.window.__dict__)
+
+    def test_non_x64_windows_architecture_fails_closed(self):
+        release = self.release(
+            "scafa-v1.5.0",
+            ("SCAFA_Workforce_Setup.exe", "checksums.txt"),
+        )
+
+        self.run_worker(release, platform="win32", machine="arm64")
+        self.deliver_ui_callback()
+
+        self.update_failed.assert_called_once()
+        self.assertIn("Windows x64", self.update_failed.call_args.args[0])
+        self.update_offer.assert_not_called()
         self.assertFalse("_pending_release" in self.window.__dict__)
 
 
