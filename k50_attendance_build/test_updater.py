@@ -1,3 +1,4 @@
+import hashlib
 import os
 import stat
 import tempfile
@@ -957,6 +958,41 @@ class UpdaterHelperTests(unittest.TestCase):
                 updater.apply_macos(archive, installed, user_uid=501)
             start.assert_not_called()
 
+    def test_macos_update_preserves_external_user_data_on_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed, archive, _old_executable = self._make_macos_update_fixture(root)
+            user_data = root / "home" / "SCAFAWorkforce"
+            user_data.mkdir(parents=True)
+            database = user_data / "attendance.db"
+            device_config = user_data / "device.json"
+            database.write_bytes(b"sqlite test database bytes")
+            device_config.write_text('{"device_ip":"192.0.2.10"}', encoding="utf-8")
+            expected_hashes = {
+                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in (database, device_config)
+            }
+
+            with patch.object(updater, "stop_macos_monitor", return_value=None) as stop, \
+                 patch.object(updater, "start_macos_monitor") as start, \
+                 patch.object(
+                     updater.subprocess, "run",
+                     return_value=unittest.mock.Mock(returncode=0),
+                 ) as launch:
+                updater.apply_macos(archive, installed, user_uid=501)
+
+            actual_hashes = {
+                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in (database, device_config)
+            }
+            self.assertEqual(actual_hashes, expected_hashes)
+            self.assertTrue((installed / "Contents" / "MacOS" / "SCAFA_Workforce").is_file())
+            self.assertFalse(installed.with_name("SCAFA_Workforce.app.previous").exists())
+            self.assertFalse(installed.with_name("SCAFA_Workforce.app.update-state").exists())
+            stop.assert_called_once_with(501)
+            start.assert_not_called()
+            launch.assert_called_once()
+
     def test_macos_update_rolls_back_when_application_launch_fails_after_monitor_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -964,6 +1000,16 @@ class UpdaterHelperTests(unittest.TestCase):
             installed_executable = installed / "Contents" / "MacOS" / "SCAFA_Workforce"
             plist = root / "pk.scafa.workforce.monitor.plist"
             plist.write_text("launch agent")
+            user_data = root / "home" / "SCAFAWorkforce"
+            user_data.mkdir(parents=True)
+            database = user_data / "attendance.db"
+            device_config = user_data / "device.json"
+            database.write_bytes(b"sqlite test database bytes")
+            device_config.write_text('{"device_ip":"192.0.2.10"}', encoding="utf-8")
+            expected_hashes = {
+                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in (database, device_config)
+            }
             stop_calls = []
             start_calls = []
 
@@ -996,6 +1042,11 @@ class UpdaterHelperTests(unittest.TestCase):
             self.assertEqual(stop_calls, [501, 501])
             self.assertEqual(start_calls, [(plist, 501), (plist, 501)])
             launch.assert_called_once()
+            actual_hashes = {
+                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in (database, device_config)
+            }
+            self.assertEqual(actual_hashes, expected_hashes)
 
     def test_macos_update_preserves_backup_and_recovery_marker_if_new_monitor_cannot_be_stopped(self):
         with tempfile.TemporaryDirectory() as tmp:
