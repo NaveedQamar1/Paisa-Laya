@@ -125,6 +125,88 @@ class MonitorStateTests(unittest.TestCase):
                 ],
             )
 
+    def test_monitor_bootstraps_v13_database_schema_before_sync(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "attendance.db"
+            with closing(sqlite3.connect(database)) as db, db:
+                db.execute(
+                    "CREATE TABLE staff(user_id TEXT PRIMARY KEY,name TEXT NOT NULL DEFAULT '')"
+                )
+                db.execute(
+                    """CREATE TABLE punches(
+                       user_id TEXT NOT NULL,punch_time TEXT NOT NULL,status TEXT DEFAULT '',
+                       UNIQUE(user_id,punch_time,status))"""
+                )
+                db.execute(
+                    "INSERT INTO staff(user_id,name) VALUES('101','Curated Employee')"
+                )
+                inserted = monitor.sync_device_records(
+                    db,
+                    [SimpleNamespace(user_id=101, name="Device Name")],
+                    [
+                        SimpleNamespace(
+                            user_id=101,
+                            timestamp=datetime(2026, 11, 15, 9, 0, 0),
+                            status=0,
+                        )
+                    ],
+                )
+                columns = {row[1] for row in db.execute("PRAGMA table_info(staff)")}
+                staff = db.execute(
+                    "SELECT name,name_source,joining_date,active FROM staff WHERE user_id='101'"
+                ).fetchone()
+                history = db.execute(
+                    """SELECT active,effective_date,source FROM staff_status_history
+                       WHERE user_id='101' ORDER BY effective_date,id"""
+                ).fetchall()
+
+        self.assertEqual(inserted, [("2026-11-15 09:00:00", "101", "0", "Curated Employee")])
+        self.assertTrue({"joining_date", "active", "name_source"}.issubset(columns))
+        self.assertEqual(staff, ("Curated Employee", "profile", "", 1))
+        self.assertEqual(
+            history,
+            [
+                (0, "0001-01-01", "device-sync-baseline"),
+                (1, "2026-11-15", "device-sync"),
+            ],
+        )
+
+    def test_monitor_does_not_backdate_inactive_legacy_employee(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "attendance.db"
+            with closing(sqlite3.connect(database)) as db, db:
+                db.execute(
+                    """CREATE TABLE staff(
+                       user_id TEXT PRIMARY KEY,name TEXT NOT NULL DEFAULT '',
+                       joining_date TEXT NOT NULL DEFAULT '',active INTEGER NOT NULL DEFAULT 1)"""
+                )
+                db.execute(
+                    """CREATE TABLE punches(
+                       user_id TEXT NOT NULL,punch_time TEXT NOT NULL,status TEXT DEFAULT '',
+                       UNIQUE(user_id,punch_time,status))"""
+                )
+                db.execute(
+                    "INSERT INTO staff(user_id,name,joining_date,active) VALUES('105','Former Employee','2020-01-01',0)"
+                )
+                monitor.sync_device_records(
+                    db,
+                    [SimpleNamespace(user_id=105, name="Device Name")],
+                    [
+                        SimpleNamespace(
+                            user_id=105,
+                            timestamp=datetime(2020, 1, 2, 9, 0, 0),
+                            status=0,
+                        )
+                    ],
+                )
+                today = monitor.datetime.now().date().isoformat()
+                history = db.execute(
+                    """SELECT active,effective_date,source FROM staff_status_history
+                       WHERE user_id='105' ORDER BY effective_date,id"""
+                ).fetchall()
+
+        self.assertEqual(history, [(0, today, "device-sync")])
+
     def test_monitor_migrates_legacy_staff_names_as_profile_managed(self):
         with tempfile.TemporaryDirectory() as tmp:
             database = Path(tmp) / "attendance.db"

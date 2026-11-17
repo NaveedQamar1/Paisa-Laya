@@ -33,10 +33,11 @@ def ensure_device_employee_status_history(db, user_id, first_punch_date=None, ef
         return False
 
     today = effective_today or date.today().isoformat()
+    active = bool(profile[0])
     effective = today
     joining = str(profile[1] or "").strip()
     joining_is_valid = False
-    if joining:
+    if active and joining:
         try:
             effective = datetime.strptime(
                 joining, "%Y-%m-%d"
@@ -45,7 +46,7 @@ def ensure_device_employee_status_history(db, user_id, first_punch_date=None, ef
             pass
         else:
             joining_is_valid = True
-    if not joining_is_valid and first_punch_date:
+    if active and not joining_is_valid and first_punch_date:
         try:
             effective = datetime.strptime(
                 str(first_punch_date), "%Y-%m-%d"
@@ -53,12 +54,20 @@ def ensure_device_employee_status_history(db, user_id, first_punch_date=None, ef
         except ValueError:
             pass
 
-    db.execute(
-        """INSERT OR IGNORE INTO staff_status_history
-           (user_id,active,effective_date,source)
-           VALUES(?,0,'0001-01-01','device-sync-baseline')""",
-        (uid,)
-    )
+    if active:
+        db.execute(
+            """INSERT OR IGNORE INTO staff_status_history
+               (user_id,active,effective_date,source)
+               VALUES(?,0,'0001-01-01','device-sync-baseline')""",
+            (uid,)
+        )
+    else:
+        # A legacy inactive profile has no known deactivation date. Remove only
+        # synthetic baselines so earlier attendance is not retroactively excluded.
+        db.execute(
+            "DELETE FROM staff_status_history WHERE user_id=? AND source LIKE '%-baseline'",
+            (uid,),
+        )
     db.execute(
         """INSERT INTO staff_status_history(user_id,active,effective_date,source)
            VALUES(?,?,?,'device-sync')

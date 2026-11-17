@@ -505,6 +505,29 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             ],
         )
 
+    def test_device_sync_repairs_inactive_baseline_without_retroactive_deactivation(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                "INSERT INTO staff(user_id,name,joining_date,active) VALUES('58','Former Employee','2020-01-01',0)"
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES('58',0,'0001-01-01','device-sync-baseline')"""
+            )
+            self.assertTrue(
+                app.ensure_device_employee_status_history(
+                    db, "58", "2020-01-02", effective_today="2026-11-17"
+                )
+            )
+            history = db.execute(
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='58' ORDER BY effective_date,id"
+            ).fetchall()
+            self.assertTrue(app.employee_active_on(db, "58", "2026-11-16"))
+            self.assertFalse(app.employee_active_on(db, "58", "2026-11-17"))
+
+        self.assertEqual(history, [(0, "2026-11-17", "device-sync")])
+
     def test_device_sync_repairs_baseline_only_history_without_duplicates(self):
         app.init_db()
         with sqlite3.connect(app.DB) as db:

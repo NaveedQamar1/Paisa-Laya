@@ -146,18 +146,41 @@ def initial_seen_punches(inserted):
     return {(stamp, uid, status) for stamp, uid, status, name in inserted}
 
 
-def sync_device_records(db, users, records):
-    """Synchronize device users and punches, then establish missing employment history."""
-    # The monitor may start before the GUI performs its schema migration. Existing
-    # names must default to profile-managed so this background poll cannot replace
-    # a name curated in Employee Management.
+def ensure_monitor_schema(db):
+    """Create the small employee schema required for safe sync on legacy databases."""
     staff_columns = {
         row[1] for row in db.execute("PRAGMA table_info(staff)")
     }
-    if "name_source" not in staff_columns:
-        db.execute(
-            "ALTER TABLE staff ADD COLUMN name_source TEXT NOT NULL DEFAULT 'profile'"
-        )
+    for column, definition in (
+        ("joining_date", "TEXT NOT NULL DEFAULT ''"),
+        ("active", "INTEGER NOT NULL DEFAULT 1"),
+        # Existing names are profile-managed until a user explicitly edits them.
+        ("name_source", "TEXT NOT NULL DEFAULT 'profile'"),
+    ):
+        if column not in staff_columns:
+            db.execute(f"ALTER TABLE staff ADD COLUMN {column} {definition}")
+
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS staff_status_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            active INTEGER NOT NULL CHECK(active IN (0,1)),
+            effective_date TEXT NOT NULL,
+            changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            source TEXT NOT NULL DEFAULT 'profile',
+            UNIQUE(user_id,effective_date))"""
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_staff_status_history_lookup "
+        "ON staff_status_history(user_id,effective_date)"
+    )
+
+
+def sync_device_records(db, users, records):
+    """Synchronize device users and punches, then establish missing employment history."""
+    # The monitor may start before the GUI performs its schema migration. Prepare
+    # the required columns/table here so a v1.3.0 database can sync immediately.
+    ensure_monitor_schema(db)
 
     synced_ids = set()
     for user in users:
