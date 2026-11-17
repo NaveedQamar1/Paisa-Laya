@@ -32,6 +32,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "..\..\dist\SCAFA_Workforce\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\dist\scafa-updater.exe"; Flags: dontcopy
 
 [Icons]
 Name: "{group}\SCAFA Workforce"; Filename: "{app}\{#MyAppExeName}"
@@ -52,6 +53,7 @@ var
   MonitorWasRunning: Boolean;
   MonitorRestored: Boolean;
   SetupSucceeded: Boolean;
+  MonitorHelperPath: String;
 
 function RunMonitorPowerShell(const Script: String; var OutputText, ErrorText: String): Boolean;
 var
@@ -65,12 +67,23 @@ begin
   Captured.Error := False;
   SetArrayLength(Captured.StdOut, 0);
   SetArrayLength(Captured.StdErr, 0);
-  Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Script + '"';
+  if MonitorHelperPath = '' then begin
+    ErrorText := 'The bounded Task Scheduler command helper has not been initialized.';
+    Result := False;
+    Exit;
+  end;
+  if not FileExists(MonitorHelperPath) then begin
+    ErrorText := 'The bounded Task Scheduler command helper is missing: ' + MonitorHelperPath;
+    Result := False;
+    Exit;
+  end;
+
+  Params := '--installer-powershell-script "' + Script + '"';
 
   try
     Result := ExecAndCaptureOutput(
-      ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-      Params, '', SW_SHOWNORMAL, ewWaitUntilTerminated, ResultCode, Captured);
+      MonitorHelperPath,
+      Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode, Captured);
   except
     ErrorText := GetExceptionMessage;
     Result := False;
@@ -248,6 +261,21 @@ var
   RestoreError: String;
 begin
   Result := '';
+  MonitorHelperPath := ExpandConstant('{tmp}\scafa-updater.exe');
+  try
+    if not FileExists(MonitorHelperPath) then
+      ExtractTemporaryFile('scafa-updater.exe');
+  except
+    ErrorText := GetExceptionMessage;
+    Result := 'SCAFA Workforce could not prepare its bounded background-monitor command helper.' +
+      #13#10 + ErrorText;
+    Exit;
+  end;
+  if not FileExists(MonitorHelperPath) then begin
+    Result := 'SCAFA Workforce could not extract its bounded background-monitor command helper.';
+    Exit;
+  end;
+
   if not ReadMonitorTaskState(State, ErrorText) then begin
     Result := 'SCAFA Workforce cannot safely inspect its background monitor task. ' +
       'Installation was stopped before replacing files.' + #13#10 + ErrorText;
@@ -304,6 +332,14 @@ var
   ErrorText: String;
 begin
   if CurUninstallStep = usUninstall then begin
+    MonitorHelperPath := ExpandConstant('{app}\scafa-updater.exe');
+    if not FileExists(MonitorHelperPath) then begin
+      MsgBox(
+        'SCAFA Workforce could not locate its bounded Task Scheduler command helper. ' +
+        'Uninstallation has been cancelled so the background task is not left pointing to a removed executable.',
+        mbError, MB_OK);
+      Abort;
+    end;
     if not RemoveMonitorTask(ErrorText) then begin
       MsgBox(
         'SCAFA Workforce could not safely stop and remove its background attendance task. ' +
