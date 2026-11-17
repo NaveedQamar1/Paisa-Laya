@@ -37,7 +37,7 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
 
     def test_release_tag_input_is_validated_before_package_and_release_use(self):
         self.assertIn(
-            "$releaseTag -notmatch '^scafa-v[0-9]+\\\\.[0-9]+\\\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {",
+            r"$releaseTag -notmatch '^scafa-v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {",
             self.workflow,
         )
         self.assertEqual(
