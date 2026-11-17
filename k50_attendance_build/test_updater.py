@@ -1000,9 +1000,10 @@ class UpdaterHelperTests(unittest.TestCase):
     def test_macos_update_preserves_backup_and_recovery_marker_if_new_monitor_cannot_be_stopped(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            installed, archive, old_executable = self._make_macos_update_fixture(root)
+            installed, archive, _old_executable = self._make_macos_update_fixture(root)
             installed_executable = installed / "Contents" / "MacOS" / "SCAFA_Workforce"
             backup = installed.with_name("SCAFA_Workforce.app.previous")
+            backup_executable = backup / "Contents" / "MacOS" / "SCAFA_Workforce"
             state_path = installed.with_name("SCAFA_Workforce.app.update-state")
             plist = root / "pk.scafa.workforce.monitor.plist"
             plist.write_text("launch agent")
@@ -1030,7 +1031,7 @@ class UpdaterHelperTests(unittest.TestCase):
                     updater.apply_macos(archive, installed, user_uid=501)
 
             self.assertEqual(installed_executable.read_text(), "new application")
-            self.assertEqual(old_executable.read_text(), "old application")
+            self.assertEqual(backup_executable.read_text(), "old application")
             self.assertTrue(backup.is_dir())
             self.assertEqual(state_path.read_text(encoding="ascii").strip(), "in_progress:loaded")
             self.assertEqual(stop_calls, [501, 501])
