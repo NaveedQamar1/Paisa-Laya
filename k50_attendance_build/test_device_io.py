@@ -353,6 +353,81 @@ class DeviceIOTests(unittest.TestCase):
             ],
         )
 
+    def test_device_sync_falls_back_to_first_punch_for_malformed_joining_date(self):
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                """INSERT INTO staff(user_id,name,joining_date,active)
+                   VALUES('103','Legacy Name','not-a-date',1)"""
+            )
+
+        users = [SimpleNamespace(user_id=103, name="Updated Device Name")]
+        punches = [
+            SimpleNamespace(
+                user_id=103,
+                timestamp=datetime(2024, 3, 5, 17, 0, 0),
+                status=1,
+            ),
+            SimpleNamespace(
+                user_id=103,
+                timestamp=datetime(2024, 3, 3, 9, 0, 0),
+                status=0,
+            ),
+        ]
+
+        class FakeConnection:
+            def disable_device(self):
+                pass
+
+            def enable_device(self):
+                pass
+
+            def disconnect(self):
+                pass
+
+            def get_users(self):
+                return users
+
+            def get_attendance(self):
+                return punches
+
+        class FakeZK:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def connect(self):
+                return FakeConnection()
+
+        fake_module = types.ModuleType("zk")
+        fake_module.ZK = FakeZK
+        ctx = self.context()
+        ctx._fetch_done = Mock()
+        ctx._fetch_error = Mock()
+
+        with patch.dict(sys.modules, {"zk": fake_module}):
+            app.App._fetch_worker(ctx, "192.168.1.50", 4370, 0)
+
+        with sqlite3.connect(app.DB) as db:
+            profile = db.execute(
+                "SELECT joining_date FROM staff WHERE user_id='103'"
+            ).fetchone()
+            history = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='103' ORDER BY effective_date,id"""
+            ).fetchall()
+            self.assertFalse(app.employee_active_on(db, "103", "2024-03-02"))
+            self.assertTrue(app.employee_active_on(db, "103", "2024-03-03"))
+
+        self.assertEqual(profile, ("not-a-date",))
+        self.assertEqual(
+            history,
+            [
+                (0, "0001-01-01", "device-sync-baseline"),
+                (1, "2024-03-03", "device-sync"),
+            ],
+        )
+        ctx._fetch_done.assert_called_once_with(2, 2, 1)
+        ctx._fetch_error.assert_not_called()
+
     def test_device_name_sync_preserves_employee_profile_and_status_history(self):
         with sqlite3.connect(app.DB) as db:
             db.execute(

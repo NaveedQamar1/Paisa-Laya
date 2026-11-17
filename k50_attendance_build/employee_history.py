@@ -35,13 +35,16 @@ def ensure_device_employee_status_history(db, user_id, first_punch_date=None, ef
     today = effective_today or date.today().isoformat()
     effective = today
     joining = str(profile[1] or "").strip()
+    joining_is_valid = False
     if joining:
         try:
             datetime.strptime(joining, "%Y-%m-%d")
-            effective = joining
         except ValueError:
             pass
-    elif first_punch_date:
+        else:
+            effective = joining
+            joining_is_valid = True
+    if not joining_is_valid and first_punch_date:
         try:
             effective = datetime.strptime(
                 str(first_punch_date), "%Y-%m-%d"
