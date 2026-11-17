@@ -96,5 +96,13 @@ class WindowsInstallerMonitorLifecycleTests(unittest.TestCase):
         self.assertNotIn("DeleteFile", self.code)
 
 
+    def test_pascal_line_break_tokens_never_start_preprocessor_directives(self):
+        for line_number, line in enumerate(self.code.splitlines(), start=1):
+            self.assertFalse(
+                line.lstrip().startswith("#"),
+                f"Pascal line-break token starts an Inno Setup preprocessor directive at [Code] line {line_number}.",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

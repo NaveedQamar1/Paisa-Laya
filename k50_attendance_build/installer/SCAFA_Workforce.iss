@@ -267,8 +267,7 @@ begin
       ExtractTemporaryFile('scafa-updater.exe');
   except
     ErrorText := GetExceptionMessage;
-    Result := 'SCAFA Workforce could not prepare its bounded background-monitor command helper.' +
-      #13#10 + ErrorText;
+    Result := 'SCAFA Workforce could not prepare its bounded background-monitor command helper.' + #13#10 + ErrorText;
     Exit;
   end;
   if not FileExists(MonitorHelperPath) then begin
