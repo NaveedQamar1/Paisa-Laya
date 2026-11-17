@@ -1,4 +1,5 @@
 import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, re, subprocess, sys, urllib.request, webbrowser, ssl
+import platform as platform_module
 import tempfile
 import certifi
 from database_lock import ApplicationAlreadyRunningError, application_instance_lock, database_maintenance_lock
@@ -871,12 +872,25 @@ class App(tk.Tk):
                     return
                 assets={str(a.get("name")):a for a in (release.get("assets") or [])}
                 if sys.platform=="win32":
+                    machine = platform_module.machine().lower()
+                    if machine not in ("amd64", "x86_64"):
+                        raise RuntimeError(
+                            "In-app updates require a Windows x64 installation; "
+                            f"this system reports {machine or 'an unknown architecture'}."
+                        )
                     platform="windows"; asset_name="SCAFA_Workforce_Setup.exe"
                 elif sys.platform=="darwin":
                     machine=os.uname().machine.lower()
+                    if machine in ("arm64", "aarch64"):
+                        asset_name="SCAFA_Workforce_macOS_apple-silicon.zip"
+                    elif machine in ("x86_64", "amd64"):
+                        asset_name="SCAFA_Workforce_macOS_intel.zip"
+                    else:
+                        raise RuntimeError(
+                            "In-app updates are not available for this macOS architecture: "
+                            f"{machine or 'unknown'}."
+                        )
                     platform="macos"
-                    asset_name=("SCAFA_Workforce_macOS_apple-silicon.zip"
-                                if machine in ("arm64","aarch64") else "SCAFA_Workforce_macOS_intel.zip")
                 else:
                     raise RuntimeError("In-app updates are currently supported on Windows and macOS only.")
                 if asset_name not in assets or "checksums.txt" not in assets:
