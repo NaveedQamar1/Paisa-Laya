@@ -50,6 +50,17 @@ These are primarily automated regression cases; use a controlled test environmen
 - [ ] If installer execution fails after the monitor stopped, confirm the previous running state is restored.
 - [ ] If monitor restart fails, confirm the error explicitly reports that the monitor could not be restarted; do not report a successful update.
 
+### Direct-installer PowerShell timeout and child cleanup
+
+The installer invokes the bundled `scafa-updater.exe` helper for Task Scheduler commands. The helper runs PowerShell with a 45-second `subprocess.run` timeout, captures stdout/stderr, and terminates the PowerShell child if the limit is exceeded. Automated tests cover timeout configuration, partial output, and the helper's exit code; the following host-level behavior still requires manual fault injection.
+
+- [ ] In a disposable Windows VM, use a test-only Task Scheduler command that sleeps longer than 45 seconds; confirm the installer reports a timeout and returns control without waiting indefinitely.
+- [ ] Confirm the timed-out PowerShell child process is no longer running and no orphaned child remains.
+- [ ] Confirm captured partial stdout/stderr appears in the setup error and setup does not replace application files after an indeterminate task state.
+- [ ] If the monitor was running before a stop attempt, confirm setup recovery attempts to restore its prior running state and reports clearly if restoration fails.
+- [ ] Repeat the timeout during uninstall cleanup; confirm uninstall aborts before deleting application files and does not claim the scheduled task was removed.
+
+
 ### Windows uninstall
 
 - [ ] Uninstall SCAFA Workforce using Windows Apps/Installed Apps.
@@ -137,6 +148,7 @@ For each test, record the result, date, operator, machine, exact commit, workflo
 | Windows v1.3.0 → v1.4 upgrade | Not run | |
 | Windows monitor state preservation | Not run | |
 | Windows updater timeout/rollback | Automated tests pending; manual not run | |
+| Windows direct-installer PowerShell timeout/termination | CI pending; manual not run | |
 | Windows uninstall/data preservation | Not run | |
 | Intel macOS clean install | Not run | |
 | Intel macOS v1.3.0 → v1.4 upgrade | Not run | |
