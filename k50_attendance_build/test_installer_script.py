@@ -61,7 +61,7 @@ class WindowsInstallerMonitorLifecycleTests(unittest.TestCase):
 
     def test_installer_uses_bounded_updater_helper_for_task_scheduler_commands(self):
         self.assertIn(
-            r'Source: "..\\..\\dist\\scafa-updater.exe"; Flags: dontcopy',
+            r'Source: "..\..\dist\scafa-updater.exe"; Flags: dontcopy',
             self.script,
         )
         prepare = self.code.split(
@@ -85,7 +85,7 @@ class WindowsInstallerMonitorLifecycleTests(unittest.TestCase):
             "procedure CurUninstallStepChanged", 1
         )[1]
         self.assertIn(
-            r"MonitorHelperPath := ExpandConstant('{app}\\scafa-updater.exe')",
+            r"MonitorHelperPath := ExpandConstant('{app}\scafa-updater.exe')",
             uninstall,
         )
         self.assertIn("if not FileExists(MonitorHelperPath) then", uninstall)
