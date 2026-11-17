@@ -839,11 +839,11 @@ def main():
             sys.stderr.write(
                 "Timed out while running the Windows installer Task Scheduler command "
                 f"after {WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS} seconds; "
-                "the PowerShell process was terminated.\\n"
+                "the PowerShell process was terminated.\n"
             )
             return 124
         except OSError as exc:
-            sys.stderr.write(f"Could not execute the Windows installer Task Scheduler command: {exc}\\n")
+            sys.stderr.write(f"Could not execute the Windows installer Task Scheduler command: {exc}\n")
             return 1
 
         sys.stdout.write(result.stdout or "")
