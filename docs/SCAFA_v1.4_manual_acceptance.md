@@ -7,6 +7,11 @@ Use a disposable test machine and a copy of production data. Never use the only 
 
 SCAFA Workforce v1.4 is an English-only application. Interface labels, prompts, validation messages, and report headings are expected in English. The release-acceptance dataset uses Latin-script employee names and English status text. Urdu/Arabic font embedding, right-to-left layout, and script shaping are explicitly out of scope and are not release blockers. Continue testing PDF/CSV/Excel escaping, wrapping, and legibility for ordinary English text and long employee names/identifiers.
 
+## Initial delivery scope
+
+- Required targets are **Windows x64 and Intel macOS (x86_64) only**. Apple Silicon/ARM64 builds, CI jobs, artifacts, and physical tests are outside the initial v1.4 delivery scope. An omitted or cancelled ARM64 job is not a release blocker.
+- The physical K50 test in section 4 is **post-delivery user acceptance**, not a blocker to producing the initial tester packages. CI must still pass its mock/fixture coverage for discovery handshakes, fetch, duplicate-safe sync, malformed rows, and connection cleanup/recovery.
+
 
 ## 1. Record the test environment
 
@@ -132,9 +137,9 @@ Use a disposable Intel Mac and a standard login account.
 - [ ] Confirm the package does not stage or rename the whole app bundle to `.previous`.
 
 
-### Apple Silicon — arm64 app ZIP smoke test
+### Future-only architecture checklist — Apple Silicon (outside initial v1.4 scope)
 
-The current PR build produces an Apple Silicon application ZIP, not a signed `.pkg` installer. Use a disposable Apple Silicon Mac (M-series) and a standard login account.
+The initial v1.4 workflow is limited to Windows x64 and Intel macOS. It is not expected to produce an Apple Silicon artifact, and no M-series hardware test is required for this delivery. The following checklist is retained only as optional future architecture-expansion guidance; do not count it as an initial v1.4 acceptance gate.
 
 - [ ] Record macOS version, Mac model/chip, exact artifact ID, workflow run, commit SHA, and archive SHA-256.
 - [ ] Extract the Apple Silicon ZIP and verify the main executable reports `arm64` (for example, with `file` or `lipo -archs`); do not rely only on the runner label or ZIP name.
@@ -147,9 +152,9 @@ The current PR build produces an Apple Silicon application ZIP, not a signed `.p
 - [ ] Record logs/screenshots and the result for each check; mark unavailable physical-device checks as not run rather than passed.
 
 
-## 4. Attendance device and synchronization
+## 4. Post-delivery physical K50 acceptance
 
-Perform these tests against an available physical K50 device; CI cannot substitute for them.
+Perform these checks after the initial tester build is handed over, when the physical K50 and its network are available. These checks are user acceptance, not an initial-delivery blocker. CI mock/fixture tests must cover the core software paths, but they cannot prove communication with the actual device.
 
 - [ ] Discover/connect to the device using the expected IP, port, and communication key.
 - [ ] Fetch attendance records for a known date range and compare representative rows with the device.
@@ -222,8 +227,8 @@ The employee-name ownership regression coverage verifies that legacy rows migrat
 | Intel macOS v1.3.0 → v1.4 upgrade | Not run | Physical Mac or disposable VM required |
 | macOS LaunchAgent stop/restart/rollback | Not run | Physical Mac or disposable VM required |
 | Intel icon patch | Not run | Physical Intel Mac required |
-| Apple Silicon app ZIP launch/helpers/data preservation | Not run | Physical Apple Silicon Mac required |
-| Physical K50 discovery/fetch/sync | Not run | Physical K50 device and network required |
+| Apple Silicon/ARM64 build and hardware test | Out of scope for initial v1.4 | No initial-delivery artifact or runner required |
+| Physical K50 discovery/fetch/sync | Post-delivery user acceptance; not an initial-delivery blocker | User's K50 device and network; record results after handoff |
 | Employee profile/name ownership and dashboard/Excel/PDF regression | Automated suite passed; end-to-end GUI checks not run | Exact-head validation #44094814799 |
 | Backup/restore with monitor enabled | Automated regression passed; live monitor/restore acceptance not run | Exact-head validation #44094814799 |
 
@@ -232,11 +237,11 @@ The employee-name ownership regression coverage verifies that legacy rows migrat
 The current CI workflow builds Windows and macOS artifacts but does not include Windows Authenticode signing or Apple Developer ID signing/notarization steps. Successful compilation and artifact upload do not establish publisher identity or Gatekeeper/SmartScreen acceptance.
 
 - [ ] Release owner decides whether signed Windows distribution is required for v1.4.0.
-- [ ] Release owner decides whether Developer ID signing and Apple notarization are required for Intel and Apple Silicon distribution.
+- [ ] Release owner decides whether Developer ID signing and Apple notarization are required for the Intel macOS distribution.
 - [ ] If signing is required, configure credentials only as protected GitHub Actions secrets; never commit certificates, private keys, passwords, or notarization credentials.
 - [ ] Add platform-specific signing/notarization steps and verify the final distributed binaries/packages (not only intermediate build outputs).
 - [ ] Record certificate identity, notarization result/ticket where applicable, and final installer/package checksums.
-- [ ] If signing is intentionally deferred, document the accepted unsigned-distribution warning and the supported installation instructions before publication.
+- [ ] If signing is intentionally deferred, document the accepted unsigned-distribution warning and the supported Windows and Intel macOS installation instructions before publication.
 
 
-**Release gate:** do not describe v1.4 as production-ready until the applicable CI jobs pass, Windows and Intel macOS artifacts are verified, database-preservation checks pass, and the physical-device/manual acceptance rows above are signed off. A skipped or unavailable platform job remains an open gate.
+**Initial v1.4 delivery gate:** Windows x64 and Intel macOS exact-head validation and packaging must pass; the corresponding artifacts must be present and verified; and required installer, updater/rollback, and database-preservation checks must be completed or explicitly recorded as outstanding manual gates. Apple Silicon/ARM64 is excluded from this delivery and cannot block it. The physical K50 checks in section 4 are post-delivery user acceptance and must be recorded separately, not treated as a prerequisite to handing over the initial tester build. A skipped or unavailable **required Windows or Intel macOS** job remains an open gate.
