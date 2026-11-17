@@ -78,9 +78,9 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
 
 
     def test_release_write_permission_is_limited_to_publisher(self):
-        self.assertIn("permissions:\\n  contents: read", self.workflow)
+        self.assertIn("permissions:\n  contents: read", self.workflow)
         publish = self.workflow.split("  publish:", 1)[1]
-        self.assertIn("permissions:\\n      contents: write", publish)
+        self.assertIn("permissions:\n      contents: write", publish)
         self.assertNotIn("contents: write", self.workflow.split("\njobs:\n", 1)[0])
 
     def test_release_actions_are_pinned_to_immutable_revisions(self):
