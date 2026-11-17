@@ -649,13 +649,76 @@ class MacOSLaunchAgentTests(unittest.TestCase):
             self.assertEqual(run.call_count, 4)
             self.assertEqual(run.call_args_list[2].args[0], ["/bin/launchctl", "bootout", service])
 
-    def test_stop_fails_closed_if_launch_agent_cannot_be_unloaded(self):
+    def test_stop_accepts_nonzero_bootout_when_service_is_confirmed_unloaded(self):
         with tempfile.TemporaryDirectory() as tmp:
             uid, plist = self._agent_fixture(Path(tmp))
-            responses = [self._result(), self._result(), self._result(1, stderr="Operation not permitted")]
+            service = f"gui/{uid}/{updater.MACOS_MONITOR_LABEL}"
+            responses = [
+                self._result(),
+                self._result(),
+                self._result(1, stderr="Operation timed out"),
+                self._result(1, stderr='Could not find service "pk.scafa.workforce.monitor"'),
+            ]
+            with patch.object(updater, "_macos_user_context", return_value=(uid, plist)), \
+                 patch.object(updater.subprocess, "run", side_effect=responses) as run:
+                self.assertEqual(updater.stop_macos_monitor(uid), plist)
+            self.assertEqual(run.call_count, 4)
+            self.assertEqual(run.call_args_list[3].args[0], ["/bin/launchctl", "print", service])
+
+    def test_stop_accepts_bootout_timeout_when_service_is_confirmed_unloaded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            uid, plist = self._agent_fixture(Path(tmp))
+            responses = [
+                self._result(),
+                self._result(),
+                updater.subprocess.TimeoutExpired(["/bin/launchctl", "bootout"], 30),
+                self._result(1, stderr='Could not find service "pk.scafa.workforce.monitor"'),
+            ]
+            with patch.object(updater, "_macos_user_context", return_value=(uid, plist)), \
+                 patch.object(updater.subprocess, "run", side_effect=responses) as run:
+                self.assertEqual(updater.stop_macos_monitor(uid), plist)
+            self.assertEqual(run.call_count, 4)
+
+    def test_stop_fails_closed_if_launch_agent_remains_loaded_after_bootout_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            uid, plist = self._agent_fixture(Path(tmp))
+            responses = [
+                self._result(),
+                self._result(),
+                self._result(1, stderr="Operation not permitted"),
+                self._result(),
+            ]
             with patch.object(updater, "_macos_user_context", return_value=(uid, plist)), \
                  patch.object(updater.subprocess, "run", side_effect=responses):
-                with self.assertRaisesRegex(RuntimeError, "Could not stop"):
+                with self.assertRaisesRegex(RuntimeError, "remains loaded"):
+                    updater.stop_macos_monitor(uid)
+
+    def test_stop_fails_closed_if_postcondition_probe_is_indeterminate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            uid, plist = self._agent_fixture(Path(tmp))
+            responses = [
+                self._result(),
+                self._result(),
+                self._result(1, stderr="Operation not permitted"),
+                self._result(1, stderr="Input/output error"),
+            ]
+            with patch.object(updater, "_macos_user_context", return_value=(uid, plist)), \
+                 patch.object(updater.subprocess, "run", side_effect=responses):
+                with self.assertRaisesRegex(RuntimeError, "Could not determine"):
+                    updater.stop_macos_monitor(uid)
+
+    def test_stop_fails_closed_if_postcondition_probe_times_out(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            uid, plist = self._agent_fixture(Path(tmp))
+            responses = [
+                self._result(),
+                self._result(),
+                self._result(1, stderr="Operation not permitted"),
+                updater.subprocess.TimeoutExpired(["/bin/launchctl", "print"], 30),
+            ]
+            with patch.object(updater, "_macos_user_context", return_value=(uid, plist)), \
+                 patch.object(updater.subprocess, "run", side_effect=responses):
+                with self.assertRaisesRegex(RuntimeError, "postcondition probe failed"):
                     updater.stop_macos_monitor(uid)
 
     def test_start_bootstraps_original_users_agent_and_verifies_loaded_state(self):

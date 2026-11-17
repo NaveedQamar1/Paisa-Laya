@@ -365,6 +365,36 @@ def _validate_macos_agent_plist(plist, user_uid):
     return plist
 
 
+def _confirm_macos_monitor_unloaded_after_failed_bootout(service, failure_detail):
+    """Accept an ambiguous bootout only when launchctl positively confirms absence."""
+    try:
+        confirmation = _run_macos_launchctl("print", service)
+    except RuntimeError as probe_error:
+        raise RuntimeError(
+            "Could not determine whether the original user's attendance monitor stopped "
+            "after the bootout command failed: "
+            + failure_detail
+            + "; postcondition probe failed: "
+            + str(probe_error)
+        ) from probe_error
+
+    if confirmation.returncode and _macos_service_is_missing(confirmation):
+        return
+    if confirmation.returncode:
+        raise RuntimeError(
+            "Could not determine whether the original user's attendance monitor stopped "
+            "after the bootout command failed: "
+            + failure_detail
+            + "; "
+            + _macos_launchctl_detail(confirmation)
+        )
+    raise RuntimeError(
+        "Could not stop the original user's macOS attendance monitor; it remains loaded "
+        "after the bootout command failed: "
+        + failure_detail
+    )
+
+
 def stop_macos_monitor(user_uid=None):
     """Unload the original user's monitor and return its plist only if it was loaded."""
     if sys.platform != "darwin":
@@ -399,12 +429,16 @@ def stop_macos_monitor(user_uid=None):
         )
     _validate_macos_agent_plist(plist, uid)
 
-    stopped = _run_macos_launchctl("bootout", service)
+    try:
+        stopped = _run_macos_launchctl("bootout", service)
+    except RuntimeError as stop_error:
+        _confirm_macos_monitor_unloaded_after_failed_bootout(service, str(stop_error))
+        return plist
     if stopped.returncode:
-        raise RuntimeError(
-            "Could not stop the original user's macOS attendance monitor: "
-            + _macos_launchctl_detail(stopped)
+        _confirm_macos_monitor_unloaded_after_failed_bootout(
+            service, _macos_launchctl_detail(stopped)
         )
+        return plist
 
     confirmation = _run_macos_launchctl("print", service)
     if confirmation.returncode and _macos_service_is_missing(confirmation):
