@@ -69,7 +69,8 @@ class MacOSPackageLifecycleTests(unittest.TestCase):
     def test_postinstall_confirms_monitor_before_removing_recovery_state(self):
         bootstrap = self.postinstall.index('launchctl bootstrap "$domain" "$plist"')
         confirmation = self.postinstall.index('launchctl print "$service"', bootstrap)
-        cleanup = self.postinstall.index('/bin/rm -f "$STATE_FILE"', confirmation)
+        cleanup = self.postinstall.index('clear_state\\nlog "Restored and verified the previously loaded monitor', confirmation)
+        self.assertIn('/bin/rm -f "$STATE_FILE"', self.postinstall)
         self.assertLess(bootstrap, confirmation)
         self.assertLess(confirmation, cleanup)
         self.assertIn("The monitor bootstrap completed, but launchd did not confirm", self.postinstall)
