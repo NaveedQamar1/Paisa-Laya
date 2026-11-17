@@ -178,6 +178,48 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
                 [("17", "2026-11-01 09:45:00", "")],
             )
 
+    def test_gui_migration_removes_inactive_synthetic_baseline_idempotently(self):
+        today = date.today().isoformat()
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                "CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', joining_date TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1)"
+            )
+            db.execute(
+                """CREATE TABLE staff_status_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    active INTEGER NOT NULL CHECK(active IN (0,1)),
+                    effective_date TEXT NOT NULL,
+                    changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    source TEXT NOT NULL DEFAULT 'profile',
+                    UNIQUE(user_id,effective_date)
+                )"""
+            )
+            db.execute(
+                "INSERT INTO staff(user_id,name,active) VALUES('59','Former Employee',0)"
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES('59',0,'0001-01-01','device-sync-baseline')"""
+            )
+
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            self.assertTrue(app.employee_active_on(db, "59", yesterday))
+            self.assertFalse(app.employee_active_on(db, "59", today))
+            first_history = db.execute(
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='59' ORDER BY effective_date,id"
+            ).fetchall()
+        self.assertEqual(first_history, [(0, today, "migration")])
+
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            second_history = db.execute(
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='59' ORDER BY effective_date,id"
+            ).fetchall()
+        self.assertEqual(second_history, first_history)
+
     def test_migration_with_existing_joining_date_creates_active_event_after_baseline(self):
         with sqlite3.connect(app.DB) as db:
             db.execute("CREATE TABLE staff(user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')")
