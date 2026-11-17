@@ -77,5 +77,26 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
         )
 
 
+    def test_release_write_permission_is_limited_to_publisher(self):
+        self.assertIn("permissions:\\n  contents: read", self.workflow)
+        publish = self.workflow.split("  publish:", 1)[1]
+        self.assertIn("permissions:\\n      contents: write", publish)
+        self.assertNotIn("contents: write", self.workflow.split("  jobs:", 1)[0])
+
+    def test_release_actions_are_pinned_to_immutable_revisions(self):
+        for action in (
+            "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
+            "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1",
+            "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f",
+            "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131",
+        ):
+            with self.subTest(action=action):
+                self.assertIn(action, self.workflow)
+        self.assertNotIn("actions/checkout@v4", self.workflow)
+        self.assertNotIn("actions/setup-python@v5", self.workflow)
+        self.assertNotIn("actions/upload-artifact@v4", self.workflow)
+        self.assertNotIn("actions/download-artifact@v4", self.workflow)
+
+
 if __name__ == "__main__":
     unittest.main()
