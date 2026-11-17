@@ -2,6 +2,7 @@
 import argparse
 import os
 import shlex
+import signal
 import stat
 import shutil
 import subprocess
@@ -164,27 +165,105 @@ WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS = 45
 WINDOWS_INSTALLER_TIMEOUT_SECONDS = 15 * 60
 
 
-def run_installer_powershell_script(script):
-    """Run installer Task Scheduler commands with a hard child-process timeout.
+def _terminate_installer_process_tree(process):
+    """Terminate PowerShell and any descendants started by an installer command."""
+    if process.poll() is not None:
+        return
 
-    The Inno Setup API's ExecAndCaptureOutput has no timeout parameter. The
-    installer therefore invokes this bundled helper, which owns and bounds
-    the PowerShell child process and returns its captured output and exit code.
+    if os.name == "nt":
+        taskkill = os.path.join(
+            os.environ.get("SystemRoot", r"C:\Windows"),
+            "System32",
+            "taskkill.exe",
+        )
+        try:
+            subprocess.run(
+                [taskkill, "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+        return
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        try:
+            process.kill()
+        except OSError:
+            pass
+
+
+def run_installer_powershell_script(script):
+    """Run installer Task Scheduler commands with a bounded process-tree timeout.
+
+    Inno Setup's ExecAndCaptureOutput has no timeout parameter, so this bundled
+    helper owns the PowerShell process. On timeout, terminate its entire process
+    tree, reap the process, and preserve captured output for the installer log.
     """
-    return subprocess.run(
-        [
-            "powershell.exe",
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            script,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS,
+    command = [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+    ]
+    popen_options = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+    }
+    if os.name == "nt":
+        popen_options["creationflags"] = getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+        )
+    else:
+        popen_options["start_new_session"] = True
+
+    process = subprocess.Popen(command, **popen_options)
+    try:
+        stdout, stderr = process.communicate(
+            timeout=WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired as timeout_error:
+        _terminate_installer_process_tree(process)
+        try:
+            stdout, stderr = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+            except OSError:
+                pass
+            try:
+                stdout, stderr = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired as cleanup_error:
+                raise RuntimeError(
+                    "The Windows installer Task Scheduler process tree could not "
+                    "be terminated and reaped after its timeout."
+                ) from cleanup_error
+
+        raise subprocess.TimeoutExpired(
+            command,
+            WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS,
+            output=stdout if stdout else timeout_error.output,
+            stderr=stderr if stderr else timeout_error.stderr,
+        )
+
+    return subprocess.CompletedProcess(
+        command, process.returncode, stdout, stderr
     )
 
 
