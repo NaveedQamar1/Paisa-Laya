@@ -116,6 +116,73 @@ class DeviceIOTests(unittest.TestCase):
             )
 
 
+    def test_fetch_worker_leaves_device_ready_and_database_unchanged_if_maintenance_lock_times_out(self):
+        users = [SimpleNamespace(user_id=101, name="Ayesha")]
+        punches = [
+            SimpleNamespace(
+                user_id=101,
+                timestamp=datetime(2026, 11, 16, 9, 0, 0),
+                status=0,
+            )
+        ]
+
+        class FakeConnection:
+            def __init__(self):
+                self.enabled = 0
+                self.disconnected = 0
+
+            def disable_device(self):
+                pass
+
+            def enable_device(self):
+                self.enabled += 1
+
+            def disconnect(self):
+                self.disconnected += 1
+
+            def get_users(self):
+                return users
+
+            def get_attendance(self):
+                return punches
+
+        connection = FakeConnection()
+
+        class FakeZK:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def connect(self):
+                return connection
+
+        fake_module = types.ModuleType("zk")
+        fake_module.ZK = FakeZK
+        ctx = self.context()
+        completed = []
+        errors = []
+        ctx._fetch_done = lambda *args: completed.append(args)
+        ctx._fetch_error = errors.append
+
+        with (
+            patch.dict(sys.modules, {"zk": fake_module}),
+            patch.object(
+                app,
+                "database_maintenance_lock",
+                side_effect=TimeoutError("maintenance lock timed out"),
+            ) as maintenance_lock,
+        ):
+            app.App._fetch_worker(ctx, "192.168.1.50", 4370, 0)
+
+        maintenance_lock.assert_called_once_with(app.DB, timeout=300)
+        self.assertEqual(connection.enabled, 1)
+        self.assertEqual(connection.disconnected, 1)
+        self.assertEqual(completed, [])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("maintenance lock timed out", errors[0])
+        with sqlite3.connect(app.DB) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM staff").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM punches").fetchone()[0], 0)
+
     def test_fetch_worker_syncs_staff_and_deduplicates_raw_punches(self):
         users = [
             SimpleNamespace(user_id=101, name="Ayesha"),
