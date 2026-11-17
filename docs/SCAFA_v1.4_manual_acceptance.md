@@ -3,6 +3,10 @@
 **Status: NOT YET EXECUTED.** This document is a test procedure, not evidence that clean-machine, installer, database-preservation, or physical-device tests have passed.
 
 Use a disposable test machine and a copy of production data. Never use the only copy of a live attendance database for upgrade or rollback testing.
+## Language scope
+
+SCAFA Workforce v1.4 is an English-only application. Interface labels, prompts, validation messages, and report headings are expected in English. The release-acceptance dataset uses Latin-script employee names and English status text. Urdu/Arabic font embedding, right-to-left layout, and script shaping are explicitly out of scope and are not release blockers. Continue testing PDF/CSV/Excel escaping, wrapping, and legibility for ordinary English text and long employee names/identifiers.
+
 
 ## 1. Record the test environment
 
@@ -169,7 +173,7 @@ Perform these tests against an available physical K50 device; CI cannot substitu
 - [ ] Test duplicate employee identifiers and invalid required fields.
 - [ ] Verify dashboard totals against the underlying attendance records for a known date range.
 - [ ] Export Excel and confirm employee names/statuses beginning with `=`, `+`, `-`, or `@` remain literal text rather than formulas.
-- [ ] Export PDF and confirm long names, IDs, and status values render safely and legibly.
+- [ ] Export PDF and confirm English report labels, Latin-script employee names, long IDs, and status values render safely and legibly.
 - [ ] Verify CSV/PDF/Excel exports against the same known records.
 - [ ] Confirm backup and restore preserve employees, attendance, schedules, leave, and settings.
 - [ ] Test backup restore while the background monitor is enabled; confirm maintenance locking prevents partial or inconsistent writes.
@@ -178,7 +182,9 @@ Perform these tests against an available physical K50 device; CI cannot substitu
 
 For each manual test, record the result, date, operator, machine, exact commit, workflow run, artifact ID, and any log/screenshot reference.
 
-### Latest automated CI and packaging evidence — validated PR #11 snapshot `a9ba51a2366bf95d8a8c98b676009e716f91a015`
+### Historical automated CI and packaging evidence — superseded PR #11 snapshot `a9ba51a2366bf95d8a8c98b676009e716f91a015`
+
+> This table is retained for audit only. The newer completed exact-head snapshot is PR #11 commit `4059ab6ed675575a812d8c290fe62aef0da3a5e9`, validated by [run #44114284116](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44114284116) and packaged by [run #44114284049](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44114284049). Those runs do not validate changes made after `4059ab6`; the current monitor-command timeout changes require fresh exact-head CI.
 
 The latest application/test changes before this snapshot are in `d2a9e274` (device-sync completion messaging and its regression test). Commits `c7630b6` and `a9ba51a` update only this manual-acceptance document; they do not change application or test sources. Both workflow runs below validate the exact PR snapshot `a9ba51a2366bf95d8a8c98b676009e716f91a015`.
 
