@@ -148,14 +148,26 @@ def initial_seen_punches(inserted):
 
 def sync_device_records(db, users, records):
     """Synchronize device users and punches, then establish missing employment history."""
+    # The monitor may start before the GUI performs its schema migration. Existing
+    # names must default to profile-managed so this background poll cannot replace
+    # a name curated in Employee Management.
+    staff_columns = {
+        row[1] for row in db.execute("PRAGMA table_info(staff)")
+    }
+    if "name_source" not in staff_columns:
+        db.execute(
+            "ALTER TABLE staff ADD COLUMN name_source TEXT NOT NULL DEFAULT 'profile'"
+        )
+
     synced_ids = set()
     for user in users:
         uid = get_device_user_id(user)
         name = str(getattr(user, "name", "") or "").strip()
         if uid and name:
             db.execute(
-                """INSERT INTO staff(user_id,name) VALUES(?,?)
-                   ON CONFLICT(user_id) DO UPDATE SET name=excluded.name""",
+                """INSERT INTO staff(user_id,name,name_source) VALUES(?,?,'device')
+                   ON CONFLICT(user_id) DO UPDATE SET name=excluded.name
+                   WHERE staff.name_source='device'""",
                 (uid, name),
             )
             synced_ids.add(uid)
