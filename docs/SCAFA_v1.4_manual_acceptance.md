@@ -70,7 +70,7 @@ These are primarily automated regression cases; use a controlled test environmen
 
 ### Direct-installer PowerShell timeout and child cleanup
 
-The installer invokes the bundled `scafa-updater.exe` helper for Task Scheduler commands. The helper runs PowerShell with a 45-second `subprocess.run` timeout, captures stdout/stderr, and terminates the PowerShell child if the limit is exceeded. Automated tests cover timeout configuration, partial output, and the helper's exit code; the following host-level behavior still requires manual fault injection.
+The installer invokes the bundled `scafa-updater.exe` helper for Task Scheduler commands. The helper starts PowerShell with a bounded 45-second process wait, captures stdout/stderr, attempts process-tree termination and reaping when the limit is exceeded, and fails closed if cleanup cannot be confirmed. Automated tests cover timeout configuration, partial output, descendant cleanup, and the unreaped-process failure path; the following host-level behavior still requires manual fault injection.
 
 - [ ] In a disposable Windows VM, use a test-only Task Scheduler command that sleeps longer than 45 seconds; confirm the installer reports a timeout and returns control without waiting indefinitely.
 - [ ] Confirm the timed-out PowerShell child process is no longer running and no orphaned child remains.
@@ -160,6 +160,10 @@ Perform these tests against an available physical K50 device; CI cannot substitu
 ## 5. Employee, dashboard, and reporting regression
 
 - [ ] Create, edit, deactivate, and view an employee profile.
+- [ ] On a disposable copy of a legacy database that predates `staff.name_source`, start the background monitor before opening the GUI; confirm its additive migration preserves every existing employee name.
+- [ ] Run foreground Fetch Attendance against that database; confirm a legacy/profile-managed name is not replaced and a new device user is created with the device-provided name.
+- [ ] Change a device-managed employee name on the device and sync again; confirm the device name refreshes while it remains device-managed.
+- [ ] Save a custom name in Employee Management, then repeat foreground fetch and background monitor sync; confirm neither path overwrites the profile name or changes its department, designation, joining date, active status, or status history.
 - [ ] Confirm employee history and linked attendance remain associated with the correct employee after edits.
 - [ ] Test duplicate employee identifiers and invalid required fields.
 - [ ] Verify dashboard totals against the underlying attendance records for a known date range.
@@ -173,48 +177,29 @@ Perform these tests against an available physical K50 device; CI cannot substitu
 
 For each manual test, record the result, date, operator, machine, exact commit, workflow run, artifact ID, and any log/screenshot reference.
 
-### Latest automated CI and packaging evidence — code/test head `39d6d8341dccade4dddce236a77022e5d776fadb`
+### Latest automated CI and packaging evidence — exact PR #11 head `e108a9d25a64fc7cda6ea4f2b8a07c7650659914`
 
-The latest code/test change is `39d6d83`. This checklist refresh is documentation-only and does not alter the validated application, installer, workflow, or test code.
+The current code/test head is `e108a9d`. It includes the employee-name ownership rules used by foreground fetch and the background monitor, plus the integration-fixture correction that explicitly marks a device-sourced test employee as device-managed. The following workflow runs validate this exact SHA; earlier runs on `39d6d83` and `84c0654` are superseded.
 
-- Validation run [#44076872667](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44076872667) validates exact code/test head `39d6d8341dccade4dddce236a77022e5d776fadb`:
-  - Windows: **201 tests total, 199 passed, 2 skipped** (POSIX-only process-group test and hosted-runner symbolic-link restriction). The Windows PowerShell descendant-process termination integration test and the new fail-closed cleanup test passed.
-  - Intel macOS: **201 tests total, 199 passed, 2 skipped** (Windows-only ScheduledTasks and Windows process-tree tests). The POSIX descendant-process cleanup test passed.
-  - Apple Silicon: **201 tests total, 199 passed, 2 skipped** (the same two Windows-only tests). The POSIX descendant-process cleanup test passed.
-- Packaging run [#44076872697](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44076872697) targets the same exact code/test head. Windows and Intel macOS packaging completed successfully. At this checklist refresh, the Apple Silicon packaging job was still **queued**; it had not failed, but a current-head Apple Silicon artifact was not yet available. Do not mark the complete platform packaging matrix passed until that job finishes.
-- Four current-head artifacts were present and unexpired. They were created on 17 November 2026 and expire **15 February 2027 11:45:28 UTC**. SHA-256 values are GitHub's artifact archive digests.
+- Validation run [#44090661588](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661588) validates exact head `e108a9d25a64fc7cda6ea4f2b8a07c7650659914`:
+  - Windows: **205 tests run, 203 passed, 2 skipped**.
+  - Intel macOS: **205 tests run, 203 passed, 2 skipped**.
+  - Apple Silicon: **205 tests run, 203 passed, 2 skipped**.
+  - All executed tests passed. Skips are platform-specific cases that cannot run on the other operating systems or hosted runner permissions.
+- Packaging run [#44090661362](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661362) targets the same exact head. Windows installer, Intel macOS app/installer, Apple Silicon app ZIP, and artifact uploads all succeeded. The `publish` job was skipped for this pull-request event; no release was published.
+- All five artifacts below were verified present and unexpired. They were created on 17 November 2026 and expire **15 February 2027 at 13:13:59 UTC**. SHA-256 values are GitHub's artifact archive digests, not separately calculated hashes of the extracted installers.
 
 | Artifact | Commit | Download | Size | Created (UTC) | Expires (UTC) | Archive SHA-256 |
 |---|---|---|---:|---|---|---|
-| Windows installer `release-windows` | `39d6d83` | [#14326086071](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44076872697/artifacts/14326086071) | 48,463,378 B | 11:48:23 | 15 Feb 2027 11:45:28 | `5f08501ba67c3beb6114031fbf8753d35ad3f6bf67547f77f1e7d900d35e636b` |
-| Intel macOS app ZIP `release-macos-intel` | `39d6d83` | [#14324722529](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44076872697/artifacts/14324722529) | 39,840,833 B | 11:48:32 | 15 Feb 2027 11:45:28 | `4a80a816505232c543a9de25454c136dbb767d2a702425ef26995b683112c9f5` |
-| Intel macOS installer `release-macos-intel-installer` | `39d6d83` | [#14324848870](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44076872697/artifacts/14324848870) | 39,824,112 B | 11:48:37 | 15 Feb 2027 11:45:28 | `e427a1ca0576d3f0983db90a094788e959ec4809f312c338bd460224978c1999` |
-| Intel icon patch `release-macos-intel-icon-patch` | `39d6d83` | [#14324667635](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44076872697/artifacts/14324667635) | 92,955 B | 11:48:38 | 15 Feb 2027 11:45:28 | `21c2e097a3136174a140fc850d1ec0c6df82b8818866b067a293b6ccc8af58a0` |
-| Apple Silicon app ZIP fallback `release-macos-apple-silicon` | `c0549f2` | [#14325230117](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44074886836/artifacts/14325230117) | 37,153,163 B | 11:33:54 | 15 Feb 2027 11:32:11 | `af59fc80818721db8b7914ad30ab2ac0c1c9b0011739b889ab4de32ffaff34de` |
+| Windows installer `release-windows` | `e108a9d` | [#14332415531](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661362/artifacts/14332415531) | 48,459,148 B | 13:21:06 | 15 Feb 2027 13:13:59 | `f952daada57bffa0edda5ab2a93c0eeff1302a67e5f0144b7e4d8dfb66c38ad2` |
+| Apple Silicon app ZIP `release-macos-apple-silicon` | `e108a9d` | [#14331273915](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661362/artifacts/14331273915) | 37,157,834 B | 13:20:18 | 15 Feb 2027 13:13:59 | `15fd025814ec67f16bead58bb3546ec9dff7abe9e61d2bcfc13dbab7f0776461` |
+| Intel macOS app ZIP `release-macos-intel` | `e108a9d` | [#14331727829](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661362/artifacts/14331727829) | 39,841,684 B | 13:22:38 | 15 Feb 2027 13:13:59 | `ef45c786c995d9a1098d8cdfd778a02cf61741b555a0ad1bd9503cd31dea6292` |
+| Intel macOS installer `release-macos-intel-installer` | `e108a9d` | [#14332027062](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661362/artifacts/14332027062) | 39,822,885 B | 13:22:44 | 15 Feb 2027 13:13:59 | `77d7f006dc510af69aad9a1b01975f6340c2928f2dc6c791f7eaad43c685b727` |
+| Intel icon patch `release-macos-intel-icon-patch` | `e108a9d` | [#14332076653](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661362/artifacts/14332076653) | 92,952 B | 13:22:46 | 15 Feb 2027 13:13:59 | `cc8a2d437aabacade81a7e97331d73abd47a25a3331fa4abd895aea4484a5399` |
 
-These are temporary CI artifacts, not published release assets. The Apple Silicon fallback was built successfully on the preceding code-equivalent head `c0549f2`; the current `39d6d83` change only adds a regression test, but its own Apple Silicon packaging job remains queued. The Apple Silicon deliverable is an app ZIP, not a `.pkg` installer.
+These are temporary CI artifacts for testing, not published release assets. Apple Silicon currently produces an application ZIP rather than a `.pkg` installer. The successful builds do not establish Windows Authenticode signing or Apple Developer ID signing/notarization.
 
-The direct-installer PowerShell helper implementation is in commit `94704ac8309f3038c3c47f6e6d416684d7f63605`, with process-tree and partial-output coverage added by `1f86e32e468268569f09bd16f6c731370073347a`. Commit `39d6d83` adds a further fail-closed test for the case where the helper cannot terminate and reap the timed-out process. That new test passed on all three validation runners.
-
-The concurrency audit also confirmed that the GUI holds `application_instance_lock` for its main loop, preventing a second supported GUI process from writing concurrently; the monitor uses `database_maintenance_lock`, and restore holds that lock through its safety snapshot, replacement, and schema migration. The cross-process single-instance and restore/monitor serialization tests passed on all three validation runners. Older v1.3.0 processes and real upgrade behavior still require the manual upgrade tests below.
-| Gate | Result | Evidence |
-|---|---|---|
-| Windows clean install | Not run | Disposable Windows 10/11 VM required |
-| Windows v1.3.0 → v1.4 upgrade | Not run | Disposable Windows 10/11 VM required |
-| Windows monitor state preservation | Automated regression tests passed on `1f86e32`; manual not run | Exact-head validation #44073752501 |
-| Windows missing scheduled-task detection | Windows PowerShell integration test passed on `39d6d83`; full installer scenario not run | Exact-head validation #44076872667 |
-| Windows updater timeout/rollback | Automated regression tests passed on `1f86e32`; manual fault injection not run | Exact-head validation #44073752501 |
-| Windows direct-installer PowerShell timeout/termination | Automated regression tests passed on `1f86e32`; manual fault injection not run | Exact-head validation #44073752501 |
-| Windows PowerShell descendant-process cleanup | Windows integration test passed on `39d6d83`; manual installer fault injection not run | Exact-head validation #44076872667 |
-| Windows uninstall/data preservation | Not run | Disposable Windows 10/11 VM required |
-| Intel macOS clean install | Not run | Physical Mac or disposable VM required |
-| Intel macOS v1.3.0 → v1.4 upgrade | Not run | Physical Mac or disposable VM required |
-| macOS LaunchAgent stop/restart/rollback | Not run | Physical Mac or disposable VM required |
-| Intel icon patch | Not run | Physical Intel Mac required |
-| Apple Silicon app ZIP launch/helpers/data preservation | Not run | Physical Apple Silicon Mac required |
-| Physical K50 discovery/fetch/sync | Not run | Physical K50 device and network required |
-| Employee/dashboard/Excel/PDF regression | Automated suite passed; end-to-end GUI checks not run | Exact-head validation #44076872667 |
-| Backup/restore with monitor enabled | Automated regression tests passed; live monitor/restore acceptance not run | Exact-head validation #44076872667 |
+The employee-name ownership regression coverage verifies that legacy rows migrate as profile-managed, new device users are device-managed, device-managed names can refresh, and saving a profile switches ownership so later device syncs preserve the curated name. These automated tests passed on all three validation runners. The real-machine GUI/monitor acceptance steps in section 5 remain **not run** until tested on a disposable machine with a K50 device.
 
 ## 7. Distribution signing and notarization decision
 
