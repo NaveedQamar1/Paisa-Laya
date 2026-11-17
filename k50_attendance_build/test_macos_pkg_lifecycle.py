@@ -116,6 +116,7 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         executable_dir.mkdir(parents=True)
         (executable_dir / "SCAFA_Workforce").write_text("app", encoding="utf-8")
         (executable_dir / "scafa-monitor").write_text("monitor", encoding="utf-8")
+        (executable_dir / "scafa-monitor").chmod(0o755)
 
         self.state_dir = self.root / "installer-state"
         self.state_file = self.state_dir / "monitor-state"
@@ -361,6 +362,15 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertFalse(self.state_file.exists())
         self.assertFalse(any(call.startswith("bootstrap ") for call in self._calls()))
+
+    def test_postinstall_retains_recovery_marker_when_new_monitor_helper_is_missing(self):
+        self._prepare_loaded_state("unloaded")
+        self._prepare_recovery_marker()
+        (self.app_bundle / "Contents" / "MacOS" / "scafa-monitor").unlink()
+        result = self._run(POSTINSTALL, "postinstall")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.state_file.exists())
+        self.assertEqual(self.launch_state.read_text(encoding="ascii").strip(), "unloaded")
 
     def test_postinstall_retains_recovery_marker_when_monitor_restore_fails(self):
         self._prepare_loaded_state("unloaded")
