@@ -189,7 +189,7 @@ For each manual test, record the result, date, operator, machine, exact commit, 
 
 ### Historical automated CI and packaging evidence — superseded PR #11 snapshot `a9ba51a2366bf95d8a8c98b676009e716f91a015`
 
-> This table is retained for audit only. The newer completed exact-head snapshot is PR #11 commit `4059ab6ed675575a812d8c290fe62aef0da3a5e9`, validated by [run #44114284116](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44114284116) and packaged by [run #44114284049](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44114284049). Those runs do not validate changes made after `4059ab6`; the current monitor-command timeout changes require fresh exact-head CI.
+> Historical evidence only. The 4059ab6/a9ba51a snapshots below are superseded by section 8, which records the current updater-worker regression coverage, exact-head CI and tester artifacts.
 
 The latest application/test changes before this snapshot are in `d2a9e274` (device-sync completion messaging and its regression test). Commits `c7630b6` and `a9ba51a` update only this manual-acceptance document; they do not change application or test sources. Both workflow runs below validate the exact PR snapshot `a9ba51a2366bf95d8a8c98b676009e716f91a015`.
 
@@ -245,3 +245,37 @@ The current CI workflow builds Windows and macOS artifacts but does not include 
 
 
 **Initial v1.4 delivery gate:** Windows x64 and Intel macOS exact-head validation and packaging must pass; the corresponding artifacts must be present and verified; and required installer, updater/rollback, and database-preservation checks must be completed or explicitly recorded as outstanding manual gates. Apple Silicon/ARM64 is excluded from this delivery and cannot block it. The physical K50 checks in section 4 are post-delivery user acceptance and must be recorded separately, not treated as a prerequisite to handing over the initial tester build. A skipped or unavailable **required Windows or Intel macOS** job remains an open gate.
+
+
+## 8. Current updater release-check worker verification — 18 November 2026
+
+**Code/test commit:** `99312cb9479b59da098e00a0f68274641cfc1baa` on `feature/v1.4-employee-management`.
+
+The new `k50_attendance_build/test_update_check_worker.py` exercises the actual background release-check worker without opening a GUI or making a network request. Five regression tests cover:
+- malformed release tags never reaching the update-offer callback;
+- Windows selecting `SCAFA_Workforce_Setup.exe` and requiring `checksums.txt`;
+- Intel macOS selecting `SCAFA_Workforce_macOS_intel.zip` and requiring `checksums.txt`;
+- missing platform packages or checksum manifests failing closed; and
+- equal/older releases not generating an update offer.
+
+### Exact-code-head validation and packaging
+
+Both workflows below were run against the exact code/test commit `99312cb9479b59da098e00a0f68274641cfc1baa`.
+
+- Validation [run #44159327821](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44159327821): Windows and Intel macOS both passed **228 tests: 226 passed, 2 skipped**. Test, application/helper build, and all executed steps passed on both platforms.
+- Packaging [run #44159327902](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44159327902): Windows and Intel macOS build and artifact-upload jobs passed. The publish job was skipped for this pull-request event; no release was published.
+
+### Verified tester artifacts
+
+All four artifacts are present, unexpired, and associated by GitHub metadata with exact code/test commit `99312cb9479b59da098e00a0f68274641cfc1baa` and packaging run #44159327902. Created 18 November 2026 UTC; expiry **15 February 2027 at 19:30:36 UTC**.
+
+| Artifact | Artifact ID / download | Size | Created (UTC) |
+|---|---|---:|---|
+| Windows installer `release-windows` | [#14362552497](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44159327902/artifacts/14362552497) | 48,461,403 B | 19:32:47 |
+| Intel macOS app ZIP `release-macos-intel` | [#14362053097](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44159327902/artifacts/14362053097) | 39,843,224 B | 19:33:09 |
+| Intel macOS installer `release-macos-intel-installer` | [#14361544044](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44159327902/artifacts/14361544044) | 39,828,228 B | 19:33:14 |
+| Intel icon patch `release-macos-intel-icon-patch` | [#14361968327](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44159327902/artifacts/14361968327) | 92,952 B | 19:33:16 |
+
+These are temporary GitHub Actions artifacts, not published release assets. The current PR head may advance with this documentation-only update; the CI evidence above applies to the exact code/test commit shown, not to a later documentation-only commit.
+
+The automated worker tests do **not** prove a real update has been installed. Windows and Intel macOS update-helper execution, monitor stop/restart, database/settings preservation, successful relaunch, rollback, clean install and v1.3.0-to-v1.4 upgrade remain manual release gates. Do not use the in-app Update button until those gates are verified.
