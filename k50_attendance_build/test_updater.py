@@ -56,15 +56,17 @@ class UpdaterHelperTests(unittest.TestCase):
                 "run",
                 side_effect=[
                     unittest.mock.Mock(returncode=0, stdout="RUNNING\n", stderr=""),
+                    unittest.mock.Mock(returncode=0, stdout="STOPPED\n", stderr=""),
                     unittest.mock.Mock(returncode=0),
                     unittest.mock.Mock(returncode=0, stdout="STARTED\n", stderr=""),
                 ],
             ) as run, patch.object(updater.subprocess,"Popen") as launch:
                 updater.apply_windows(installer,root)
-            self.assertEqual(run.call_count, 3)
-            self.assertIn("Stop-ScheduledTask", run.call_args_list[0].args[0][-1])
-            self.assertEqual(run.call_args_list[1].args[0][0], str(installer))
-            self.assertIn("Start-ScheduledTask", run.call_args_list[2].args[0][-1])
+            self.assertEqual(run.call_count, 4)
+            self.assertIn("Get-ScheduledTask", run.call_args_list[0].args[0][-1])
+            self.assertIn("Stop-ScheduledTask", run.call_args_list[1].args[0][-1])
+            self.assertEqual(run.call_args_list[2].args[0][0], str(installer))
+            self.assertIn("Start-ScheduledTask", run.call_args_list[3].args[0][-1])
             launch.assert_called_once_with([str(executable)],cwd=str(root))
 
     def test_windows_update_restarts_monitor_when_installer_fails(self):
@@ -77,14 +79,15 @@ class UpdaterHelperTests(unittest.TestCase):
                 "run",
                 side_effect=[
                     unittest.mock.Mock(returncode=0, stdout="RUNNING\n", stderr=""),
+                    unittest.mock.Mock(returncode=0, stdout="STOPPED\n", stderr=""),
                     unittest.mock.Mock(returncode=5),
                     unittest.mock.Mock(returncode=0, stdout="STARTED\n", stderr=""),
                 ],
             ) as run, patch.object(updater.subprocess,"Popen") as launch:
                 with self.assertRaisesRegex(RuntimeError, "exit code 5"):
                     updater.apply_windows(installer,root)
-            self.assertEqual(run.call_count, 3)
-            self.assertIn("Start-ScheduledTask", run.call_args_list[2].args[0][-1])
+            self.assertEqual(run.call_count, 4)
+            self.assertIn("Start-ScheduledTask", run.call_args_list[3].args[0][-1])
             launch.assert_not_called()
 
     def test_windows_update_aborts_if_running_monitor_cannot_be_stopped(self):
@@ -95,18 +98,87 @@ class UpdaterHelperTests(unittest.TestCase):
             with patch.object(
                 updater.subprocess,
                 "run",
-                return_value=unittest.mock.Mock(
-                    returncode=1, stdout="", stderr="Access is denied."
-                ),
+                side_effect=[
+                    unittest.mock.Mock(returncode=0, stdout="RUNNING\n", stderr=""),
+                    unittest.mock.Mock(returncode=1, stdout="", stderr="Access is denied."),
+                    unittest.mock.Mock(returncode=0, stdout="RUNNING\n", stderr=""),
+                ],
             ) as run, patch.object(updater.subprocess,"Popen") as launch:
                 with self.assertRaisesRegex(RuntimeError, "Could not stop"):
                     updater.apply_windows(installer,root)
-            run.assert_called_once()
-            stop_script = run.call_args.args[0][-1]
-            self.assertIn("Get-ScheduledTask", stop_script)
+            self.assertEqual(run.call_count, 3)
+            state_script = run.call_args_list[0].args[0][-1]
+            stop_script = run.call_args_list[1].args[0][-1]
+            self.assertIn("Get-ScheduledTask", state_script)
+            self.assertIn("Stop-ScheduledTask", stop_script)
             self.assertIn("-ErrorAction Stop", stop_script)
             self.assertIn("NoMatchingCimInstance", stop_script)
             launch.assert_not_called()
+
+    def test_windows_stop_timeout_with_confirmed_stopped_postcondition_preserves_restart(self):
+        with patch.object(
+            updater,
+            "_run_windows_monitor_command",
+            side_effect=[
+                "RUNNING",
+                RuntimeError("Timed out while trying to stop the Windows attendance monitor."),
+                "NOT_RUNNING",
+            ],
+        ) as command:
+            self.assertTrue(updater.stop_windows_monitor())
+        self.assertEqual(command.call_count, 3)
+        self.assertIn("Get-ScheduledTask", command.call_args_list[0].args[0])
+        self.assertIn("Stop-ScheduledTask", command.call_args_list[1].args[0])
+        self.assertIn("Get-ScheduledTask", command.call_args_list[2].args[0])
+
+    def test_windows_stop_timeout_aborts_when_monitor_remains_running(self):
+        with patch.object(
+            updater,
+            "_run_windows_monitor_command",
+            side_effect=[
+                "RUNNING",
+                RuntimeError("Timed out while trying to stop the Windows attendance monitor."),
+                "RUNNING",
+            ],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "still running"):
+                updater.stop_windows_monitor()
+
+    def test_windows_stop_timeout_aborts_when_postcondition_probe_fails(self):
+        with patch.object(
+            updater,
+            "_run_windows_monitor_command",
+            side_effect=[
+                "RUNNING",
+                RuntimeError("Timed out while trying to stop the Windows attendance monitor."),
+                RuntimeError("Could not inspect the task."),
+            ],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Could not verify whether the attendance monitor stopped"):
+                updater.stop_windows_monitor()
+
+    def test_windows_monitor_command_uses_a_bounded_timeout(self):
+        result = unittest.mock.Mock(returncode=0, stdout="RUNNING\\n", stderr="")
+        with patch.object(updater.subprocess, "run", return_value=result) as run:
+            self.assertEqual(
+                updater._run_windows_monitor_command("Get-ScheduledTask", "inspect"),
+                "RUNNING",
+            )
+        self.assertEqual(
+            run.call_args.kwargs["timeout"],
+            updater.WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS,
+        )
+
+    def test_windows_monitor_command_reports_timeout(self):
+        with patch.object(
+            updater.subprocess,
+            "run",
+            side_effect=updater.subprocess.TimeoutExpired(
+                cmd="powershell.exe", timeout=updater.WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Timed out while trying to inspect"):
+                updater._run_windows_monitor_command("Get-ScheduledTask", "inspect")
 
     def test_zip_extraction_rejects_parent_directory_paths(self):
         import zipfile

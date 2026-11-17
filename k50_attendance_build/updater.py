@@ -77,6 +77,24 @@ def show_error(message):
 
 WINDOWS_MONITOR_TASK_NAME = "SCAFA Workforce Attendance Monitor"
 
+WINDOWS_MONITOR_STATE_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+$taskName = 'SCAFA Workforce Attendance Monitor'
+try {
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+} catch {
+    if ($_.FullyQualifiedErrorId -like 'NoMatchingCimInstance*') {
+        Write-Output 'MISSING'
+        exit 0
+    }
+    throw
+}
+$state = [string]$task.State
+if ($state -eq 'Running') { Write-Output 'RUNNING' }
+elseif ($state -eq 'Disabled') { Write-Output 'DISABLED' }
+else { Write-Output 'NOT_RUNNING' }
+"""
+
 WINDOWS_MONITOR_STOP_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
 $taskName = 'SCAFA Workforce Attendance Monitor'
@@ -107,7 +125,7 @@ do {
 if ($state -eq 'Running') {
     throw 'The attendance monitor task did not stop within 30 seconds.'
 }
-Write-Output 'RUNNING'
+Write-Output 'STOPPED'
 """
 
 WINDOWS_MONITOR_START_SCRIPT = r"""
@@ -131,21 +149,35 @@ Write-Output 'STARTED'
 """
 
 
+WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS = 45
+
+
 def _run_windows_monitor_command(script, operation):
-    result = subprocess.run(
-        [
-            "powershell.exe",
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            script,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"Timed out while trying to {operation} the Windows attendance monitor "
+            f"after {WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS} seconds."
+        ) from exc
+    except OSError as exc:
+        raise RuntimeError(
+            f"Could not execute the Windows attendance monitor {operation} command: {exc}"
+        ) from exc
     if result.returncode:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(
@@ -156,17 +188,55 @@ def _run_windows_monitor_command(script, operation):
     return output[-1].upper() if output else ""
 
 
-def stop_windows_monitor():
-    """Stop a running scheduled monitor before replacing its executable."""
+def _windows_monitor_state():
+    """Return a positively observed state for the per-user scheduled monitor."""
     state = _run_windows_monitor_command(
-        WINDOWS_MONITOR_STOP_SCRIPT, "stop"
+        WINDOWS_MONITOR_STATE_SCRIPT, "inspect"
     )
-    if state == "RUNNING":
-        return True
-    if state in {"MISSING", "NOT_RUNNING", "DISABLED"}:
+    if state not in {"RUNNING", "NOT_RUNNING", "DISABLED", "MISSING"}:
+        raise RuntimeError(
+            f"Could not confirm the Windows attendance monitor state: {state or 'no response'}."
+        )
+    return state
+
+
+def stop_windows_monitor():
+    """Stop a running scheduled monitor and verify ambiguous command outcomes."""
+    initial_state = _windows_monitor_state()
+    if initial_state in {"MISSING", "NOT_RUNNING", "DISABLED"}:
         return False
+    if initial_state != "RUNNING":
+        raise RuntimeError(
+            f"Could not confirm the Windows attendance monitor state: {initial_state or 'no response'}."
+        )
+
+    try:
+        state = _run_windows_monitor_command(
+            WINDOWS_MONITOR_STOP_SCRIPT, "stop"
+        )
+    except RuntimeError as stop_error:
+        try:
+            post_state = _windows_monitor_state()
+        except Exception as probe_error:
+            raise RuntimeError(
+                f"{stop_error} Could not verify whether the attendance monitor stopped: {probe_error}"
+            ) from stop_error
+        if post_state == "NOT_RUNNING":
+            # The monitor was confirmed running before stop was attempted. Preserve
+            # that fact so apply_windows() restarts it after the installer completes.
+            return True
+        if post_state == "RUNNING":
+            raise RuntimeError(
+                f"{stop_error} The attendance monitor is still running; the update was aborted."
+            ) from stop_error
+        raise RuntimeError(
+            f"{stop_error} The attendance monitor state changed to {post_state}; the update was aborted."
+        ) from stop_error
+
+    if state in {"STOPPED", "NOT_RUNNING"}:
+        return True
     raise RuntimeError(
-        f"Could not confirm the Windows attendance monitor state: {state or 'no response'}."
+        f"Could not confirm that the Windows attendance monitor stopped: {state or 'no response'}."
     )
 
 
