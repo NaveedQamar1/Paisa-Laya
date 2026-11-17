@@ -300,6 +300,49 @@ class UpdateCheckWorkerTests(unittest.TestCase):
             self.assertEqual(command[command.index("--platform") + 1], "windows")
             self.assertEqual(command[command.index("--package") + 1], str(staged / asset_name))
 
+    def test_download_worker_removes_partial_files_when_checksum_transfer_fails(self):
+        package_bytes = b"complete installer"
+        asset_name = "SCAFA_Workforce_Setup.exe"
+        release = self.release("scafa-v1.5.0", (asset_name, "checksums.txt"))
+
+        partial_checksum = MagicMock()
+        partial_checksum.__enter__.return_value = partial_checksum
+        partial_checksum.read.side_effect = [
+            b"partial checksum data",
+            OSError("connection reset during checksum download"),
+        ]
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            install = root / "install"
+            install.mkdir()
+            executable = install / "SCAFA_Workforce.exe"
+            self.window._pending_release = (release, asset_name, "windows")
+
+            with patch.object(app.Path, "home", return_value=home), patch.object(
+                app.sys, "executable", str(executable)
+            ), patch.object(
+                app.urllib.request,
+                "urlopen",
+                side_effect=[
+                    self.download_response(package_bytes),
+                    partial_checksum,
+                ],
+            ) as open_asset:
+                self.window._download_and_prepare_update()
+                self.window.after.assert_called_once()
+                self.window.after.call_args.args[1]()
+
+            staged = home / "SCAFAWorkforce" / "updates"
+            self.assertEqual(open_asset.call_count, 2)
+            self.assertFalse((staged / asset_name).exists())
+            self.assertFalse((staged / "checksums.txt").exists())
+            self.assertFalse((staged / "scafa-updater-run.exe").exists())
+            self.update_failed.assert_called_once()
+            self.assertIn("connection reset", self.update_failed.call_args.args[0])
+
+
     def test_download_worker_rejects_checksum_mismatch_without_launching(self):
         package_bytes = b"tampered installer"
         wrong_digest = hashlib.sha256(b"original installer").hexdigest()
