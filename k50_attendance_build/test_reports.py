@@ -228,6 +228,30 @@ class ReportExportTests(unittest.TestCase):
         page_count = len(re.findall(rb"/Type\s*/Page\b", pdf))
         self.assertGreaterEqual(page_count, 3)
 
+    def test_pdf_export_escapes_employee_names_and_status_markup(self):
+        destination = self.root / "markup-safe-attendance.pdf"
+        ctx = self.context()
+        unsafe_name = '<b>Ayesha & Co</b> <script>alert("x")</script>'
+        ctx._name = lambda uid: unsafe_name if str(uid) == "101" else "Bilal"
+        ctx._attendance_day_status = lambda uid, day, stamps: (
+            "<b>Present & verified</b>",
+            "09:45",
+            "18:00",
+            8.25,
+        )
+
+        with patch.object(app.filedialog, "asksaveasfilename", return_value=str(destination)), \
+             patch.object(app.messagebox, "showinfo") as showinfo, \
+             patch.object(app.messagebox, "showerror") as showerror:
+            app.App.export_pdf(ctx)
+
+        showinfo.assert_called_once()
+        showerror.assert_not_called()
+        pdf = destination.read_bytes()
+        self.assertTrue(pdf.startswith(b"%PDF-"))
+        page_count = len(re.findall(rb"/Type\s*/Page\b", pdf))
+        self.assertGreaterEqual(page_count, 3)
+
 
 class CSVImportRegressionTests(unittest.TestCase):
     def setUp(self):
