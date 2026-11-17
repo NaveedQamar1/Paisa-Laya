@@ -38,12 +38,17 @@ jobs:
           python-version: "3.12"
       - name: Build Windows installer
         shell: pwsh
+        env:
+          SCAFA_RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag }}
         run: |
-          $releaseTag = "${{ github.event.inputs.release_tag }}"
+          $releaseTag = $env:SCAFA_RELEASE_TAG_INPUT
           if ([string]::IsNullOrWhiteSpace($releaseTag)) {
             $versionLine = Select-String -Path "k50_attendance_build/app.py" -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
             if (-not $versionLine) { throw "APP_VERSION was not found in app.py" }
             $releaseTag = "scafa-v$($versionLine.Matches[0].Groups[1].Value)"
+          }
+          if (-not [string]::IsNullOrWhiteSpace($releaseTag) -and $releaseTag -notmatch '^scafa-v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "release_tag must match scafa-vMAJOR.MINOR.PATCH, optionally with a prerelease suffix."
           }
           $version = $releaseTag -replace '^scafa-v',''
           python -m pip install --upgrade pip
@@ -82,12 +87,18 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build macOS app
+        env:
+          SCAFA_RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag }}
         run: |
-          RELEASE_TAG="${{ github.event.inputs.release_tag }}"
+          RELEASE_TAG="${SCAFA_RELEASE_TAG_INPUT:-}"
           if [ -z "$RELEASE_TAG" ]; then
             APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
             if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
             RELEASE_TAG="scafa-v$APP_VERSION"
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^scafa-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "release_tag must match scafa-vMAJOR.MINOR.PATCH, optionally with a prerelease suffix." >&2
+            exit 1
           fi
           VERSION="${RELEASE_TAG#scafa-v}"
           python -m pip install --upgrade pip
@@ -155,14 +166,19 @@ jobs:
       - name: Generate checksums and publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          SCAFA_RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag }}
         shell: bash
         run: |
           set -euo pipefail
+          RELEASE_TAG="${SCAFA_RELEASE_TAG_INPUT:-}"
           if [ -z "$RELEASE_TAG" ]; then
             APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
             if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
             RELEASE_TAG="scafa-v$APP_VERSION"
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^scafa-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "release_tag must match scafa-vMAJOR.MINOR.PATCH, optionally with a prerelease suffix." >&2
+            exit 1
           fi
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             echo "Release $RELEASE_TAG already exists; skipping duplicate publication."
