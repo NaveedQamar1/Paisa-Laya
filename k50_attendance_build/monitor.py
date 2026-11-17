@@ -16,6 +16,9 @@ DB = DB_BASE / "attendance.db"
 CONFIG = BASE / "device.json"
 STATE = BASE / "monitor-state.json"
 
+# AppleScript is best-effort; it must never stall attendance polling indefinitely.
+MACOS_NOTIFICATION_TIMEOUT_SECONDS = 10
+
 
 def notify(title, message):
     """Send a native desktop notification and return any delivery error."""
@@ -23,7 +26,8 @@ def notify(title, message):
         result = subprocess.run(
             ["/usr/bin/osascript", "-e",
              f'display notification {json.dumps(message)} with title {json.dumps(title)}'],
-            capture_output=True, text=True, check=False
+            capture_output=True, text=True, check=False,
+            timeout=MACOS_NOTIFICATION_TIMEOUT_SECONDS,
         )
         if result.returncode:
             raise RuntimeError(result.stderr.strip() or "macOS notification delivery failed")

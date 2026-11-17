@@ -335,6 +335,46 @@ class MonitorNotificationTests(unittest.TestCase):
     def sample_event(self):
         return [("2026-11-15 09:00:00", "101", "0", "Ayesha")]
 
+    def test_macos_notification_uses_a_bounded_subprocess_timeout(self):
+        result = SimpleNamespace(returncode=0, stderr="")
+        with patch.object(monitor.sys, "platform", "darwin"), patch.object(
+            monitor.subprocess, "run", return_value=result
+        ) as run:
+            monitor.notify("Employee arrived", "Ayesha arrived")
+
+        self.assertEqual(
+            run.call_args.kwargs["timeout"],
+            monitor.MACOS_NOTIFICATION_TIMEOUT_SECONDS,
+        )
+        self.assertEqual(run.call_args.args[0][0], "/usr/bin/osascript")
+
+    def test_macos_notification_timeout_keeps_punch_unseen_and_retries(self):
+        inserted = self.sample_event()
+        key = ("2026-11-15 09:00:00", "101", "0")
+        timeout = monitor.subprocess.TimeoutExpired(
+            cmd=["/usr/bin/osascript"],
+            timeout=monitor.MACOS_NOTIFICATION_TIMEOUT_SECONDS,
+        )
+        delivered = SimpleNamespace(returncode=0, stderr="")
+
+        with patch.object(monitor.sys, "platform", "darwin"), patch.object(
+            monitor.subprocess, "run", side_effect=[timeout, delivered]
+        ) as run, patch.object(monitor, "log_error") as log_error:
+            seen = monitor.notify_new_punches(inserted, set())
+            self.assertNotIn(key, seen)
+
+            seen = monitor.notify_new_punches(inserted, seen)
+
+        self.assertIn(key, seen)
+        self.assertEqual(run.call_count, 2)
+        self.assertTrue(
+            all(
+                call.kwargs["timeout"] == monitor.MACOS_NOTIFICATION_TIMEOUT_SECONDS
+                for call in run.call_args_list
+            )
+        )
+        log_error.assert_called_once()
+
     def test_first_poll_establishes_baseline_without_historical_notifications(self):
         inserted = self.sample_event()
         with patch.object(monitor, "notify") as notify:
