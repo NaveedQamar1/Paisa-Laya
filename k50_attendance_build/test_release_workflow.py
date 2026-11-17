@@ -98,6 +98,21 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
         self.assertNotIn("actions/download-artifact@v4", self.workflow)
 
 
+    def test_initial_delivery_ci_matrix_matches_supported_platforms(self):
+        validation_path = (
+            Path(__file__).resolve().parents[1]
+            / ".github"
+            / "workflows"
+            / "scafa-validation.yml"
+        )
+        validation_workflow = validation_path.read_text(encoding="utf-8")
+        for workflow in (self.workflow, validation_workflow):
+            with self.subTest(workflow="release" if workflow is self.workflow else "validation"):
+                self.assertIn("runner: macos-15-intel", workflow)
+                self.assertNotIn("apple-silicon", workflow)
+                self.assertNotIn("runner: macos-15\\n", workflow)
+                self.assertIn("runs-on: windows-latest", workflow)
+
     def test_build_workflow_uses_pinned_pillow_from_requirements(self):
         requirements = (
             Path(__file__).with_name("requirements.txt")
