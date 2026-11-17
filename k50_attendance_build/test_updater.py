@@ -13,6 +13,29 @@ import updater
 import app
 
 
+class ReleaseTagValidationTests(unittest.TestCase):
+    def test_parse_release_tag_accepts_exact_three_component_version(self):
+        self.assertEqual(app.parse_release_tag("scafa-v1.4.1"), (1, 4, 1))
+        self.assertEqual(app.parse_release_tag("scafa-v10.20.300"), (10, 20, 300))
+
+    def test_parse_release_tag_rejects_tags_outside_release_format(self):
+        invalid_tags = (
+            "",
+            "1.5.0",
+            "v1.5.0",
+            "scafa-v1.5",
+            "scafa-v1.5.0.1",
+            "scafa-v1.5.0-rc1",
+            "scafa-v1.x.0",
+            "scafa-v-1.5.0",
+            None,
+        )
+        for tag in invalid_tags:
+            with self.subTest(tag=tag):
+                with self.assertRaisesRegex(RuntimeError, "invalid SCAFA version tag"):
+                    app.parse_release_tag(tag)
+
+
 class UpdaterHelperTests(unittest.TestCase):
     def setUp(self):
         # Unit tests must never stop a real LaunchAgent on the developer or CI host.
