@@ -44,14 +44,18 @@ class DeviceIOTests(unittest.TestCase):
         ]
 
         class FakeConnection:
+            def __init__(self):
+                self.enabled = 0
+                self.disconnected = 0
+
             def disable_device(self):
                 pass
 
             def enable_device(self):
-                pass
+                self.enabled += 1
 
             def disconnect(self):
-                pass
+                self.disconnected += 1
 
             def get_users(self):
                 return users
@@ -59,12 +63,14 @@ class DeviceIOTests(unittest.TestCase):
             def get_attendance(self):
                 return punches
 
+        connection = FakeConnection()
+
         class FakeZK:
             def __init__(self, *args, **kwargs):
                 pass
 
             def connect(self):
-                return FakeConnection()
+                return connection
 
         fake_module = types.ModuleType("zk")
         fake_module.ZK = FakeZK
@@ -75,18 +81,26 @@ class DeviceIOTests(unittest.TestCase):
             (total, inserted, saved)
         )
         ctx._fetch_error = errors.append
+        original_lock = app.database_maintenance_lock
+
+        def checked_maintenance_lock(path, timeout):
+            self.assertEqual(connection.enabled, 1)
+            self.assertEqual(connection.disconnected, 1)
+            return original_lock(path, timeout)
 
         with (
             patch.dict(sys.modules, {"zk": fake_module}),
             patch.object(
                 app,
                 "database_maintenance_lock",
-                wraps=app.database_maintenance_lock,
+                side_effect=checked_maintenance_lock,
             ) as maintenance_lock,
         ):
             app.App._fetch_worker(ctx, "192.168.1.50", 4370, 0)
 
         maintenance_lock.assert_called_once_with(app.DB, timeout=300)
+        self.assertEqual(connection.enabled, 1)
+        self.assertEqual(connection.disconnected, 1)
         self.assertEqual(completed, [(1, 1, 1)])
         self.assertEqual(errors, [])
         with sqlite3.connect(app.DB) as db:
