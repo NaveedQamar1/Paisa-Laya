@@ -279,3 +279,27 @@ All four artifacts are present, unexpired, and associated by GitHub metadata wit
 These are temporary GitHub Actions artifacts, not published release assets. The current PR head may advance with this documentation-only update; the CI evidence above applies to the exact code/test commit shown, not to a later documentation-only commit.
 
 The automated worker tests do **not** prove a real update has been installed. Windows and Intel macOS update-helper execution, monitor stop/restart, database/settings preservation, successful relaunch, rollback, clean install and v1.3.0-to-v1.4 upgrade remain manual release gates. Do not use the in-app Update button until those gates are verified.
+
+## 9. Intel macOS component-installer monitor lifecycle
+
+The Intel macOS component `.pkg` now includes dedicated `preinstall` and `postinstall` scripts. This is an automated lifecycle safeguard; it does **not** replace the required physical-Mac installation and upgrade acceptance tests.
+
+### Installer safeguards
+
+- The preinstall script refuses to replace the app while the SCAFA GUI process is running. Quit the app and rerun the installer.
+- It inspects local user LaunchAgent domains, validates the monitor plist type, ownership, label and executable path, and fails closed if launchd state is ambiguous or more than one SCAFA monitor is loaded.
+- If exactly one monitor is loaded, it writes a root-owned, mode-600 recovery marker and unloads the service. Bundle replacement proceeds only after launchd confirms the service is absent.
+- The postinstall script restores only a monitor recorded as loaded before installation. It validates the installed helper and original user's plist, bootstraps the service, and confirms the loaded state before deleting the recovery marker.
+- If the original user has no active GUI session, the script defers restoration to the next login only when the plist's `RunAtLoad` property is confirmed. If restoration cannot be confirmed, installation reports an error and retains the recovery marker at `/var/db/scafa-workforce-installer/monitor-state`.
+- A clean install or an upgrade where monitoring was disabled does not enable monitoring as a side effect.
+
+### Manual Intel Mac acceptance still required
+
+- [ ] With monitoring enabled, quit the SCAFA GUI, run the Intel `.pkg` upgrade, and confirm the monitor is unloaded during bundle replacement and loaded again after installation.
+- [ ] With monitoring disabled, install/upgrade and confirm no LaunchAgent is created or loaded.
+- [ ] Attempt installation while the GUI is open and confirm the preinstall script aborts before replacing the app.
+- [ ] Verify the database, employee profiles, settings and logs remain intact after upgrade.
+- [ ] In a disposable test account, exercise a postinstall restore failure and verify the recovery marker remains available for diagnosis.
+- [ ] Verify monitor operation after logout/login and after a Mac restart.
+
+The scripts and package contents are syntax-checked and inspected in Intel macOS CI. Real LaunchAgent behaviour, Installer UI behaviour and data preservation remain manual release gates until tested on a physical Intel Mac or disposable macOS VM.
