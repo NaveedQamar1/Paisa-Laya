@@ -164,6 +164,7 @@ Perform these tests against an available physical K50 device; CI cannot substitu
 - [ ] Run foreground Fetch Attendance against that database; confirm a legacy/profile-managed name is not replaced and a new device user is created with the device-provided name.
 - [ ] Change a device-managed employee name on the device and sync again; confirm the device name refreshes while it remains device-managed.
 - [ ] Save a custom name in Employee Management, then repeat foreground fetch and background monitor sync; confirm neither path overwrites the profile name or changes its department, designation, joining date, active status, or status history.
+- [ ] Confirm the fetch success/warning summary reports device users processed, attendance records read, and new records saved; it must not claim that every employee name was changed or synced.
 - [ ] Confirm employee history and linked attendance remain associated with the correct employee after edits.
 - [ ] Test duplicate employee identifiers and invalid required fields.
 - [ ] Verify dashboard totals against the underlying attendance records for a known date range.
@@ -177,29 +178,48 @@ Perform these tests against an available physical K50 device; CI cannot substitu
 
 For each manual test, record the result, date, operator, machine, exact commit, workflow run, artifact ID, and any log/screenshot reference.
 
-### Latest automated CI and packaging evidence — exact PR #11 head `e108a9d25a64fc7cda6ea4f2b8a07c7650659914`
+### Latest automated CI and packaging evidence — validated PR #11 snapshot `c7630b6c2bcae3c2cfb46c5497db3a133b12ed1a`
 
-The current code/test head is `e108a9d`. It includes the employee-name ownership rules used by foreground fetch and the background monitor, plus the integration-fixture correction that explicitly marks a device-sourced test employee as device-managed. The following workflow runs validate this exact SHA; earlier runs on `39d6d83` and `84c0654` are superseded.
+The latest application/test changes before this snapshot are in `d2a9e274` (device-sync completion messaging and its regression test). Commit `c7630b6` adds only a manual-acceptance documentation refresh; it does not change application or test sources. Both workflow runs below target the exact PR snapshot `c7630b6c2bcae3c2cfb46c5497db3a133b12ed1a`.
 
-- Validation run [#44090661588](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661588) validates exact head `e108a9d25a64fc7cda6ea4f2b8a07c7650659914`:
-  - Windows: **205 tests run, 203 passed, 2 skipped**.
-  - Intel macOS: **205 tests run, 203 passed, 2 skipped**.
-  - Apple Silicon: **205 tests run, 203 passed, 2 skipped**.
-  - All executed tests passed. Skips are platform-specific cases that cannot run on the other operating systems or hosted runner permissions.
-- Packaging run [#44090661362](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661362) targets the same exact head. Windows installer, Intel macOS app/installer, Apple Silicon app ZIP, and artifact uploads all succeeded. The `publish` job was skipped for this pull-request event; no release was published.
-- All five artifacts below were verified present and unexpired. They were created on 17 November 2026 and expire **15 February 2027 at 13:13:59 UTC**. SHA-256 values are GitHub's artifact archive digests, not separately calculated hashes of the extracted installers.
+- Validation run [#44094120169](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120169) validates exact head `c7630b6c2bcae3c2cfb46c5497db3a133b12ed1a`:
+  - Windows: **206 tests run, 204 passed, 2 skipped**.
+  - Intel macOS: **206 tests run, 204 passed, 2 skipped**.
+  - Apple Silicon: **206 tests run, 204 passed, 2 skipped**.
+  - All executed tests passed; the two skips on each platform are platform/host-permission-specific.
+- Packaging run [#44094120217](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120217) validates the same exact head. Windows, Intel macOS and Apple Silicon package jobs and all artifact uploads succeeded. The `publish` job was skipped for this pull-request event; no release was published.
+- All five artifacts below were verified present and unexpired. They were created on 17 November 2026 and expire **15 February 2027 at 13:34:43 UTC**. SHA-256 values are GitHub's artifact archive digests, not separately calculated hashes of the extracted installers.
 
 | Artifact | Commit | Download | Size | Created (UTC) | Expires (UTC) | Archive SHA-256 |
 |---|---|---|---:|---|---|---|
-| Windows installer `release-windows` | `e108a9d` | [#14332415531](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661362/artifacts/14332415531) | 48,459,148 B | 13:21:06 | 15 Feb 2027 13:13:59 | `f952daada57bffa0edda5ab2a93c0eeff1302a67e5f0144b7e4d8dfb66c38ad2` |
-| Apple Silicon app ZIP `release-macos-apple-silicon` | `e108a9d` | [#14331273915](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661362/artifacts/14331273915) | 37,157,834 B | 13:20:18 | 15 Feb 2027 13:13:59 | `15fd025814ec67f16bead58bb3546ec9dff7abe9e61d2bcfc13dbab7f0776461` |
-| Intel macOS app ZIP `release-macos-intel` | `e108a9d` | [#14331727829](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661362/artifacts/14331727829) | 39,841,684 B | 13:22:38 | 15 Feb 2027 13:13:59 | `ef45c786c995d9a1098d8cdfd778a02cf61741b555a0ad1bd9503cd31dea6292` |
-| Intel macOS installer `release-macos-intel-installer` | `e108a9d` | [#14332027062](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661362/artifacts/14332027062) | 39,822,885 B | 13:22:44 | 15 Feb 2027 13:13:59 | `77d7f006dc510af69aad9a1b01975f6340c2928f2dc6c791f7eaad43c685b727` |
-| Intel icon patch `release-macos-intel-icon-patch` | `e108a9d` | [#14332076653](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44090661362/artifacts/14332076653) | 92,952 B | 13:22:46 | 15 Feb 2027 13:13:59 | `cc8a2d437aabacade81a7e97331d73abd47a25a3331fa4abd895aea4484a5399` |
+| Windows installer `release-windows` | `c7630b6` | [#14333970516](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120217/artifacts/14333970516) | 48,459,420 B | 13:37:18 | 15 Feb 2027 13:34:43 | `239feaad98c6b8cb7fb86f5ee2828c6cf20ae781f9b487693fbffe3990c15dbb` |
+| Apple Silicon app ZIP `release-macos-apple-silicon` | `c7630b6` | [#14332457598](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120217/artifacts/14332457598) | 37,156,307 B | 13:35:51 | 15 Feb 2027 13:34:43 | `fba42b7242bab90a0bfc58d967beb2d335aff8ceb70b9fc3c10ede992688bd61` |
+| Intel macOS app ZIP `release-macos-intel` | `c7630b6` | [#14332128157](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120217/artifacts/14332128157) | 39,838,120 B | 13:36:37 | 15 Feb 2027 13:34:43 | `b3e4d832409d2ede9bb00fd127678bacbfde13882bf53e11930223ab68f7a246` |
+| Intel macOS installer `release-macos-intel-installer` | `c7630b6` | [#14332653402](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120217/artifacts/14332653402) | 39,815,568 B | 13:36:42 | 15 Feb 2027 13:34:43 | `4feb3d0293f710e7ec075b7e42d7b379811776d90ddbfcd7eab437a3b0993bc2` |
+| Intel icon patch `release-macos-intel-icon-patch` | `c7630b6` | [#14333870350](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120217/artifacts/14333870350) | 92,950 B | 13:36:44 | 15 Feb 2027 13:34:43 | `46f8250a0f6a705d75dcadec3cd781a1b6c6d3f4ea13b24405a8a483404a637a` |
 
 These are temporary CI artifacts for testing, not published release assets. Apple Silicon currently produces an application ZIP rather than a `.pkg` installer. The successful builds do not establish Windows Authenticode signing or Apple Developer ID signing/notarization.
 
-The employee-name ownership regression coverage verifies that legacy rows migrate as profile-managed, new device users are device-managed, device-managed names can refresh, and saving a profile switches ownership so later device syncs preserve the curated name. These automated tests passed on all three validation runners. The real-machine GUI/monitor acceptance steps in section 5 remain **not run** until tested on a disposable machine with a K50 device.
+The employee-name ownership regression coverage verifies that legacy rows migrate as profile-managed, new device users are device-managed, device-managed names can refresh, and saving a profile switches ownership so later device syncs preserve the curated name. The foreground fetch summary accurately reports device users processed rather than implying every profile name was overwritten. These automated tests passed on all three validation runners. The real-machine GUI/monitor acceptance steps in section 5 remain **not run** until tested on a disposable machine with a K50 device.
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Windows clean install | Not run | Disposable Windows 10/11 VM required |
+| Windows v1.3.0 → v1.4 upgrade | Not run | Disposable Windows 10/11 VM required |
+| Windows monitor state preservation | Automated regression passed; manual not run | Exact-head validation #44094120169 |
+| Windows missing scheduled-task detection | Windows PowerShell integration passed; full installer scenario not run | Exact-head validation #44094120169 |
+| Windows updater timeout/rollback | Automated regression passed; manual fault injection not run | Exact-head validation #44094120169 |
+| Windows direct-installer PowerShell timeout/termination | Automated regression passed; manual fault injection not run | Exact-head validation #44094120169 |
+| Windows PowerShell descendant-process cleanup | Windows integration test passed; manual installer fault injection not run | Exact-head validation #44094120169 |
+| Windows uninstall/data preservation | Not run | Disposable Windows 10/11 VM required |
+| Intel macOS clean install | Not run | Physical Mac or disposable VM required |
+| Intel macOS v1.3.0 → v1.4 upgrade | Not run | Physical Mac or disposable VM required |
+| macOS LaunchAgent stop/restart/rollback | Not run | Physical Mac or disposable VM required |
+| Intel icon patch | Not run | Physical Intel Mac required |
+| Apple Silicon app ZIP launch/helpers/data preservation | Not run | Physical Apple Silicon Mac required |
+| Physical K50 discovery/fetch/sync | Not run | Physical K50 device and network required |
+| Employee profile/name ownership and dashboard/Excel/PDF regression | Automated suite passed; end-to-end GUI checks not run | Exact-head validation #44094120169 |
+| Backup/restore with monitor enabled | Automated regression passed; live monitor/restore acceptance not run | Exact-head validation #44094120169 |
 
 ## 7. Distribution signing and notarization decision
 
