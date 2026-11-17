@@ -289,7 +289,7 @@ class UpdaterHelperTests(unittest.TestCase):
                 updater.run_installer_powershell_script("Start-ScheduledTask")
 
     def test_installer_powershell_cli_returns_output_and_child_exit_code(self):
-        result = unittest.mock.Mock(returncode=0, stdout="Running\\n", stderr="")
+        result = unittest.mock.Mock(returncode=0, stdout="Running\n", stderr="")
         stdout = io.StringIO()
         stderr = io.StringIO()
         with patch.object(
@@ -302,15 +302,15 @@ class UpdaterHelperTests(unittest.TestCase):
             return_value=result,
         ), redirect_stdout(stdout), redirect_stderr(stderr):
             self.assertEqual(updater.main(), 0)
-        self.assertEqual(stdout.getvalue(), "Running\\n")
+        self.assertEqual(stdout.getvalue(), "Running\n")
         self.assertEqual(stderr.getvalue(), "")
 
     def test_installer_powershell_cli_reports_timeout_and_preserves_partial_output(self):
         timeout = updater.subprocess.TimeoutExpired(
             cmd="powershell.exe",
             timeout=updater.WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS,
-            output=b"partial output\\n",
-            stderr=b"partial error\\n",
+            output=b"partial output\n",
+            stderr=b"partial error\n",
         )
         stdout = io.StringIO()
         stderr = io.StringIO()
