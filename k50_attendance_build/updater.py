@@ -156,6 +156,30 @@ WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS = 45
 WINDOWS_INSTALLER_TIMEOUT_SECONDS = 15 * 60
 
 
+def run_installer_powershell_script(script):
+    """Run installer Task Scheduler commands with a hard child-process timeout.
+
+    The Inno Setup API's ExecAndCaptureOutput has no timeout parameter. The
+    installer therefore invokes this bundled helper, which owns and bounds
+    the PowerShell child process and returns its captured output and exit code.
+    """
+    return subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS,
+    )
+
+
 def _run_windows_monitor_command(script, operation):
     try:
         result = subprocess.run(
@@ -792,12 +816,43 @@ def apply_macos(package,target,user_uid=None):
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument("--pid",type=int,required=True)
-    parser.add_argument("--package",required=True)
-    parser.add_argument("--target",required=True)
-    parser.add_argument("--platform",choices=("windows","macos"),required=True)
+    parser.add_argument("--pid",type=int)
+    parser.add_argument("--package")
+    parser.add_argument("--target")
+    parser.add_argument("--platform",choices=("windows","macos"))
     parser.add_argument("--user-uid",type=int,default=None)
+    parser.add_argument("--installer-powershell-script")
     args=parser.parse_args()
+
+    if args.installer_powershell_script is not None:
+        try:
+            result = run_installer_powershell_script(args.installer_powershell_script)
+        except subprocess.TimeoutExpired as exc:
+            for stream, output in (
+                (sys.stdout, exc.stdout),
+                (sys.stderr, exc.stderr),
+            ):
+                if output:
+                    if isinstance(output, bytes):
+                        output = output.decode("utf-8", errors="replace")
+                    stream.write(output)
+            sys.stderr.write(
+                "Timed out while running the Windows installer Task Scheduler command "
+                f"after {WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS} seconds; "
+                "the PowerShell process was terminated.\\n"
+            )
+            return 124
+        except OSError as exc:
+            sys.stderr.write(f"Could not execute the Windows installer Task Scheduler command: {exc}\\n")
+            return 1
+
+        sys.stdout.write(result.stdout or "")
+        sys.stderr.write(result.stderr or "")
+        return result.returncode
+
+    if args.pid is None or not args.package or not args.target or not args.platform:
+        parser.error("--pid, --package, --target, and --platform are required for update mode")
+
     try:
         wait_for_process(args.pid)
         if args.platform=="windows":
@@ -817,7 +872,8 @@ def main():
     except Exception as exc:
         show_error(str(exc))
         raise
+    return 0
 
 
 if __name__=="__main__":
-    main()
+    raise SystemExit(main())
