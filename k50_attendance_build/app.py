@@ -183,6 +183,14 @@ def init_db(*, maintenance_lock_held=False):
             ).fetchone()
             if has_status_event:
                 continue
+            if not int(active or 0):
+                # A legacy inactive profile has no known deactivation date. Remove
+                # only synthetic baselines before recording migration-day inactivity;
+                # real status events are preserved by the guard above.
+                c.execute(
+                    "DELETE FROM staff_status_history WHERE user_id=? AND source LIKE '%-baseline'",
+                    (str(uid),),
+                )
             effective = date.today().isoformat()
             if int(active or 0):
                 if valid_joining:
