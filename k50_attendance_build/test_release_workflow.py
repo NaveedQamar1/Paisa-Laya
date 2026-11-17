@@ -37,7 +37,7 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
 
     def test_release_tag_input_is_validated_before_package_and_release_use(self):
         self.assertIn(
-            r"$releaseTag -notmatch '^scafa-v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {",
+            r"$releaseTag -notmatch '^scafa-v[0-9]+\.[0-9]+\.[0-9]+$') {",
             self.workflow,
         )
         self.assertEqual(
@@ -48,6 +48,28 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
         )
         self.assertEqual(self.workflow.count("release_tag must match scafa-vMAJOR.MINOR.PATCH"), 3)
 
+
+    def test_package_version_must_match_application_version(self):
+        self.assertIn(
+            '$appVersion = $versionLine.Matches[0].Groups[1].Value',
+            self.workflow,
+        )
+        self.assertIn(
+            'if ($releaseTag -ne "scafa-v$appVersion")',
+            self.workflow,
+        )
+        self.assertIn(
+            'if [[ "$RELEASE_TAG" != "scafa-v$APP_VERSION" ]]',
+            self.workflow,
+        )
+        self.assertIn('VERSION="$APP_VERSION"', self.workflow)
+        self.assertNotIn('optionally with a prerelease suffix', self.workflow)
+        self.assertEqual(
+            self.workflow.count(
+                "release_tag must exactly match APP_VERSION as scafa-vMAJOR.MINOR.PATCH."
+            ),
+            3,
+        )
 
     def test_release_publication_requires_an_explicit_versioned_tag_ref(self):
         publish = self.workflow.split("  publish:", 1)[1]
