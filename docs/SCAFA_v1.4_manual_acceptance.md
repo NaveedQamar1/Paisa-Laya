@@ -85,6 +85,22 @@ Use a disposable Intel Mac and a standard login account.
 - [ ] Confirm an absent app bundle or missing patch resource produces a clear error and no partial modification.
 - [ ] Confirm the package does not stage or rename the whole app bundle to `.previous`.
 
+
+### Apple Silicon — arm64 app ZIP smoke test
+
+The current PR build produces an Apple Silicon application ZIP, not a signed `.pkg` installer. Use a disposable Apple Silicon Mac (M-series) and a standard login account.
+
+- [ ] Record macOS version, Mac model/chip, exact artifact ID, workflow run, commit SHA, and archive SHA-256.
+- [ ] Extract the Apple Silicon ZIP and verify the main executable reports `arm64` (for example, with `file` or `lipo -archs`); do not rely only on the runner label or ZIP name.
+- [ ] Copy the app bundle to `/Applications`, launch it, and confirm macOS does not report an architecture or missing-library error.
+- [ ] Confirm the displayed application version is v1.4.0 and the application opens the expected `~/SCAFAWorkforce` database rather than creating an empty parallel data directory.
+- [ ] Confirm the bundled monitor and updater helpers exist, are executable, and can be launched by their intended application workflows.
+- [ ] Verify first-run monitor/LaunchAgent setup, normal stop/start, logout/login recovery, and that an intentionally disabled or absent monitor is not silently enabled.
+- [ ] Perform a test update check and verify the updater's checksum validation and rollback behavior without using live production data.
+- [ ] Confirm employee, attendance, device configuration, and backup data remain intact after app replacement and restart.
+- [ ] Record logs/screenshots and the result for each check; mark unavailable physical-device checks as not run rather than passed.
+
+
 ## 4. Attendance device and synchronization
 
 Perform these tests against an available physical K50 device; CI cannot substitute for them.
@@ -126,8 +142,21 @@ For each test, record the result, date, operator, machine, exact commit, workflo
 | Intel macOS v1.3.0 → v1.4 upgrade | Not run | |
 | macOS LaunchAgent stop/restart/rollback | Not run | |
 | Intel icon patch | Not run | |
+| Apple Silicon app ZIP launch/helpers/data preservation | Not run | |
 | Physical K50 discovery/fetch/sync | Not run | |
 | Employee/dashboard/Excel/PDF regression | Not run | |
 | Backup/restore with monitor enabled | Not run | |
+
+## 7. Distribution signing and notarization decision
+
+The current CI workflow builds Windows and macOS artifacts but does not include Windows Authenticode signing or Apple Developer ID signing/notarization steps. Successful compilation and artifact upload do not establish publisher identity or Gatekeeper/SmartScreen acceptance.
+
+- [ ] Release owner decides whether signed Windows distribution is required for v1.4.0.
+- [ ] Release owner decides whether Developer ID signing and Apple notarization are required for Intel and Apple Silicon distribution.
+- [ ] If signing is required, configure credentials only as protected GitHub Actions secrets; never commit certificates, private keys, passwords, or notarization credentials.
+- [ ] Add platform-specific signing/notarization steps and verify the final distributed binaries/packages (not only intermediate build outputs).
+- [ ] Record certificate identity, notarization result/ticket where applicable, and final installer/package checksums.
+- [ ] If signing is intentionally deferred, document the accepted unsigned-distribution warning and the supported installation instructions before publication.
+
 
 **Release gate:** do not describe v1.4 as production-ready until the applicable CI jobs pass, Windows and Intel macOS artifacts are verified, database-preservation checks pass, and the physical-device/manual acceptance rows above are signed off. A skipped or unavailable platform job remains an open gate.
