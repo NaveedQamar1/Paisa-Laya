@@ -82,6 +82,7 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
         app.init_db()
         context = type("Context", (), {})()
         context._names_cache = None
+        context._store_device_users = lambda users, db=None: app.App._store_device_users(context, users, db)
         app.App._store_device_users(
             context,
             [type("DeviceUser", (), {"user_id": "17", "name": "Device Renamed"})()]
@@ -604,6 +605,7 @@ class EmployeeProfileSaveTests(unittest.TestCase):
             )
         context = type("Context", (), {})()
         context._names_cache = None
+        context._store_device_users = lambda users, db=None: app.App._store_device_users(context, users, db)
         app.App._store_device_users(
             context,
             [type("DeviceUser", (), {"user_id": "18", "name": "Updated Device Name"})()]
@@ -613,6 +615,28 @@ class EmployeeProfileSaveTests(unittest.TestCase):
                 "SELECT name,name_source FROM staff WHERE user_id='18'"
             ).fetchone()
         self.assertEqual(row, ("Updated Device Name", "device"))
+
+
+    def test_saving_device_managed_name_switches_it_to_profile_managed(self):
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                """INSERT INTO staff(user_id,name,name_source)
+                   VALUES('19','Device Name','device')"""
+            )
+        self.save_profile("19", "Curated Name", current_user_id="19")
+
+        context = type("Context", (), {})()
+        context._names_cache = None
+        context._store_device_users = lambda users, db=None: app.App._store_device_users(context, users, db)
+        app.App._store_device_users(
+            context,
+            [type("DeviceUser", (), {"user_id": "19", "name": "Later Device Name"})()]
+        )
+        with sqlite3.connect(app.DB) as db:
+            row = db.execute(
+                "SELECT name,name_source FROM staff WHERE user_id='19'"
+            ).fetchone()
+        self.assertEqual(row, ("Curated Name", "profile"))
 
 
     def test_stale_profile_snapshot_cannot_overwrite_device_synced_name(self):
