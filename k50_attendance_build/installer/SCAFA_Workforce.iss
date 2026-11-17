@@ -307,8 +307,7 @@ begin
     if not RemoveMonitorTask(ErrorText) then begin
       MsgBox(
         'SCAFA Workforce could not safely stop and remove its background attendance task. ' +
-        'Uninstallation has been cancelled so the task is not left pointing to a removed executable.' +
-        #13#10#13#10 + ErrorText,
+        'Uninstallation has been cancelled so the task is not left pointing to a removed executable.' + #13#10#13#10 + ErrorText,
         mbError, MB_OK);
       Abort;
     end;
