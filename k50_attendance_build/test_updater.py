@@ -1180,6 +1180,31 @@ class MacOSUpdateAuthorizationTests(unittest.TestCase):
         self.assertIn(shlex_quote_for_test(package), expected_script)
         self.assertIn(shlex_quote_for_test(target), expected_script)
 
+    def test_macos_update_does_not_apply_when_admin_authorization_is_cancelled(self):
+        arguments = self._arguments()
+        helper = "/Applications/SCAFA Workforce.app/Contents/MacOS/scafa-updater"
+
+        with patch.object(updater.sys, "argv", arguments), \
+             patch.object(updater.sys, "executable", helper), \
+             patch.object(updater, "wait_for_process") as wait, \
+             patch.object(updater.os, "access", return_value=False), \
+             patch.object(
+                 updater.subprocess,
+                 "run",
+                 side_effect=updater.subprocess.CalledProcessError(
+                     1, ["/usr/bin/osascript"]
+                 ),
+             ) as run, \
+             patch.object(updater, "show_error") as show_error, \
+             patch.object(updater, "apply_macos") as apply:
+            with self.assertRaises(updater.subprocess.CalledProcessError):
+                updater.main()
+
+        wait.assert_called_once_with(123)
+        run.assert_called_once()
+        show_error.assert_called_once()
+        apply.assert_not_called()
+
     def test_macos_update_applies_directly_when_application_directory_is_writable(self):
         arguments = self._arguments()
         package = arguments[arguments.index("--package") + 1]
