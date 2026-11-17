@@ -36,13 +36,17 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
         )
 
     def test_release_tag_input_is_validated_before_package_and_release_use(self):
-        self.assertIn("$releaseTag -notmatch '^scafa-v[0-9]+", self.workflow)
+        self.assertIn(
+            "$releaseTag -notmatch '^scafa-v[0-9]+\\\\.[0-9]+\\\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {",
+            self.workflow,
+        )
         self.assertEqual(
             self.workflow.count(
                 '[[ ! "$RELEASE_TAG" =~ ^scafa-v[0-9]+'
             ),
             2,
         )
+        self.assertEqual(self.workflow.count("release_tag must match scafa-vMAJOR.MINOR.PATCH"), 3)
 
 
 if __name__ == "__main__":
