@@ -1,4 +1,4 @@
-import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, subprocess, sys, urllib.request, webbrowser, ssl
+import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, re, subprocess, sys, urllib.request, webbrowser, ssl
 import tempfile
 import certifi
 from database_lock import ApplicationAlreadyRunningError, application_instance_lock, database_maintenance_lock
@@ -28,6 +28,24 @@ APP_VERSION = "1.4.0"
 MONITOR_COMMAND_TIMEOUT_SECONDS = 30
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
+
+def parse_release_tag(tag):
+    """Parse only the exact versioned tag format used by SCAFA releases."""
+    if not isinstance(tag, str):
+        raise RuntimeError("The latest GitHub release has an invalid SCAFA version tag.")
+
+    match = re.fullmatch(
+        re.escape(RELEASE_PREFIX) + r"([0-9]+)\\.([0-9]+)\\.([0-9]+)",
+        tag,
+    )
+    if match is None:
+        raise RuntimeError(
+            "The latest GitHub release has an invalid SCAFA version tag. "
+            "Expected scafa-vMAJOR.MINOR.PATCH."
+        )
+    return tuple(int(part) for part in match.groups())
+
+
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
 CSV_EXPORT_FORMAT_COLUMN = "SCAFA Export Format"
 CSV_EXPORT_FORMAT_MARKER = "scafa-workforce-csv-v1"
@@ -814,9 +832,9 @@ class App(tk.Tk):
                 with urllib.request.urlopen(request,timeout=20,context=SSL_CONTEXT) as response:
                     release=json.loads(response.read().decode("utf-8"))
                 tag=str(release.get("tag_name") or "")
-                latest=tag.removeprefix(RELEASE_PREFIX).lstrip("v")
-                current_parts=tuple(int(x) for x in APP_VERSION.split("."))
-                latest_parts=tuple(int(x) for x in latest.split("."))
+                latest_parts = parse_release_tag(tag)
+                latest = tag[len(RELEASE_PREFIX):]
+                current_parts = tuple(int(x) for x in APP_VERSION.split("."))
                 if latest_parts<=current_parts:
                     self.after(0,lambda:self._update_no_update(latest or tag))
                     return
