@@ -1,9 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-APP="/Applications/SCAFA_Workforce.app"
-ICON_SOURCE="$APP/Contents/Resources/scafa_workforce_icon.icns"
+# Installer package scripts run as root. Keep this package script-only so
+# macOS Installer never stages/replaces the entire .app bundle.
+TARGET_VOLUME="${3:-/}"
+APP="${TARGET_VOLUME%/}/Applications/SCAFA_Workforce.app"
+RESOURCES="$APP/Contents/Resources"
 PLIST="$APP/Contents/Info.plist"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ICON_SOURCE="$SCRIPT_DIR/scafa_workforce_icon.icns"
 
 if [ ! -d "$APP" ] || [ ! -f "$PLIST" ]; then
   echo "SCAFA Workforce was not found in /Applications. Install the full application first." >&2
@@ -11,16 +16,17 @@ if [ ! -d "$APP" ] || [ ! -f "$PLIST" ]; then
 fi
 
 if [ ! -f "$ICON_SOURCE" ]; then
-  echo "The SCAFA icon resource is missing. Install the full SCAFA Workforce 1.3.0 package instead." >&2
+  echo "The icon resource is missing from this installer." >&2
   exit 1
 fi
 
-# Changing Info.plist invalidates a signed app bundle. Do not damage a signed installation.
+# Editing Info.plist invalidates a signed bundle. Never modify a signed app.
 if /usr/bin/codesign -dv "$APP" >/dev/null 2>&1; then
-  echo "This installation is code-signed. Use the full signed SCAFA Workforce installer instead." >&2
+  echo "This installation is code-signed. The icon patch will not modify it; use the full signed installer." >&2
   exit 1
 fi
 
+/usr/bin/install -o root -g wheel -m 644 "$ICON_SOURCE" "$RESOURCES/scafa_workforce_icon.icns"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile scafa_workforce_icon.icns" "$PLIST" 2>/dev/null || \
   /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string scafa_workforce_icon.icns" "$PLIST"
 
