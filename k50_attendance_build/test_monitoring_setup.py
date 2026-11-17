@@ -186,7 +186,7 @@ class BackgroundMonitorSetupTests(unittest.TestCase):
                  patch.object(app.sys, "executable", str(root / "SCAFA_Workforce.exe")), \
                  patch.object(app.Path, "home", return_value=root), \
                  patch.object(app.messagebox, "askyesno", return_value=False), \
-                 patch.object(app.subprocess, "run", side_effect=results), \
+                 patch.object(app.subprocess, "run", side_effect=results) as run, \
                  patch.object(app.messagebox, "showwarning") as showwarning, \
                  patch.object(app.messagebox, "showinfo") as showinfo:
                 app.App.configure_background_monitoring(ctx)
