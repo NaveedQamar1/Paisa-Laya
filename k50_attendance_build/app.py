@@ -2165,15 +2165,15 @@ class App(tk.Tk):
     def _fetch_done(self,total,inserted,saved_users=0,device_warning=None):
         self._fetch_in_progress=False
         self.refresh()
-        summary=f"Staff names fetched: {saved_users}\nAttendance records read: {total}\nNew attendance records saved: {inserted}"
+        summary=f"Device users processed: {saved_users}\nAttendance records read: {total}\nNew attendance records saved: {inserted}"
         if device_warning:
-            self.status.set(f"Sync complete • {saved_users} staff names synced • {total} punches read • {inserted} new • DEVICE WARNING")
+            self.status.set(f"Sync complete • {saved_users} device users processed • {total} punches read • {inserted} new • DEVICE WARNING")
             messagebox.showwarning(
                 "Sync completed with device warning",
                 f"{summary}\n\n{device_warning}\n\nCheck the attendance device before the next sync.",
             )
         else:
-            self.status.set(f"Sync complete • {saved_users} staff names synced • {total} punches read • {inserted} new")
+            self.status.set(f"Sync complete • {saved_users} device users processed • {total} punches read • {inserted} new")
             messagebox.showinfo("Sync complete",summary)
 
     def _fetch_error(self,msg,device_warning=None):
