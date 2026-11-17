@@ -173,36 +173,36 @@ Perform these tests against an available physical K50 device; CI cannot substitu
 
 For each manual test, record the result, date, operator, machine, exact commit, workflow run, artifact ID, and any log/screenshot reference.
 
-### Latest exact-head automated CI evidence — code commit `740c51b520fb7be637b92b90d46eb2505ba86529`
+### Latest exact-head automated CI evidence — implementation commit \`94704ac8309f3038c3c47f6e6d416684d7f63605\`, regression-test head \`1f86e32e468268569f09bd16f6c731370073347a\`
 
-- Validation run [#44069968973](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44069968973), exact code SHA `740c51b`:
-  - Windows: **198 tests total, 197 passed, 1 skipped** (the hosted Windows runner does not permit the existing symbolic-link test). The Windows-only integration test for the missing-task error returned by `Get-ScheduledTask` passed.
-  - Intel macOS: **198 tests total, 197 passed, 1 skipped** (the Windows-only ScheduledTasks integration test).
-  - Apple Silicon: **198 tests total, 197 passed, 1 skipped** (the Windows-only ScheduledTasks integration test).
-  - The missing-task regression assertions passed on all three platforms.
-- Packaging run [#44069968797](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44069968797), same exact code SHA, final attempt 2: Windows installer, Intel macOS app ZIP, Intel installer, Intel icon patch, and Apple Silicon app ZIP all built and uploaded. The first Intel attempt hit a temporary DNS resolution failure while upgrading pip; rerunning only the failed Intel job succeeded. The publish job was skipped as expected for a pull request.
-- The five verified CI artifacts below were created on 17 November 2026. SHA-256 values are GitHub's artifact archive digests.
+- Validation run [#44073752501](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44073752501), exact PR head SHA \`1f86e32\`:
+  - Windows: **200 tests total, 198 passed, 2 skipped** (POSIX-only process-group test and hosted-runner symbolic-link restriction). The Windows PowerShell descendant-process termination integration test passed.
+  - Intel macOS: **200 tests total, 198 passed, 2 skipped** (Windows-only ScheduledTasks and Windows process-tree integration tests). The POSIX descendant-process cleanup test passed.
+  - Apple Silicon: **200 tests total, 198 passed, 2 skipped** (the same two Windows-only tests). The POSIX descendant-process cleanup test passed.
+- Packaging run [#44073752386](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44073752386), same exact PR head SHA: Windows installer, Intel macOS app ZIP, Intel installer, Intel icon patch, and Apple Silicon app ZIP all built and uploaded. All build and upload steps succeeded; the publish job was skipped as expected for a pull request.
+- The five verified CI artifacts below were created on 17 November 2026 and expire **15 February 2027 11:24:35 UTC**. SHA-256 values are GitHub's artifact archive digests.
 
 | Artifact | Download | Size | Created (UTC) | Expires (UTC) | Archive SHA-256 |
 |---|---|---:|---|---|---|
-| Windows installer `release-windows` | [#14321792387](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44069968797/artifacts/14321792387) | 48,458,427 B | 11:02:55 | 15 Feb 2027 11:00:09 | `d0f572653aa28d6d776062692aa82b6eed91ea8d699200a6048fd4f12f6b915f` |
-| Apple Silicon app ZIP `release-macos-apple-silicon` | [#14322501391](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44069968797/artifacts/14322501391) | 37,155,579 B | 11:01:01 | 15 Feb 2027 11:00:09 | `787dc4331fb851351d6ffd4bfa172b0cc38cf4cb0411e153c9c1542e6685011d` |
-| Intel macOS app ZIP `release-macos-intel` | [#14321384616](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44069968797/artifacts/14321384616) | 39,837,276 B | 11:05:06 | 15 Feb 2027 11:03:17 | `bf2060eaaa672f2c6bf253aee0c3718056c40141263fa500fce565c146bef20d` |
-| Intel macOS installer `release-macos-intel-installer` | [#14322367173](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44069968797/artifacts/14322367173) | 39,811,771 B | 11:05:10 | 15 Feb 2027 11:03:17 | `850d561947d6fee356449f96609d703a06cc37a03587eb847459ea5cbd5e93b8` |
-| Intel icon patch `release-macos-intel-icon-patch` | [#14321424419](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44069968797/artifacts/14321424419) | 92,954 B | 11:05:12 | 15 Feb 2027 11:03:17 | `272cb2f92bba64e1bb2009589bdcb413c126b08c30d52d2e96de383c33ccc9e4` |
+| Windows installer \`release-windows\` | [#14324570268](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44073752386/artifacts/14324570268) | 48,462,899 B | 11:27:09 | 15 Feb 2027 11:24:35 | \`ff376772228a942f0485b87c1302ae5c2f6b8a63bc7b427b3a3d4d72f124a952\` |
+| Apple Silicon app ZIP \`release-macos-apple-silicon\` | [#14323937471](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44073752386/artifacts/14323937471) | 37,154,483 B | 11:25:47 | 15 Feb 2027 11:24:35 | \`b3ff6126bc7080289655910d711c7aa020849ba3b749b904fd328fa61d3d38ae\` |
+| Intel macOS app ZIP \`release-macos-intel\` | [#14323797231](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44073752386/artifacts/14323797231) | 39,842,821 B | 11:28:07 | 15 Feb 2027 11:24:35 | \`729f89ae8b50bcccaadf6cadc2e3bdf41510e8f52ffc4897df0611742e0aceba\` |
+| Intel macOS installer \`release-macos-intel-installer\` | [#14323274735](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44073752386/artifacts/14323274735) | 39,823,617 B | 11:28:11 | 15 Feb 2027 11:24:35 | \`48dc70d7e90bf57c93e716ea999b15e218346af1736b1ccdbfcf62fa0bb8717b\` |
+| Intel icon patch \`release-macos-intel-icon-patch\` | [#14323204797](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44073752386/artifacts/14323204797) | 92,954 B | 11:28:12 | 15 Feb 2027 11:24:35 | \`ac71c98c8b3f77e1369faca42e9a3eeec311ff167cca3921926562b342c8485e\` |
 
-These are temporary CI artifacts, not published release assets. The Apple Silicon deliverable is an app ZIP, not a `.pkg` installer. Exact-head CI confirms automated tests, compilation, and packaging; it does not prove real-machine installation, data preservation, signing, notarization, or physical-device operation.
+These are temporary CI artifacts, not published release assets. The Apple Silicon deliverable is an app ZIP, not a \`.pkg\` installer. Exact-head CI confirms automated tests, compilation, and packaging; it does not prove real-machine installation, data preservation, signing, notarization, or physical-device operation.
 
-The evidence above validates application code commit `740c51b520fb7be637b92b90d46eb2505ba86529`. This evidence refresh is documentation-only and does not change executable code or workflow definitions.
+The implementation commit \`94704ac8309f3038c3c47f6e6d416684d7f63605\` now terminates the installer PowerShell process tree on timeout: Windows uses \`taskkill /T /F\`, while POSIX test runners terminate the isolated process group. The helper waits for termination and retains captured output. Regression tests in \`1f86e32e468268569f09bd16f6c731370073347a\` verify descendant cleanup and partial-output preservation. The evidence above validates these changes on exact PR head \`1f86e32\`.
 
 | Gate | Result | Evidence |
 |---|---|---|
 | Windows clean install | Not run | Disposable Windows 10/11 VM required |
 | Windows v1.3.0 → v1.4 upgrade | Not run | Disposable Windows 10/11 VM required |
-| Windows monitor state preservation | Automated regression tests passed on `740c51b`; manual not run | Exact-head validation #44069968973 |
-| Windows missing scheduled-task detection | Windows PowerShell integration test passed on `740c51b`; full installer scenario not run | Exact-head validation #44069968973 |
-| Windows updater timeout/rollback | Automated regression tests passed on `740c51b`; manual fault injection not run | Exact-head validation #44069968973 |
-| Windows direct-installer PowerShell timeout/termination | Automated regression tests passed on `740c51b`; manual fault injection not run | Exact-head validation #44069968973 |
+| Windows monitor state preservation | Automated regression tests passed on \`1f86e32\`; manual not run | Exact-head validation #44073752501 |
+| Windows missing scheduled-task detection | Windows PowerShell integration test passed on \`1f86e32\`; full installer scenario not run | Exact-head validation #44073752501 |
+| Windows updater timeout/rollback | Automated regression tests passed on \`1f86e32\`; manual fault injection not run | Exact-head validation #44073752501 |
+| Windows direct-installer PowerShell timeout/termination | Automated regression tests passed on \`1f86e32\`; manual fault injection not run | Exact-head validation #44073752501 |
+| Windows PowerShell descendant-process cleanup | Windows integration test passed on \`1f86e32\`; manual installer fault injection not run | Exact-head validation #44073752501 |
 | Windows uninstall/data preservation | Not run | Disposable Windows 10/11 VM required |
 | Intel macOS clean install | Not run | Physical Mac or disposable VM required |
 | Intel macOS v1.3.0 → v1.4 upgrade | Not run | Physical Mac or disposable VM required |
@@ -210,8 +210,8 @@ The evidence above validates application code commit `740c51b520fb7be637b92b90d4
 | Intel icon patch | Not run | Physical Intel Mac required |
 | Apple Silicon app ZIP launch/helpers/data preservation | Not run | Physical Apple Silicon Mac required |
 | Physical K50 discovery/fetch/sync | Not run | Physical K50 device and network required |
-| Employee/dashboard/Excel/PDF regression | Automated suite passed; end-to-end GUI checks not run | Exact-head validation #44069968973 |
-| Backup/restore with monitor enabled | Automated regression tests passed; live monitor/restore acceptance not run | Exact-head validation #44069968973 |
+| Employee/dashboard/Excel/PDF regression | Automated suite passed; end-to-end GUI checks not run | Exact-head validation #44073752501 |
+| Backup/restore with monitor enabled | Automated regression tests passed; live monitor/restore acceptance not run | Exact-head validation #44073752501 |
 
 ## 7. Distribution signing and notarization decision
 
