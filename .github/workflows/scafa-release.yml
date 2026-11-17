@@ -111,7 +111,7 @@ jobs:
             if [[ "$GITHUB_REF" == refs/tags/scafa-v* ]]; then
               RELEASE_TAG="${GITHUB_REF#refs/tags/}"
             else
-              APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
+              APP_VERSION="$(sed -n 's/^APP_VERSION = "\\([^"]*\\)"/\\1/p' k50_attendance_build/app.py | head -n 1)"
               if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
               RELEASE_TAG="scafa-v$APP_VERSION"
             fi
@@ -135,14 +135,14 @@ jobs:
           python -m PyInstaller --noconfirm --clean --onefile --name scafa-updater k50_attendance_build/updater.py
           install -m 755 dist/scafa-monitor dist/SCAFA_Workforce.app/Contents/MacOS/scafa-monitor
           install -m 755 dist/scafa-updater dist/SCAFA_Workforce.app/Contents/MacOS/scafa-updater
+          # Apply an ad-hoc signature after all bundled executables/resources are in place.
+          # This is not Developer ID signing or notarization; it gives macOS a consistent
+          # sealed bundle for integrity verification and catches damaged bundle contents.
+          codesign --force --deep --sign - --timestamp=none dist/SCAFA_Workforce.app
+          codesign --verify --deep --strict --verbose=2 dist/SCAFA_Workforce.app
           ditto -c -k --sequesterRsrc --keepParent dist/SCAFA_Workforce.app dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
           if [ "${{ matrix.arch }}" = "intel" ]; then
             pkgbuild --component dist/SCAFA_Workforce.app --install-location /Applications --identifier pk.scafa.workforce --version "$VERSION" dist/SCAFA_Workforce_Installer_Intel.pkg
-
-            # Build a script-only icon patch. A payload rooted at the .app path makes
-            # macOS Installer stage/rename the whole app bundle to .app.previous.
-            # Keeping the icon in the scripts directory and copying it from postinstall
-            # avoids replacing the application and runs the copy with installer privileges.
             mkdir -p icon-patch-scripts
             cp k50_attendance_build/assets/scafa_workforce_icon.icns icon-patch-scripts/scafa_workforce_icon.icns
             cp k50_attendance_build/installer/macos-icon-patch-postinstall icon-patch-scripts/postinstall
@@ -200,7 +200,7 @@ jobs:
             if [[ "$GITHUB_REF" == refs/tags/scafa-v* ]]; then
               RELEASE_TAG="${GITHUB_REF#refs/tags/}"
             else
-              APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
+              APP_VERSION="$(sed -n 's/^APP_VERSION = "\\([^"]*\\)"/\\1/p' k50_attendance_build/app.py | head -n 1)"
               if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
               RELEASE_TAG="scafa-v$APP_VERSION"
             fi
@@ -221,7 +221,7 @@ jobs:
           while IFS= read -r -d '' file; do
             name="$(basename "$file")"
             digest="$(sha256sum "$file" | cut -d ' ' -f 1)"
-            printf '%s  %s\n' "$digest" "$name" >> release-assets/checksums.txt
+            printf '%s  %s\\n' "$digest" "$name" >> release-assets/checksums.txt
           done < <(find release-assets -type f ! -name checksums.txt -print0)
           mapfile -d '' assets < <(find release-assets -type f -print0)
           gh release create "$RELEASE_TAG" "${assets[@]}" --repo "${{ github.repository }}" --target "$GITHUB_SHA" --title "SCAFA Workforce $RELEASE_TAG" --generate-notes
