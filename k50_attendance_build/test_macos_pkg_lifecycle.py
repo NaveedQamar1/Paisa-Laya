@@ -341,7 +341,7 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertEqual(self.launch_state.read_text(encoding="ascii").strip(), "loaded")
         self.assertFalse(self.state_file.exists())
-        self.assertIn("bootstrap gui/501", self._calls())
+        self.assertTrue(any(call.startswith("bootstrap gui/501 ") for call in self._calls()))
         self.assertIn("print gui/501/pk.scafa.workforce.monitor", self._calls())
 
     def test_postinstall_leaves_previously_disabled_monitor_unloaded(self):
