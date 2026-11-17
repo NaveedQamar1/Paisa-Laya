@@ -153,6 +153,7 @@ Write-Output 'STARTED'
 
 
 WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS = 45
+WINDOWS_INSTALLER_TIMEOUT_SECONDS = 15 * 60
 
 
 def _run_windows_monitor_command(script, operation):
@@ -263,7 +264,17 @@ def apply_windows(package,target):
     # closing the GUI application. Stop it before replacing scafa-monitor.exe.
     monitor_was_running = stop_windows_monitor()
     try:
-        result=subprocess.run([str(installer),"/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CLOSEAPPLICATIONS"],check=False)
+        try:
+            result=subprocess.run(
+                [str(installer),"/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CLOSEAPPLICATIONS"],
+                check=False,
+                timeout=WINDOWS_INSTALLER_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"The Windows installer did not finish within {WINDOWS_INSTALLER_TIMEOUT_SECONDS} "
+                "seconds; the installer process was terminated."
+            ) from exc
         if result.returncode:
             raise RuntimeError(f"The Windows installer returned exit code {result.returncode}.")
         installed_app=Path(target)/"SCAFA_Workforce.exe"

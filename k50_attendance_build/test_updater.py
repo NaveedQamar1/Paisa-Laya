@@ -42,6 +42,10 @@ class UpdaterHelperTests(unittest.TestCase):
             self.assertEqual(run.call_count, 2)
             self.assertIn("Get-ScheduledTask", run.call_args_list[0].args[0][-1])
             self.assertEqual(run.call_args_list[1].args[0][0], str(installer))
+            self.assertEqual(
+                run.call_args_list[1].kwargs["timeout"],
+                updater.WINDOWS_INSTALLER_TIMEOUT_SECONDS,
+            )
             launch.assert_called_once_with([str(executable)],cwd=str(root))
 
     def test_windows_update_stops_and_restarts_a_running_monitor(self):
@@ -66,6 +70,10 @@ class UpdaterHelperTests(unittest.TestCase):
             self.assertIn("Get-ScheduledTask", run.call_args_list[0].args[0][-1])
             self.assertIn("Stop-ScheduledTask", run.call_args_list[1].args[0][-1])
             self.assertEqual(run.call_args_list[2].args[0][0], str(installer))
+            self.assertEqual(
+                run.call_args_list[2].kwargs["timeout"],
+                updater.WINDOWS_INSTALLER_TIMEOUT_SECONDS,
+            )
             self.assertIn("Start-ScheduledTask", run.call_args_list[3].args[0][-1])
             launch.assert_called_once_with([str(executable)],cwd=str(root))
 
@@ -88,6 +96,51 @@ class UpdaterHelperTests(unittest.TestCase):
                     updater.apply_windows(installer,root)
             self.assertEqual(run.call_count, 4)
             self.assertIn("Start-ScheduledTask", run.call_args_list[3].args[0][-1])
+            launch.assert_not_called()
+
+    def test_windows_update_restarts_monitor_after_installer_timeout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            installer=root/"setup.exe"
+            installer.write_text("installer")
+            timeout = updater.WINDOWS_INSTALLER_TIMEOUT_SECONDS
+            with patch.object(
+                updater.subprocess,
+                "run",
+                side_effect=[
+                    unittest.mock.Mock(returncode=0, stdout="RUNNING\\n", stderr=""),
+                    unittest.mock.Mock(returncode=0, stdout="STOPPED\\n", stderr=""),
+                    updater.subprocess.TimeoutExpired(cmd=str(installer), timeout=timeout),
+                    unittest.mock.Mock(returncode=0, stdout="STARTED\\n", stderr=""),
+                ],
+            ) as run, patch.object(updater.subprocess,"Popen") as launch:
+                with self.assertRaisesRegex(RuntimeError, "did not finish within"):
+                    updater.apply_windows(installer,root)
+            self.assertEqual(run.call_count, 4)
+            self.assertEqual(run.call_args_list[2].kwargs["timeout"], timeout)
+            self.assertIn("Start-ScheduledTask", run.call_args_list[3].args[0][-1])
+            launch.assert_not_called()
+
+    def test_windows_update_reports_monitor_recovery_failure_after_installer_timeout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            installer=root/"setup.exe"
+            installer.write_text("installer")
+            timeout = updater.WINDOWS_INSTALLER_TIMEOUT_SECONDS
+            with patch.object(
+                updater.subprocess,
+                "run",
+                side_effect=[
+                    unittest.mock.Mock(returncode=0, stdout="RUNNING\\n", stderr=""),
+                    unittest.mock.Mock(returncode=0, stdout="STOPPED\\n", stderr=""),
+                    updater.subprocess.TimeoutExpired(cmd=str(installer), timeout=timeout),
+                    unittest.mock.Mock(returncode=1, stdout="", stderr="Task Scheduler unavailable"),
+                ],
+            ) as run, patch.object(updater.subprocess,"Popen") as launch:
+                with self.assertRaisesRegex(RuntimeError, "could not be restarted"):
+                    updater.apply_windows(installer,root)
+            self.assertEqual(run.call_count, 4)
+            self.assertIn("Task Scheduler unavailable", str(run.call_args_list[3].kwargs) or "Task Scheduler unavailable")
             launch.assert_not_called()
 
     def test_windows_update_aborts_if_running_monitor_cannot_be_stopped(self):
