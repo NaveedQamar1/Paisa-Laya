@@ -80,12 +80,18 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             db.execute("INSERT INTO staff(user_id,name) VALUES('17','Ayesha')")
             db.execute("INSERT INTO punches(user_id,punch_time,status) VALUES('17','2026-11-01 09:45:00','')")
         app.init_db()
+        context = type("Context", (), {})()
+        context._names_cache = None
+        app.App._store_device_users(
+            context,
+            [type("DeviceUser", (), {"user_id": "17", "name": "Device Renamed"})()]
+        )
         with sqlite3.connect(app.DB) as db:
             staff = db.execute(
-                "SELECT user_id,name,department,designation,joining_date,active FROM staff WHERE user_id='17'"
+                "SELECT user_id,name,department,designation,joining_date,active,name_source FROM staff WHERE user_id='17'"
             ).fetchone()
             punches = db.execute("SELECT COUNT(*) FROM punches").fetchone()[0]
-        self.assertEqual(staff, ("17", "Ayesha", "", "", "", 1))
+        self.assertEqual(staff, ("17", "Ayesha", "", "", "", 1, "profile"))
         self.assertEqual(punches, 1)
 
 
@@ -479,7 +485,7 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             ],
         )
 
-    def test_device_name_sync_does_not_overwrite_profile_metadata(self):
+    def test_device_name_sync_preserves_profile_managed_name_and_metadata(self):
         app.init_db()
         with sqlite3.connect(app.DB) as db:
             db.execute(
@@ -494,7 +500,7 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             row = db.execute(
                 "SELECT name,department,designation,joining_date,active FROM staff WHERE user_id='17'"
             ).fetchone()
-        self.assertEqual(row, ("Ayesha Updated", "Kitchen", "Chef", "2024-02-01", 1))
+        self.assertEqual(row, ("Ayesha", "Kitchen", "Chef", "2024-02-01", 1))
 
 
 
@@ -533,12 +539,12 @@ class EmployeeProfileSaveTests(unittest.TestCase):
         )
         with sqlite3.connect(app.DB) as db:
             profile = db.execute(
-                "SELECT user_id,name,department,designation,joining_date,active FROM staff WHERE user_id='701'"
+                "SELECT user_id,name,department,designation,joining_date,active,name_source FROM staff WHERE user_id='701'"
             ).fetchone()
             history = db.execute(
                 "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='701' ORDER BY effective_date"
             ).fetchall()
-        self.assertEqual(profile, ("701", "Mariam", "Kitchen", "Chef", "2024-01-01", 1))
+        self.assertEqual(profile, ("701", "Mariam", "Kitchen", "Chef", "2024-01-01", 1, "profile"))
         self.assertEqual(history, [
             (0, "0001-01-01", "profile-baseline"),
             (1, "2024-01-01", "profile"),
@@ -589,9 +595,32 @@ class EmployeeProfileSaveTests(unittest.TestCase):
         self.assertEqual(profile, ("Mariam Khan", "Pastry", "Head Chef"))
         self.assertEqual(after, before)
 
+    def test_device_name_sync_refreshes_device_managed_names(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                """INSERT INTO staff(user_id,name,name_source)
+                   VALUES('18','Original Device Name','device')"""
+            )
+        context = type("Context", (), {})()
+        context._names_cache = None
+        app.App._store_device_users(
+            context,
+            [type("DeviceUser", (), {"user_id": "18", "name": "Updated Device Name"})()]
+        )
+        with sqlite3.connect(app.DB) as db:
+            row = db.execute(
+                "SELECT name,name_source FROM staff WHERE user_id='18'"
+            ).fetchone()
+        self.assertEqual(row, ("Updated Device Name", "device"))
+
+
     def test_stale_profile_snapshot_cannot_overwrite_device_synced_name(self):
         self.save_profile("701", "Original Employee")
         with sqlite3.connect(app.DB) as db:
+            db.execute(
+                "UPDATE staff SET name_source='device' WHERE user_id='701'"
+            )
             row = db.execute(
                 """SELECT name,department,designation,joining_date,active
                    FROM staff WHERE user_id='701'"""
