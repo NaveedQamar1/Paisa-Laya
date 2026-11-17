@@ -128,6 +128,9 @@ def init_db(*, maintenance_lock_held=False):
             ("designation", "TEXT NOT NULL DEFAULT ''"),
             ("joining_date", "TEXT NOT NULL DEFAULT ''"),
             ("active", "INTEGER NOT NULL DEFAULT 1"),
+            # Existing names are treated as profile-managed during migration so
+            # a background device poll cannot silently replace a curated name.
+            ("name_source", "TEXT NOT NULL DEFAULT 'profile'"),
         ):
             if column not in staff_columns:
                 c.execute(f"ALTER TABLE staff ADD COLUMN {column} {definition}")
@@ -396,8 +399,8 @@ def save_employee_profile(db, user_id, name, department="", designation="", join
 
         if previous is None:
             db.execute(
-                """INSERT INTO staff(user_id,name,department,designation,joining_date,active)
-                   VALUES(?,?,?,?,?,?)""",
+                """INSERT INTO staff(user_id,name,department,designation,joining_date,active,name_source)
+                   VALUES(?,?,?,?,?,?,'profile')""",
                 (uid, full_name, department, designation, joining, new_active)
             )
             save_profile_status_history(
@@ -431,7 +434,7 @@ def save_employee_profile(db, user_id, name, department="", designation="", join
             previous_active = int(previous[4])
             previous_joining = previous[3] or ""
             cursor = db.execute(
-                """UPDATE staff SET name=?,department=?,designation=?,joining_date=?,active=?
+                """UPDATE staff SET name=?,department=?,designation=?,joining_date=?,active=?,name_source='profile'
                    WHERE user_id=? AND name IS ? AND department IS ? AND designation IS ?
                      AND joining_date IS ? AND active IS ?""",
                 (
@@ -1673,8 +1676,9 @@ class App(tk.Tk):
             name=str(getattr(user,"name","") or "").strip()
             if not uid or not name:
                 continue
-            db.execute("""INSERT INTO staff(user_id,name) VALUES(?,?)
-                         ON CONFLICT(user_id) DO UPDATE SET name=excluded.name""",(uid,name))
+            db.execute("""INSERT INTO staff(user_id,name,name_source) VALUES(?,?,'device')
+                         ON CONFLICT(user_id) DO UPDATE SET name=excluded.name
+                         WHERE staff.name_source='device'""",(uid,name))
             saved+=1
         self._names_cache=None
         return saved
