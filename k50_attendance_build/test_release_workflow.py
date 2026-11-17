@@ -49,5 +49,33 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
         self.assertEqual(self.workflow.count("release_tag must match scafa-vMAJOR.MINOR.PATCH"), 3)
 
 
+    def test_release_publication_requires_an_explicit_versioned_tag_ref(self):
+        publish = self.workflow.split("  publish:", 1)[1]
+        self.assertIn(
+            "if: startsWith(github.ref, 'refs/tags/scafa-v')",
+            publish,
+        )
+        self.assertNotIn("github.event_name != 'pull_request'", publish)
+        self.assertNotIn("refs/heads/main", publish)
+
+    def test_tag_builds_use_the_exact_pushed_tag(self):
+        self.assertIn(
+            "$env:GITHUB_REF -like 'refs/tags/scafa-v*'",
+            self.workflow,
+        )
+        self.assertIn(
+            "$releaseTag -ne $env:GITHUB_REF.Substring('refs/tags/'.Length)",
+            self.workflow,
+        )
+        self.assertEqual(
+            self.workflow.count('[[ "$GITHUB_REF" == refs/tags/scafa-v* ]]'),
+            2,
+        )
+        self.assertEqual(
+            self.workflow.count('RELEASE_TAG="${GITHUB_REF#refs/tags/}"'),
+            2,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
