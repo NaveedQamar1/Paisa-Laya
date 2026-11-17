@@ -115,6 +115,28 @@ class UpdaterHelperTests(unittest.TestCase):
             self.assertIn("NoMatchingCimInstance", stop_script)
             launch.assert_not_called()
 
+    def test_windows_stop_aborts_when_monitor_task_is_queued(self):
+        with patch.object(
+            updater,
+            "_run_windows_monitor_command",
+            return_value="QUEUED",
+        ) as command:
+            with self.assertRaisesRegex(RuntimeError, "state: QUEUED"):
+                updater.stop_windows_monitor()
+        command.assert_called_once()
+        self.assertIn("Queued", command.call_args.args[0])
+
+    def test_windows_stop_aborts_if_task_becomes_queued_during_stop(self):
+        with patch.object(
+            updater,
+            "_run_windows_monitor_command",
+            side_effect=["RUNNING", "QUEUED"],
+        ) as command:
+            with self.assertRaisesRegex(RuntimeError, "QUEUED"):
+                updater.stop_windows_monitor()
+        self.assertEqual(command.call_count, 2)
+        self.assertIn("Queued", command.call_args_list[1].args[0])
+
     def test_windows_stop_timeout_with_confirmed_stopped_postcondition_preserves_restart(self):
         with patch.object(
             updater,

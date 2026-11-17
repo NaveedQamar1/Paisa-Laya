@@ -90,9 +90,13 @@ try {
     throw
 }
 $state = [string]$task.State
-if ($state -eq 'Running') { Write-Output 'RUNNING' }
-elseif ($state -eq 'Disabled') { Write-Output 'DISABLED' }
-else { Write-Output 'NOT_RUNNING' }
+switch ($state) {
+    'Running' { Write-Output 'RUNNING' }
+    'Disabled' { Write-Output 'DISABLED' }
+    'Ready' { Write-Output 'NOT_RUNNING' }
+    'Queued' { Write-Output 'QUEUED' }
+    default { Write-Output 'UNKNOWN' }
+}
 """
 
 WINDOWS_MONITOR_STOP_SCRIPT = r"""
@@ -110,11 +114,10 @@ try {
     throw
 }
 $state = [string]$task.State
-if ($state -ne 'Running') {
-    if ($state -eq 'Disabled') { Write-Output 'DISABLED' }
-    else { Write-Output 'NOT_RUNNING' }
-    exit 0
-}
+if ($state -eq 'Disabled') { Write-Output 'DISABLED'; exit 0 }
+if ($state -eq 'Ready') { Write-Output 'NOT_RUNNING'; exit 0 }
+if ($state -eq 'Queued') { Write-Output 'QUEUED'; exit 0 }
+if ($state -ne 'Running') { Write-Output 'UNKNOWN'; exit 0 }
 Stop-ScheduledTask -InputObject $task -ErrorAction Stop
 $deadline = (Get-Date).AddSeconds(30)
 do {
@@ -122,8 +125,8 @@ do {
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
     $state = [string]$task.State
 } while ($state -eq 'Running' -and (Get-Date) -lt $deadline)
-if ($state -eq 'Running') {
-    throw 'The attendance monitor task did not stop within 30 seconds.'
+if ($state -ne 'Ready') {
+    throw "The attendance monitor task did not reach Ready state within 30 seconds; observed '$state'."
 }
 Write-Output 'STOPPED'
 """
@@ -193,7 +196,7 @@ def _windows_monitor_state():
     state = _run_windows_monitor_command(
         WINDOWS_MONITOR_STATE_SCRIPT, "inspect"
     )
-    if state not in {"RUNNING", "NOT_RUNNING", "DISABLED", "MISSING"}:
+    if state not in {"RUNNING", "NOT_RUNNING", "DISABLED", "MISSING", "QUEUED", "UNKNOWN"}:
         raise RuntimeError(
             f"Could not confirm the Windows attendance monitor state: {state or 'no response'}."
         )
