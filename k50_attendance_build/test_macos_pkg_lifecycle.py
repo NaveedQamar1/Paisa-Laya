@@ -144,72 +144,72 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
 
     def _write_command(self, name, body):
         path = self.fake_bin / name
-        path.write_text("#!/bin/bash\\nset -e\\n" + body, encoding="utf-8")
+        path.write_text("#!/bin/bash\nset -e\n" + body, encoding="utf-8")
         path.chmod(0o755)
 
     def _write_fake_commands(self):
-        self._write_command("id", 'echo 0\\n')
+        self._write_command("id", 'echo 0\n')
         self._write_command(
             "pgrep",
-            'if [ "${SCAFA_TEST_GUI_RUNNING:-0}" = "1" ]; then exit 0; fi\\nexit 1\\n',
+            'if [ "${SCAFA_TEST_GUI_RUNNING:-0}" = "1" ]; then exit 0; fi\nexit 1\n',
         )
         self._write_command(
             "dscl",
-            'if [ "$2" = "-list" ]; then echo "scafa 501"; exit 0; fi\\n'
-            'if [ "$2" = "-read" ]; then echo "NFSHomeDirectory: $SCAFA_TEST_HOME"; exit 0; fi\\n'
-            'echo "unexpected dscl call: $*" >&2; exit 2\\n',
+            'if [ "$2" = "-list" ]; then echo "scafa 501"; exit 0; fi\n'
+            'if [ "$2" = "-read" ]; then echo "NFSHomeDirectory: $SCAFA_TEST_HOME"; exit 0; fi\n'
+            'echo "unexpected dscl call: $*" >&2; exit 2\n',
         )
         self._write_command(
             "stat",
-            'case "$2" in\\n'
-            '  %u) case "$3" in "$SCAFA_TEST_HOME"/*) echo 501;; *) echo 0;; esac ;;\\n'
-            '  %Lp) echo 600 ;;\\n'
-            '  *) exit 2 ;;\\n'
-            'esac\\n',
+            'case "$2" in\n'
+            '  %u) case "$3" in "$SCAFA_TEST_HOME"/*) echo 501;; *) echo 0;; esac ;;\n'
+            '  %Lp) echo 600 ;;\n'
+            '  *) exit 2 ;;\n'
+            'esac\n',
         )
         self._write_command(
             "PlistBuddy",
-            'case "$2" in\\n'
-            '  "Print :Label") echo "pk.scafa.workforce.monitor" ;;\\n'
-            '  "Print :ProgramArguments:0") echo "$SCAFA_TEST_APP_BUNDLE/Contents/MacOS/scafa-monitor" ;;\\n'
-            '  "Print :RunAtLoad") echo "true" ;;\\n'
-            '  *) echo "unexpected plist query: $2" >&2; exit 2 ;;\\n'
-            'esac\\n',
+            'case "$2" in\n'
+            '  "Print :Label") echo "pk.scafa.workforce.monitor" ;;\n'
+            '  "Print :ProgramArguments:0") echo "$SCAFA_TEST_APP_BUNDLE/Contents/MacOS/scafa-monitor" ;;\n'
+            '  "Print :RunAtLoad") echo "true" ;;\n'
+            '  *) echo "unexpected plist query: $2" >&2; exit 2 ;;\n'
+            'esac\n',
         )
         self._write_command(
             "install",
-            'mkdir -p "$8"\\nchmod 700 "$8"\\n',
+            'mkdir -p "$8"\nchmod 700 "$8"\n',
         )
-        self._write_command("chown", 'exit 0\\n')
+        self._write_command("chown", 'exit 0\n')
         self._write_command(
             "launchctl",
-            'printf "%s\\n" "$*" >> "$SCAFA_TEST_CALL_LOG"\\n'
-            'case "$1" in\\n'
-            '  print)\\n'
-            '    if [ "$2" = "gui/501" ]; then\\n'
-            '      if [ "${SCAFA_TEST_NO_GUI_DOMAIN:-0}" = "1" ]; then echo "Could not find domain specified." >&2; exit 113; fi\\n'
-            '      exit 0\\n'
-            '    fi\\n'
-            '    if [ "$2" = "gui/501/pk.scafa.workforce.monitor" ]; then\\n'
-            '      state=$(cat "$SCAFA_TEST_LAUNCH_STATE")\\n'
-            '      case "$state" in\\n'
-            '        loaded) exit 0 ;;\\n'
-            '        unknown) echo "Operation not permitted" >&2; exit 1 ;;\\n'
-            '        *) echo \'Could not find service "pk.scafa.workforce.monitor"\' >&2; exit 113 ;;\\n'
-            '      esac\\n'
-            '    fi\\n'
-            '    echo "unexpected launchctl print target: $2" >&2; exit 2 ;;\\n'
-            '  bootout)\\n'
-            '    if [ "${SCAFA_TEST_BOOTOUT_FAIL:-0}" = "1" ]; then\\n'
-            '      if [ "${SCAFA_TEST_BOOTOUT_STATE:-loaded}" = "unloaded" ]; then echo unloaded > "$SCAFA_TEST_LAUNCH_STATE"; fi\\n'
-            '      echo "simulated bootout failure" >&2; exit 1\\n'
-            '    fi\\n'
-            '    echo unloaded > "$SCAFA_TEST_LAUNCH_STATE"; exit 0 ;;\\n'
-            '  bootstrap)\\n'
-            '    if [ "${SCAFA_TEST_BOOTSTRAP_FAIL:-0}" = "1" ]; then echo "simulated bootstrap failure" >&2; exit 1; fi\\n'
-            '    echo loaded > "$SCAFA_TEST_LAUNCH_STATE"; exit 0 ;;\\n'
-            'esac\\n'
-            'echo "unexpected launchctl command: $*" >&2; exit 2\\n',
+            'printf "%s\\n" "$*" >> "$SCAFA_TEST_CALL_LOG"\n'
+            'case "$1" in\n'
+            '  print)\n'
+            '    if [ "$2" = "gui/501" ]; then\n'
+            '      if [ "${SCAFA_TEST_NO_GUI_DOMAIN:-0}" = "1" ]; then echo "Could not find domain specified." >&2; exit 113; fi\n'
+            '      exit 0\n'
+            '    fi\n'
+            '    if [ "$2" = "gui/501/pk.scafa.workforce.monitor" ]; then\n'
+            '      state=$(cat "$SCAFA_TEST_LAUNCH_STATE")\n'
+            '      case "$state" in\n'
+            '        loaded) exit 0 ;;\n'
+            '        unknown) echo "Operation not permitted" >&2; exit 1 ;;\n'
+            '        *) echo \'Could not find service "pk.scafa.workforce.monitor"\' >&2; exit 113 ;;\n'
+            '      esac\n'
+            '    fi\n'
+            '    echo "unexpected launchctl print target: $2" >&2; exit 2 ;;\n'
+            '  bootout)\n'
+            '    if [ "${SCAFA_TEST_BOOTOUT_FAIL:-0}" = "1" ]; then\n'
+            '      if [ "${SCAFA_TEST_BOOTOUT_STATE:-loaded}" = "unloaded" ]; then echo unloaded > "$SCAFA_TEST_LAUNCH_STATE"; elif [ "${SCAFA_TEST_BOOTOUT_STATE:-loaded}" = "unknown" ]; then echo unknown > "$SCAFA_TEST_LAUNCH_STATE"; fi\n'
+            '      echo "simulated bootout failure" >&2; exit 1\n'
+            '    fi\n'
+            '    echo unloaded > "$SCAFA_TEST_LAUNCH_STATE"; exit 0 ;;\n'
+            '  bootstrap)\n'
+            '    if [ "${SCAFA_TEST_BOOTSTRAP_FAIL:-0}" = "1" ]; then echo "simulated bootstrap failure" >&2; exit 1; fi\n'
+            '    echo loaded > "$SCAFA_TEST_LAUNCH_STATE"; exit 0 ;;\n'
+            'esac\n'
+            'echo "unexpected launchctl command: $*" >&2; exit 2\n',
         )
 
     def _script_copy(self, source, name):
@@ -260,7 +260,7 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
 
     def _prepare_recovery_marker(self):
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        self.state_file.write_text("501\\n", encoding="ascii")
+        self.state_file.write_text("501\n", encoding="ascii")
         self.state_file.chmod(0o600)
 
     def _calls(self):
@@ -296,6 +296,30 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.state_file.exists())
         self.assertEqual(self._calls(), [])
+
+    def test_preinstall_accepts_nonzero_bootout_when_monitor_is_confirmed_unloaded(self):
+        self._prepare_loaded_state("loaded")
+        result = self._run(
+            PREINSTALL,
+            "preinstall",
+            SCAFA_TEST_BOOTOUT_FAIL="1",
+            SCAFA_TEST_BOOTOUT_STATE="unloaded",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(self.launch_state.read_text(encoding="ascii").strip(), "unloaded")
+        self.assertEqual(self.state_file.read_text(encoding="ascii").strip(), "501")
+
+    def test_preinstall_retains_recovery_marker_when_bootout_state_is_indeterminate(self):
+        self._prepare_loaded_state("loaded")
+        result = self._run(
+            PREINSTALL,
+            "preinstall",
+            SCAFA_TEST_BOOTOUT_FAIL="1",
+            SCAFA_TEST_BOOTOUT_STATE="unknown",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.state_file.exists())
+        self.assertEqual(self.launch_state.read_text(encoding="ascii").strip(), "unknown")
 
     def test_preinstall_aborts_when_bootout_fails_and_monitor_remains_loaded(self):
         self._prepare_loaded_state("loaded")
