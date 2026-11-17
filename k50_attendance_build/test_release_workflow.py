@@ -98,5 +98,25 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
         self.assertNotIn("actions/download-artifact@v4", self.workflow)
 
 
+    def test_build_workflow_uses_pinned_pillow_from_requirements(self):
+        requirements = (
+            Path(__file__).with_name("requirements.txt")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        pillow_requirements = [
+            line.strip()
+            for line in requirements
+            if line.strip().lower().startswith("pillow")
+        ]
+        self.assertEqual(pillow_requirements, ["Pillow==13.0.0"])
+        self.assertNotIn("python -m pip install pillow", self.workflow)
+        self.assertEqual(
+            self.workflow.count(
+                "python -m pip install -r k50_attendance_build/requirements.txt"
+            ),
+            2,
+        )
+
 if __name__ == "__main__":
     unittest.main()
