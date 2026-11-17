@@ -178,25 +178,25 @@ Perform these tests against an available physical K50 device; CI cannot substitu
 
 For each manual test, record the result, date, operator, machine, exact commit, workflow run, artifact ID, and any log/screenshot reference.
 
-### Latest automated CI and packaging evidence — validated PR #11 snapshot `c7630b6c2bcae3c2cfb46c5497db3a133b12ed1a`
+### Latest automated CI and packaging evidence — validated PR #11 snapshot `a9ba51a2366bf95d8a8c98b676009e716f91a015`
 
-The latest application/test changes before this snapshot are in `d2a9e274` (device-sync completion messaging and its regression test). Commit `c7630b6` adds only a manual-acceptance documentation refresh; it does not change application or test sources. Both workflow runs below target the exact PR snapshot `c7630b6c2bcae3c2cfb46c5497db3a133b12ed1a`.
+The latest application/test changes before this snapshot are in `d2a9e274` (device-sync completion messaging and its regression test). Commits `c7630b6` and `a9ba51a` update only this manual-acceptance document; they do not change application or test sources. Both workflow runs below validate the exact PR snapshot `a9ba51a2366bf95d8a8c98b676009e716f91a015`.
 
-- Validation run [#44094120169](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120169) validates exact head `c7630b6c2bcae3c2cfb46c5497db3a133b12ed1a`:
+- Validation run [#44094814799](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094814799) validates exact head `a9ba51a2366bf95d8a8c98b676009e716f91a015`:
   - Windows: **206 tests run, 204 passed, 2 skipped**.
   - Intel macOS: **206 tests run, 204 passed, 2 skipped**.
   - Apple Silicon: **206 tests run, 204 passed, 2 skipped**.
   - All executed tests passed; the two skips on each platform are platform/host-permission-specific.
-- Packaging run [#44094120217](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120217) validates the same exact head. Windows, Intel macOS and Apple Silicon package jobs and all artifact uploads succeeded. The `publish` job was skipped for this pull-request event; no release was published.
-- All five artifacts below were verified present and unexpired. They were created on 17 November 2026 and expire **15 February 2027 at 13:34:43 UTC**. SHA-256 values are GitHub's artifact archive digests, not separately calculated hashes of the extracted installers.
+- Packaging run [#44094814779](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094814779) validates the same exact head. Windows, Intel macOS and Apple Silicon package jobs and all artifact uploads succeeded. The `publish` job was skipped for this pull-request event; no release was published.
+- All five artifacts below were verified present and unexpired. They were created on 17 November 2026 and expire **15 February 2027 at 13:38:51 UTC**. SHA-256 values are GitHub's artifact archive digests, not separately calculated hashes of the extracted installers.
 
 | Artifact | Commit | Download | Size | Created (UTC) | Expires (UTC) | Archive SHA-256 |
 |---|---|---|---:|---|---|---|
-| Windows installer `release-windows` | `c7630b6` | [#14333970516](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120217/artifacts/14333970516) | 48,459,420 B | 13:37:18 | 15 Feb 2027 13:34:43 | `239feaad98c6b8cb7fb86f5ee2828c6cf20ae781f9b487693fbffe3990c15dbb` |
-| Apple Silicon app ZIP `release-macos-apple-silicon` | `c7630b6` | [#14332457598](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120217/artifacts/14332457598) | 37,156,307 B | 13:35:51 | 15 Feb 2027 13:34:43 | `fba42b7242bab90a0bfc58d967beb2d335aff8ceb70b9fc3c10ede992688bd61` |
-| Intel macOS app ZIP `release-macos-intel` | `c7630b6` | [#14332128157](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120217/artifacts/14332128157) | 39,838,120 B | 13:36:37 | 15 Feb 2027 13:34:43 | `b3e4d832409d2ede9bb00fd127678bacbfde13882bf53e11930223ab68f7a246` |
-| Intel macOS installer `release-macos-intel-installer` | `c7630b6` | [#14332653402](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120217/artifacts/14332653402) | 39,815,568 B | 13:36:42 | 15 Feb 2027 13:34:43 | `4feb3d0293f710e7ec075b7e42d7b379811776d90ddbfcd7eab437a3b0993bc2` |
-| Intel icon patch `release-macos-intel-icon-patch` | `c7630b6` | [#14333870350](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094120217/artifacts/14333870350) | 92,950 B | 13:36:44 | 15 Feb 2027 13:34:43 | `46f8250a0f6a705d75dcadec3cd781a1b6c6d3f4ea13b24405a8a483404a637a` |
+| Windows installer `release-windows` | `a9ba51a` | [#14332379690](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094814779/artifacts/14332379690) | 48,457,638 B | 13:41:06 | 15 Feb 2027 13:38:51 | `7908746eef8fa8fe357392e5b4f080f6008eb463f950419e5b842cdcfbd255f9` |
+| Apple Silicon app ZIP `release-macos-apple-silicon` | `a9ba51a` | [#14333382021](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094814779/artifacts/14333382021) | 37,153,406 B | 13:39:55 | 15 Feb 2027 13:38:51 | `fa3a28c65f4b2ebf22a82c80eaae69467adc35b9c6f56cfe65f668d3d6adac89` |
+| Intel macOS app ZIP `release-macos-intel` | `a9ba51a` | [#14333257384](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094814779/artifacts/14333257384) | 39,837,072 B | 13:40:37 | 15 Feb 2027 13:38:51 | `0cb1dcd1a594399340edaa49adb7204e0a5b62cc37076c1d8eea4cf96abbd00f` |
+| Intel macOS installer `release-macos-intel-installer` | `a9ba51a` | [#14332084727](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094814779/artifacts/14332084727) | 39,814,921 B | 13:40:41 | 15 Feb 2027 13:38:51 | `4ee33ac46f9b91982ab4675154197c3b0edb5d07b6345a4c6d9aa14861645ded` |
+| Intel icon patch `release-macos-intel-icon-patch` | `a9ba51a` | [#14334250120](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44094814779/artifacts/14334250120) | 92,952 B | 13:40:42 | 15 Feb 2027 13:38:51 | `3a08715264e25f2303124cc6d4b97ffec07e4729d50cd53da2704196b34adf91` |
 
 These are temporary CI artifacts for testing, not published release assets. Apple Silicon currently produces an application ZIP rather than a `.pkg` installer. The successful builds do not establish Windows Authenticode signing or Apple Developer ID signing/notarization.
 
@@ -206,11 +206,11 @@ The employee-name ownership regression coverage verifies that legacy rows migrat
 |---|---|---|
 | Windows clean install | Not run | Disposable Windows 10/11 VM required |
 | Windows v1.3.0 → v1.4 upgrade | Not run | Disposable Windows 10/11 VM required |
-| Windows monitor state preservation | Automated regression passed; manual not run | Exact-head validation #44094120169 |
-| Windows missing scheduled-task detection | Windows PowerShell integration passed; full installer scenario not run | Exact-head validation #44094120169 |
-| Windows updater timeout/rollback | Automated regression passed; manual fault injection not run | Exact-head validation #44094120169 |
-| Windows direct-installer PowerShell timeout/termination | Automated regression passed; manual fault injection not run | Exact-head validation #44094120169 |
-| Windows PowerShell descendant-process cleanup | Windows integration test passed; manual installer fault injection not run | Exact-head validation #44094120169 |
+| Windows monitor state preservation | Automated regression passed; manual not run | Exact-head validation #44094814799 |
+| Windows missing scheduled-task detection | Windows PowerShell integration passed; full installer scenario not run | Exact-head validation #44094814799 |
+| Windows updater timeout/rollback | Automated regression passed; manual fault injection not run | Exact-head validation #44094814799 |
+| Windows direct-installer PowerShell timeout/termination | Automated regression passed; manual fault injection not run | Exact-head validation #44094814799 |
+| Windows PowerShell descendant-process cleanup | Windows integration test passed; manual installer fault injection not run | Exact-head validation #44094814799 |
 | Windows uninstall/data preservation | Not run | Disposable Windows 10/11 VM required |
 | Intel macOS clean install | Not run | Physical Mac or disposable VM required |
 | Intel macOS v1.3.0 → v1.4 upgrade | Not run | Physical Mac or disposable VM required |
@@ -218,8 +218,8 @@ The employee-name ownership regression coverage verifies that legacy rows migrat
 | Intel icon patch | Not run | Physical Intel Mac required |
 | Apple Silicon app ZIP launch/helpers/data preservation | Not run | Physical Apple Silicon Mac required |
 | Physical K50 discovery/fetch/sync | Not run | Physical K50 device and network required |
-| Employee profile/name ownership and dashboard/Excel/PDF regression | Automated suite passed; end-to-end GUI checks not run | Exact-head validation #44094120169 |
-| Backup/restore with monitor enabled | Automated regression passed; live monitor/restore acceptance not run | Exact-head validation #44094120169 |
+| Employee profile/name ownership and dashboard/Excel/PDF regression | Automated suite passed; end-to-end GUI checks not run | Exact-head validation #44094814799 |
+| Backup/restore with monitor enabled | Automated regression passed; live monitor/restore acceptance not run | Exact-head validation #44094814799 |
 
 ## 7. Distribution signing and notarization decision
 
