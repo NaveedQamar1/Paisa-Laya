@@ -59,6 +59,37 @@ class WindowsInstallerMonitorLifecycleTests(unittest.TestCase):
         self.assertIn("exit 2", self.code)
         self.assertIn("CompareText(OutputText, 'Missing') = 0", self.code)
 
+    def test_installer_uses_bounded_updater_helper_for_task_scheduler_commands(self):
+        self.assertIn(
+            r'Source: "..\\..\\dist\\scafa-updater.exe"; Flags: dontcopy',
+            self.script,
+        )
+        prepare = self.code.split(
+            "function PrepareToInstall", 1
+        )[1].split("procedure CurStepChanged", 1)[0]
+        self.assertIn("ExtractTemporaryFile('scafa-updater.exe')", prepare)
+        self.assertLess(
+            prepare.index("ExtractTemporaryFile('scafa-updater.exe')"),
+            prepare.index("ReadMonitorTaskState(State, ErrorText)"),
+        )
+
+        runner = self.code.split(
+            "function RunMonitorPowerShell", 1
+        )[1].split("function ReadMonitorTaskState", 1)[0]
+        self.assertIn("ExecAndCaptureOutput(", runner)
+        self.assertIn("MonitorHelperPath,", runner)
+        self.assertIn("--installer-powershell-script", runner)
+        self.assertNotIn("WindowsPowerShell", runner)
+
+        uninstall = self.code.split(
+            "procedure CurUninstallStepChanged", 1
+        )[1]
+        self.assertIn(
+            r"MonitorHelperPath := ExpandConstant('{app}\\scafa-updater.exe')",
+            uninstall,
+        )
+        self.assertIn("if not FileExists(MonitorHelperPath) then", uninstall)
+
     def test_installer_lifecycle_does_not_delete_user_attendance_data(self):
         self.assertNotIn("SCAFAWorkforce", self.code)
         self.assertNotIn("DelTree", self.code)
