@@ -397,13 +397,44 @@ class DatabaseAdministrationTests(unittest.TestCase):
             os.replace(replacement_path, backup_path)
             return True
 
+        real_restore = app.restore_database_snapshot
+        observed = {}
+
+        def inspect_validated_snapshot(source, destination):
+            staged = sqlite3.connect(source)
+            try:
+                observed["staged"] = staged.execute(
+                    "SELECT user_id,name FROM staff"
+                ).fetchall()
+            finally:
+                staged.close()
+            result = real_restore(source, destination)
+            restored = sqlite3.connect(destination)
+            try:
+                observed["after_restore"] = restored.execute(
+                    "SELECT user_id,name FROM staff"
+                ).fetchall()
+            finally:
+                restored.close()
+            return result
+
         with (
             patch.object(app.filedialog, "askopenfilename", return_value=str(backup_path)),
-            patch.object(app.messagebox, "askyesno", side_effect=replace_selected_file_after_validation),
+            patch.object(app.messagebox, "askyesno", side_effect=replace_selected_file_after_validation) as confirm,
             patch.object(app.messagebox, "showinfo") as showinfo,
             patch.object(app.messagebox, "showerror") as showerror,
+            patch.object(
+                app, "restore_database_snapshot", side_effect=inspect_validated_snapshot
+            ) as restore,
         ):
             app.App.restore_database(self.ctx)
+
+        confirm.assert_called_once()
+        restore.assert_called_once()
+        showinfo.assert_called_once()
+        showerror.assert_not_called()
+        self.assertEqual(observed["staged"], [("new", "Original Backup")])
+        self.assertEqual(observed["after_restore"], [("new", "Original Backup")])
 
         with sqlite3.connect(app.DB) as restored:
             self.assertEqual(
