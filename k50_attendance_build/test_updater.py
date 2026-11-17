@@ -957,6 +957,85 @@ class UpdaterHelperTests(unittest.TestCase):
                 updater.apply_macos(archive, installed, user_uid=501)
             start.assert_not_called()
 
+    def test_macos_update_rolls_back_when_application_launch_fails_after_monitor_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed, archive, old_executable = self._make_macos_update_fixture(root)
+            installed_executable = installed / "Contents" / "MacOS" / "SCAFA_Workforce"
+            plist = root / "pk.scafa.workforce.monitor.plist"
+            plist.write_text("launch agent")
+            stop_calls = []
+            start_calls = []
+
+            def stop_monitor(user_uid):
+                stop_calls.append(user_uid)
+                if len(stop_calls) == 1:
+                    return plist
+                self.assertEqual(installed_executable.read_text(), "new application")
+                return None
+
+            def start_monitor(agent_plist, user_uid):
+                start_calls.append((agent_plist, user_uid))
+                if len(start_calls) == 1:
+                    self.assertEqual(installed_executable.read_text(), "new application")
+                else:
+                    self.assertEqual(old_executable.read_text(), "old application")
+
+            launch_error = updater.subprocess.CalledProcessError(
+                1, ["/usr/bin/open", str(installed)]
+            )
+            with patch.object(updater, "stop_macos_monitor", side_effect=stop_monitor), \
+                 patch.object(updater, "start_macos_monitor", side_effect=start_monitor), \
+                 patch.object(updater.subprocess, "run", side_effect=launch_error) as launch:
+                with self.assertRaises(updater.subprocess.CalledProcessError):
+                    updater.apply_macos(archive, installed, user_uid=501)
+
+            self.assertEqual(old_executable.read_text(), "old application")
+            self.assertFalse(installed.with_name("SCAFA_Workforce.app.previous").exists())
+            self.assertFalse(installed.with_name("SCAFA_Workforce.app.update-state").exists())
+            self.assertEqual(stop_calls, [501, 501])
+            self.assertEqual(start_calls, [(plist, 501), (plist, 501)])
+            launch.assert_called_once()
+
+    def test_macos_update_preserves_backup_and_recovery_marker_if_new_monitor_cannot_be_stopped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed, archive, old_executable = self._make_macos_update_fixture(root)
+            installed_executable = installed / "Contents" / "MacOS" / "SCAFA_Workforce"
+            backup = installed.with_name("SCAFA_Workforce.app.previous")
+            state_path = installed.with_name("SCAFA_Workforce.app.update-state")
+            plist = root / "pk.scafa.workforce.monitor.plist"
+            plist.write_text("launch agent")
+            stop_calls = []
+
+            def stop_monitor(user_uid):
+                stop_calls.append(user_uid)
+                if len(stop_calls) == 1:
+                    return plist
+                self.assertEqual(installed_executable.read_text(), "new application")
+                raise RuntimeError("new monitor remains loaded")
+
+            def start_monitor(agent_plist, user_uid):
+                self.assertEqual(installed_executable.read_text(), "new application")
+
+            launch_error = updater.subprocess.CalledProcessError(
+                1, ["/usr/bin/open", str(installed)]
+            )
+            with patch.object(updater, "stop_macos_monitor", side_effect=stop_monitor), \
+                 patch.object(updater, "start_macos_monitor", side_effect=start_monitor) as start, \
+                 patch.object(updater.subprocess, "run", side_effect=launch_error):
+                with self.assertRaisesRegex(
+                    RuntimeError, "previous application bundle is preserved"
+                ):
+                    updater.apply_macos(archive, installed, user_uid=501)
+
+            self.assertEqual(installed_executable.read_text(), "new application")
+            self.assertEqual(old_executable.read_text(), "old application")
+            self.assertTrue(backup.is_dir())
+            self.assertEqual(state_path.read_text(encoding="ascii").strip(), "in_progress:loaded")
+            self.assertEqual(stop_calls, [501, 501])
+            start.assert_called_once_with(plist, 501)
+
     def test_macos_monitor_restart_failure_rolls_back_the_application(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
