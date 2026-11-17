@@ -83,7 +83,11 @@ $taskName = 'SCAFA Workforce Attendance Monitor'
 try {
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
 } catch {
-    if ($_.FullyQualifiedErrorId -like 'NoMatchingCimInstance*') {
+    if (
+    $_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*' -or
+    $_.FullyQualifiedErrorId -like 'NoMatchingCimInstance*' -or
+    $_.FullyQualifiedErrorId -like 'NoMatchingTasksFound*'
+) {
         Write-Output 'MISSING'
         exit 0
     }
@@ -107,7 +111,11 @@ try {
 } catch {
     # Only a genuine missing task is safe to treat as "monitor not configured".
     # Access, service, or permission errors must abort the update before files change.
-    if ($_.FullyQualifiedErrorId -like 'NoMatchingCimInstance*') {
+    if (
+    $_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*' -or
+    $_.FullyQualifiedErrorId -like 'NoMatchingCimInstance*' -or
+    $_.FullyQualifiedErrorId -like 'NoMatchingTasksFound*'
+) {
         Write-Output 'MISSING'
         exit 0
     }

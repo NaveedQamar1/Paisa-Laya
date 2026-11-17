@@ -1,3 +1,5 @@
+import os
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -55,9 +57,63 @@ class WindowsInstallerMonitorLifecycleTests(unittest.TestCase):
         self.assertIn("Monitor task is still active", self.code)
 
     def test_missing_task_is_tolerated_but_other_query_errors_fail(self):
-        self.assertIn("NoMatchingTasksFound", self.code)
+        read_state = self.code.split(
+            "function ReadMonitorTaskState", 1
+        )[1].split("function StopMonitorTask", 1)[0]
+        remove_task = self.code.split(
+            "function RemoveMonitorTask", 1
+        )[1].split("function PrepareToInstall", 1)[0]
+        for error_id in (
+            "CmdletizationQuery_NotFound",
+            "NoMatchingCimInstance",
+            "NoMatchingTasksFound",
+        ):
+            self.assertIn(error_id, read_state)
+            self.assertIn(error_id, remove_task)
         self.assertIn("exit 2", self.code)
         self.assertIn("CompareText(OutputText, 'Missing') = 0", self.code)
+
+    @unittest.skipUnless(os.name == "nt", "ScheduledTasks is available only on Windows")
+    def test_windows_missing_task_error_identifier_is_supported(self):
+        script = r"""
+$ErrorActionPreference = 'Stop'
+Import-Module ScheduledTasks -ErrorAction Stop
+$taskName = 'SCAFA-Workforce-Definitely-Missing-For-CI-Regression-00000000'
+try {
+    Get-ScheduledTask -TaskName $taskName -TaskPath '\' -ErrorAction Stop | Out-Null
+    Write-Output 'FOUND'
+    exit 10
+} catch {
+    Write-Output ([string]$_.FullyQualifiedErrorId)
+    exit 0
+}
+"""
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        error_id = result.stdout.strip()
+        self.assertNotEqual(error_id, "FOUND")
+        self.assertTrue(
+            error_id.startswith(
+                (
+                    "CmdletizationQuery_NotFound",
+                    "NoMatchingCimInstance",
+                    "NoMatchingTasksFound",
+                )
+            ),
+            error_id,
+        )
 
     def test_installer_uses_bounded_updater_helper_for_task_scheduler_commands(self):
         self.assertIn(

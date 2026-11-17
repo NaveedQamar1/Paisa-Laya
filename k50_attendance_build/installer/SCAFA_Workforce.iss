@@ -129,7 +129,10 @@ begin
     '$ErrorActionPreference=''Stop''; $taskName=''SCAFA Workforce Attendance Monitor''; ' +
     'try { $task=Get-ScheduledTask -TaskName $taskName -TaskPath ([string][char]92) -ErrorAction Stop; ' +
     '[Console]::Out.Write($task.State.ToString()) } catch { ' +
-    'if ($_.FullyQualifiedErrorId -like ''NoMatchingTasksFound*'') { [Console]::Out.Write(''Missing''); exit 0 }; ' +
+    'if ($_.FullyQualifiedErrorId -like ''CmdletizationQuery_NotFound*'' -or ' +
+    '    $_.FullyQualifiedErrorId -like ''NoMatchingCimInstance*'' -or ' +
+    '    $_.FullyQualifiedErrorId -like ''NoMatchingTasksFound*'') { ' +
+    '[Console]::Out.Write(''Missing''); exit 0 }; ' +
     '[Console]::Error.WriteLine($_.Exception.Message); exit 2 }';
 
   Result := RunMonitorPowerShell(Script, OutputText, ErrorText);
@@ -239,7 +242,10 @@ begin
     '[Console]::Error.WriteLine(''Monitor task state is indeterminate: '' + $task.State.ToString()); exit 3 }; ' +
     'Unregister-ScheduledTask -TaskName $taskName -TaskPath ([string][char]92) -Confirm:$false -ErrorAction Stop | Out-Null; ' +
     '[Console]::Out.Write(''Removed'') } catch { ' +
-    'if ($_.FullyQualifiedErrorId -like ''NoMatchingTasksFound*'') { [Console]::Out.Write(''Missing''); exit 0 }; ' +
+    'if ($_.FullyQualifiedErrorId -like ''CmdletizationQuery_NotFound*'' -or ' +
+    '    $_.FullyQualifiedErrorId -like ''NoMatchingCimInstance*'' -or ' +
+    '    $_.FullyQualifiedErrorId -like ''NoMatchingTasksFound*'') { ' +
+    '[Console]::Out.Write(''Missing''); exit 0 }; ' +
     '[Console]::Error.WriteLine($_.Exception.Message); exit 2 }';
 
   Result := RunMonitorPowerShell(Script, OutputText, ErrorText);

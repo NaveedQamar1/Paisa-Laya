@@ -170,6 +170,20 @@ class UpdaterHelperTests(unittest.TestCase):
             self.assertIn("NoMatchingCimInstance", stop_script)
             launch.assert_not_called()
 
+    def test_windows_monitor_scripts_recognize_missing_task_error_variants(self):
+        missing_error_ids = (
+            "CmdletizationQuery_NotFound",
+            "NoMatchingCimInstance",
+            "NoMatchingTasksFound",
+        )
+        for script in (
+            updater.WINDOWS_MONITOR_STATE_SCRIPT,
+            updater.WINDOWS_MONITOR_STOP_SCRIPT,
+        ):
+            for error_id in missing_error_ids:
+                with self.subTest(error_id=error_id):
+                    self.assertIn(error_id, script)
+
     def test_windows_stop_aborts_when_monitor_task_is_queued(self):
         with patch.object(
             updater,
