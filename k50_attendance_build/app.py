@@ -921,6 +921,7 @@ class App(tk.Tk):
             threading.Thread(target=self._download_and_prepare_update,daemon=True).start()
 
     def _download_and_prepare_update(self):
+        staged_paths = []
         try:
             pending=getattr(self,"_pending_release",None)
             if not pending:
@@ -933,6 +934,7 @@ class App(tk.Tk):
             package=base/asset_name
             checksum_file=base/"checksums.txt"
             for name,destination in ((asset_name,package),("checksums.txt",checksum_file)):
+                staged_paths.append(destination)
                 url = validate_release_asset_url(
                     assets[name].get("browser_download_url"), tag, name
                 )
@@ -942,13 +944,9 @@ class App(tk.Tk):
                         chunk=response.read(1024*1024)
                         if not chunk: break
                         out.write(chunk)
-            try:
-                verify_update_asset(
-                    package, checksum_file, asset_name, assets[asset_name].get("digest")
-                )
-            except Exception:
-                package.unlink(missing_ok=True)
-                raise
+            verify_update_asset(
+                package, checksum_file, asset_name, assets[asset_name].get("digest")
+            )
             helper_name="scafa-updater.exe" if platform=="windows" else "scafa-updater"
             helper_source=Path(sys.executable).resolve().parent/helper_name
             if platform=="macos":
@@ -960,6 +958,7 @@ class App(tk.Tk):
                 raise RuntimeError("The update helper is missing from this installation. Install the latest full setup package first.")
             import shutil
             helper_copy=base/("scafa-updater-run.exe" if platform=="windows" else "scafa-updater-run")
+            staged_paths.append(helper_copy)
             shutil.copy2(helper_source,helper_copy)
             command=[str(helper_copy),"--pid",str(os.getpid()),"--package",str(package),
                      "--target",str(app_target),"--platform",platform]
@@ -967,6 +966,11 @@ class App(tk.Tk):
                 command.extend(["--user-uid",str(os.getuid())])
             self.after(0,lambda:self._launch_update_helper(command))
         except Exception as exc:
+            for staged_path in staged_paths:
+                try:
+                    staged_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
             message=str(exc)
             self.after(0,lambda m=message:self._update_check_failed(m))
 
