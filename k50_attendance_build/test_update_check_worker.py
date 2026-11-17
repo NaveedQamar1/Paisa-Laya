@@ -1,7 +1,10 @@
 """Regression tests for the background GitHub release-check worker."""
 
+import hashlib
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import app
@@ -35,8 +38,24 @@ class UpdateCheckWorkerTests(unittest.TestCase):
     def release(tag, asset_names):
         return {
             "tag_name": tag,
-            "assets": [{"name": name} for name in asset_names],
+            "assets": [
+                {
+                    "name": name,
+                    "browser_download_url": (
+                        "https://github.com/NaveedQamar1/Paisa-Laya/"
+                        f"releases/download/{tag}/{name}"
+                    ),
+                }
+                for name in asset_names
+            ],
         }
+
+    @staticmethod
+    def download_response(data):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.side_effect = [data, b""]
+        return response
 
     def run_worker(self, release, platform="win32", machine="x86_64"):
         response = MagicMock()
@@ -149,6 +168,161 @@ class UpdateCheckWorkerTests(unittest.TestCase):
         self.update_offer.assert_not_called()
         self.update_failed.assert_not_called()
         self.assertFalse("_pending_release" in self.window.__dict__)
+
+
+    def test_external_release_asset_url_is_rejected_before_offer(self):
+        release = self.release(
+            "scafa-v1.5.0",
+            ("SCAFA_Workforce_Setup.exe", "checksums.txt"),
+        )
+        release["assets"][0]["browser_download_url"] = (
+            "https://updates.example.invalid/SCAFA_Workforce_Setup.exe"
+        )
+
+        self.run_worker(release)
+        self.deliver_ui_callback()
+
+        self.update_failed.assert_called_once()
+        self.assertIn("expected GitHub repository release", self.update_failed.call_args.args[0])
+        self.update_offer.assert_not_called()
+        self.assertFalse("_pending_release" in self.window.__dict__)
+
+    def test_release_asset_url_rejects_wrong_repository_and_query_string(self):
+        valid = (
+            "https://github.com/NaveedQamar1/Paisa-Laya/releases/download/"
+            "scafa-v1.5.0/SCAFA_Workforce_Setup.exe"
+        )
+        invalid_urls = (
+            "http://github.com/NaveedQamar1/Paisa-Laya/releases/download/scafa-v1.5.0/SCAFA_Workforce_Setup.exe",
+            valid.replace("/NaveedQamar1/Paisa-Laya/", "/someone-else/other-repo/"),
+            valid + "?redirect=https://example.invalid",
+            valid.replace("github.com", "github.com.example.invalid"),
+        )
+        for url in invalid_urls:
+            with self.subTest(url=url):
+                with self.assertRaisesRegex(RuntimeError, "expected GitHub repository"):
+                    app.validate_release_asset_url(
+                        url, "scafa-v1.5.0", "SCAFA_Workforce_Setup.exe"
+                    )
+
+    def test_download_worker_verifies_and_stages_package_before_launch(self):
+        package_bytes = b"verified test installer"
+        digest = hashlib.sha256(package_bytes).hexdigest()
+        asset_name = "SCAFA_Workforce_Setup.exe"
+        release = self.release("scafa-v1.5.0", (asset_name, "checksums.txt"))
+        release["assets"][0]["digest"] = "sha256:" + digest
+        checksum_bytes = f"{digest}  {asset_name}\n".encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            install = root / "install"
+            install.mkdir()
+            executable = install / "SCAFA_Workforce.exe"
+            helper = install / "scafa-updater.exe"
+            helper.write_bytes(b"test updater helper")
+            self.window._pending_release = (release, asset_name, "windows")
+
+            with patch.object(app.Path, "home", return_value=home), patch.object(
+                app.sys, "executable", str(executable)
+            ), patch.object(
+                app.urllib.request,
+                "urlopen",
+                side_effect=[
+                    self.download_response(package_bytes),
+                    self.download_response(checksum_bytes),
+                ],
+            ) as open_asset, patch.object(
+                self.window, "_launch_update_helper"
+            ) as launch_helper:
+                self.window._download_and_prepare_update()
+                self.window.after.assert_called_once()
+                self.window.after.call_args.args[1]()
+
+            self.assertEqual(open_asset.call_count, 2)
+            staged = home / "SCAFAWorkforce" / "updates"
+            self.assertEqual((staged / asset_name).read_bytes(), package_bytes)
+            self.assertEqual((staged / "checksums.txt").read_bytes(), checksum_bytes)
+            self.assertEqual(
+                (staged / "scafa-updater-run.exe").read_bytes(),
+                b"test updater helper",
+            )
+            launch_helper.assert_called_once()
+            command = launch_helper.call_args.args[0]
+            self.assertEqual(command[command.index("--platform") + 1], "windows")
+            self.assertEqual(command[command.index("--package") + 1], str(staged / asset_name))
+
+    def test_download_worker_rejects_checksum_mismatch_without_launching(self):
+        package_bytes = b"tampered installer"
+        wrong_digest = hashlib.sha256(b"original installer").hexdigest()
+        asset_name = "SCAFA_Workforce_Setup.exe"
+        release = self.release("scafa-v1.5.0", (asset_name, "checksums.txt"))
+        release["assets"][0]["digest"] = "sha256:" + wrong_digest
+        checksum_bytes = f"{wrong_digest}  {asset_name}\n".encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            install = root / "install"
+            install.mkdir()
+            executable = install / "SCAFA_Workforce.exe"
+            self.window._pending_release = (release, asset_name, "windows")
+
+            with patch.object(app.Path, "home", return_value=home), patch.object(
+                app.sys, "executable", str(executable)
+            ), patch.object(
+                app.urllib.request,
+                "urlopen",
+                side_effect=[
+                    self.download_response(package_bytes),
+                    self.download_response(checksum_bytes),
+                ],
+            ), patch.object(self.window, "_launch_update_helper") as launch_helper:
+                self.window._download_and_prepare_update()
+                self.window.after.assert_called_once()
+                self.window.after.call_args.args[1]()
+
+            self.update_failed.assert_called_once()
+            self.assertIn("failed SHA-256 verification", self.update_failed.call_args.args[0])
+            self.assertFalse(
+                (home / "SCAFAWorkforce" / "updates" / asset_name).exists()
+            )
+            launch_helper.assert_not_called()
+
+    def test_download_worker_fails_closed_when_installed_helper_is_missing(self):
+        package_bytes = b"verified test installer"
+        digest = hashlib.sha256(package_bytes).hexdigest()
+        asset_name = "SCAFA_Workforce_Setup.exe"
+        release = self.release("scafa-v1.5.0", (asset_name, "checksums.txt"))
+        release["assets"][0]["digest"] = "sha256:" + digest
+        checksum_bytes = f"{digest}  {asset_name}\n".encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            install = root / "install"
+            install.mkdir()
+            executable = install / "SCAFA_Workforce.exe"
+            self.window._pending_release = (release, asset_name, "windows")
+
+            with patch.object(app.Path, "home", return_value=home), patch.object(
+                app.sys, "executable", str(executable)
+            ), patch.object(
+                app.urllib.request,
+                "urlopen",
+                side_effect=[
+                    self.download_response(package_bytes),
+                    self.download_response(checksum_bytes),
+                ],
+            ), patch.object(self.window, "_launch_update_helper") as launch_helper:
+                self.window._download_and_prepare_update()
+                self.window.after.assert_called_once()
+                self.window.after.call_args.args[1]()
+
+            self.update_failed.assert_called_once()
+            self.assertIn("update helper is missing", self.update_failed.call_args.args[0])
+            launch_helper.assert_not_called()
+
 
 
 if __name__ == "__main__":
