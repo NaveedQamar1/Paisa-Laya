@@ -35,7 +35,7 @@ def parse_release_tag(tag):
         raise RuntimeError("The latest GitHub release has an invalid SCAFA version tag.")
 
     match = re.fullmatch(
-        re.escape(RELEASE_PREFIX) + r"([0-9]+)\\.([0-9]+)\\.([0-9]+)",
+        re.escape(RELEASE_PREFIX) + r"([0-9]+)\.([0-9]+)\.([0-9]+)",
         tag,
     )
     if match is None:
