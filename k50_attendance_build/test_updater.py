@@ -1,6 +1,7 @@
 import os
 import stat
 import tempfile
+import time
 import unittest
 import io
 from contextlib import redirect_stderr, redirect_stdout
@@ -273,34 +274,130 @@ class UpdaterHelperTests(unittest.TestCase):
 
     def test_installer_powershell_runner_uses_bounded_timeout_and_captures_output(self):
         script = "Get-ScheduledTask -TaskName 'SCAFA Workforce Attendance Monitor'"
-        result = unittest.mock.Mock(returncode=0, stdout="Running", stderr="")
+        command = [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ]
+        process = unittest.mock.Mock(returncode=0)
+        process.communicate.return_value = ("Running", "")
         with patch.object(
-            updater.subprocess, "run", return_value=result
-        ) as run:
-            self.assertIs(updater.run_installer_powershell_script(script), result)
+            updater.subprocess, "Popen", return_value=process
+        ) as popen:
+            result = updater.run_installer_powershell_script(script)
 
-        self.assertEqual(run.call_args.args[0][0], "powershell.exe")
-        self.assertEqual(run.call_args.args[0][-1], script)
-        self.assertTrue(run.call_args.kwargs["capture_output"])
-        self.assertTrue(run.call_args.kwargs["text"])
+        self.assertEqual(result.args, command)
+        self.assertEqual(result.stdout, "Running")
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(popen.call_args.args[0], command)
+        self.assertEqual(popen.call_args.kwargs["stdout"], updater.subprocess.PIPE)
+        self.assertEqual(popen.call_args.kwargs["stderr"], updater.subprocess.PIPE)
+        self.assertTrue(popen.call_args.kwargs["text"])
         self.assertEqual(
-            run.call_args.kwargs["timeout"],
-            updater.WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS,
+            popen.call_args.kwargs["creationflags"]
+            if os.name == "nt"
+            else popen.call_args.kwargs["start_new_session"],
+            getattr(updater.subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            if os.name == "nt"
+            else True,
+        )
+        process.communicate.assert_called_once_with(
+            timeout=updater.WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS
         )
 
-    def test_installer_powershell_runner_propagates_timeout_for_installer_recovery(self):
-        with patch.object(
-            updater.subprocess,
-            "run",
-            side_effect=updater.subprocess.TimeoutExpired(
+    def test_installer_powershell_runner_terminates_and_reaps_on_timeout(self):
+        process = unittest.mock.Mock(returncode=-9)
+        process.communicate.side_effect = [
+            updater.subprocess.TimeoutExpired(
                 cmd="powershell.exe",
                 timeout=updater.WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS,
                 output=b"partial output",
                 stderr=b"partial error",
             ),
-        ):
-            with self.assertRaises(updater.subprocess.TimeoutExpired):
+            ("partial output", "partial error"),
+        ]
+        with patch.object(
+            updater.subprocess, "Popen", return_value=process
+        ), patch.object(
+            updater, "_terminate_installer_process_tree"
+        ) as terminate:
+            with self.assertRaises(updater.subprocess.TimeoutExpired) as raised:
                 updater.run_installer_powershell_script("Start-ScheduledTask")
+
+        terminate.assert_called_once_with(process)
+        self.assertIn("partial output", raised.exception.output)
+        self.assertIn("partial error", raised.exception.stderr)
+
+    @unittest.skipIf(os.name == "nt", "Uses a POSIX process group to verify descendant cleanup")
+    def test_installer_powershell_timeout_kills_descendant_processes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fake_powershell = root / "powershell.exe"
+            marker = root / "descendant-survived.txt"
+            fake_powershell.write_text(
+                "#!/bin/sh\n"
+                "printf 'partial stdout\\n'\n"
+                "printf 'partial stderr\\n' >&2\n"
+                f"(sleep 1.5; printf 'survived' > '{marker}') &\n"
+                "wait\n",
+                encoding="utf-8",
+            )
+            fake_powershell.chmod(0o755)
+            search_path = str(root) + os.pathsep + os.environ.get("PATH", "")
+            with patch.dict(os.environ, {"PATH": search_path}), patch.object(
+                updater, "WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS", 0.2
+            ):
+                with self.assertRaises(updater.subprocess.TimeoutExpired) as raised:
+                    updater.run_installer_powershell_script("Start-Sleep")
+
+            stdout = raised.exception.output
+            stderr = raised.exception.stderr
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            self.assertIn("partial stdout", stdout or "")
+            self.assertIn("partial stderr", stderr or "")
+            time.sleep(1.8)
+            self.assertFalse(marker.exists(), "A descendant process survived the timeout")
+
+    @unittest.skipUnless(os.name == "nt", "Requires Windows PowerShell and taskkill")
+    def test_installer_powershell_timeout_kills_windows_descendant_processes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            child_script = root / "scafa-timeout-child.cmd"
+            marker = root / "descendant-survived.txt"
+            child_script.write_text(
+                "@echo off\r\n"
+                "timeout /t 6 /nobreak >nul\r\n"
+                f'echo survived > "{marker}"\r\n',
+                encoding="utf-8",
+            )
+            script = (
+                "$child = Start-Process -FilePath $env:ComSpec "
+                "-ArgumentList ('/c \"' + $env:SCAFA_TEST_CHILD_SCRIPT + '\"') "
+                "-PassThru -WindowStyle Hidden; "
+                "[Console]::Out.WriteLine('CHILD_PID=' + $child.Id); "
+                "Start-Sleep -Seconds 30"
+            )
+            with patch.dict(
+                os.environ, {"SCAFA_TEST_CHILD_SCRIPT": str(child_script)}
+            ), patch.object(
+                updater, "WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS", 1.0
+            ):
+                with self.assertRaises(updater.subprocess.TimeoutExpired) as raised:
+                    updater.run_installer_powershell_script(script)
+
+            stdout = raised.exception.output
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            self.assertIn("CHILD_PID=", stdout or "")
+            time.sleep(6.5)
+            self.assertFalse(marker.exists(), "A Windows descendant process survived the timeout")
 
     def test_installer_powershell_cli_returns_output_and_child_exit_code(self):
         result = unittest.mock.Mock(returncode=0, stdout="Running\n", stderr="")
