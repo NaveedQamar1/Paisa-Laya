@@ -108,10 +108,10 @@ class UpdaterHelperTests(unittest.TestCase):
                 updater.subprocess,
                 "run",
                 side_effect=[
-                    unittest.mock.Mock(returncode=0, stdout="RUNNING\\n", stderr=""),
-                    unittest.mock.Mock(returncode=0, stdout="STOPPED\\n", stderr=""),
+                    unittest.mock.Mock(returncode=0, stdout="RUNNING\n", stderr=""),
+                    unittest.mock.Mock(returncode=0, stdout="STOPPED\n", stderr=""),
                     updater.subprocess.TimeoutExpired(cmd=str(installer), timeout=timeout),
-                    unittest.mock.Mock(returncode=0, stdout="STARTED\\n", stderr=""),
+                    unittest.mock.Mock(returncode=0, stdout="STARTED\n", stderr=""),
                 ],
             ) as run, patch.object(updater.subprocess,"Popen") as launch:
                 with self.assertRaisesRegex(RuntimeError, "did not finish within"):
@@ -131,16 +131,16 @@ class UpdaterHelperTests(unittest.TestCase):
                 updater.subprocess,
                 "run",
                 side_effect=[
-                    unittest.mock.Mock(returncode=0, stdout="RUNNING\\n", stderr=""),
-                    unittest.mock.Mock(returncode=0, stdout="STOPPED\\n", stderr=""),
+                    unittest.mock.Mock(returncode=0, stdout="RUNNING\n", stderr=""),
+                    unittest.mock.Mock(returncode=0, stdout="STOPPED\n", stderr=""),
                     updater.subprocess.TimeoutExpired(cmd=str(installer), timeout=timeout),
                     unittest.mock.Mock(returncode=1, stdout="", stderr="Task Scheduler unavailable"),
                 ],
             ) as run, patch.object(updater.subprocess,"Popen") as launch:
-                with self.assertRaisesRegex(RuntimeError, "could not be restarted"):
+                with self.assertRaisesRegex(RuntimeError, "could not be restarted") as error:
                     updater.apply_windows(installer,root)
             self.assertEqual(run.call_count, 4)
-            self.assertIn("Task Scheduler unavailable", str(run.call_args_list[3].kwargs) or "Task Scheduler unavailable")
+            self.assertIn("Task Scheduler unavailable", str(error.exception))
             launch.assert_not_called()
 
     def test_windows_update_aborts_if_running_monitor_cannot_be_stopped(self):
