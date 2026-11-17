@@ -512,8 +512,8 @@ class DeviceIOTests(unittest.TestCase):
     def test_device_name_sync_preserves_employee_profile_and_status_history(self):
         with sqlite3.connect(app.DB) as db:
             db.execute(
-                """INSERT INTO staff(user_id,name,department,designation,joining_date,active)
-                   VALUES('101','Old Device Name','Kitchen','Chef','2024-03-01',0)"""
+                """INSERT INTO staff(user_id,name,department,designation,joining_date,active,name_source)
+                   VALUES('101','Old Device Name','Kitchen','Chef','2024-03-01',0,'device')"""
             )
             db.execute(
                 """INSERT INTO staff_status_history(user_id,active,effective_date,source)
