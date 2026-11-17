@@ -15,9 +15,27 @@ Use a disposable test machine and a copy of production data. Never use the only 
 
 A successful CI artifact build is not a published release and does not replace these manual gates.
 
-## 2. Windows — upgrade and data preservation
+## 2. Windows — clean install, upgrade, and data preservation
 
-Use a disposable Windows account. Install the latest stable v1.3.0 package first.
+### Clean install on Windows 10/11
+
+Use a fresh Windows 10/11 VM or a new standard Windows user profile that has never run SCAFA Workforce or K50 Attendance Manager.
+
+- [ ] Confirm there is no existing SCAFA/K50 application install, no `SCAFAWorkforce` or `K50AttendanceManager` data directory, no SCAFA scheduled task, and no SCAFA monitor process.
+- [ ] Record the Windows edition/build and the standard user account; do not use the only copy of production data.
+- [ ] Install the v1.4 Windows installer as that standard user and confirm setup does not require administrator elevation.
+- [ ] Confirm the application is installed in the expected per-user location and appears in Windows Apps/Installed Apps.
+- [ ] Launch the app; verify the displayed version is v1.4.0 and the new database is created at the expected per-user `SCAFAWorkforce/attendance.db` path.
+- [ ] Run `PRAGMA integrity_check` against the new database and confirm it returns `ok`; verify the expected tables are initialized.
+- [ ] Record the initial monitor/task state. Confirm the app does not silently enable a monitor contrary to the selected/default monitor setting.
+- [ ] Create a disposable test employee/profile, close the app, reopen it, and confirm the profile persists.
+- [ ] Restart Windows and confirm only the configured SCAFA monitor task starts.
+- [ ] Uninstall through Windows Apps/Installed Apps; confirm the application files/task are removed but user data is preserved.
+- [ ] Reinstall and confirm the preserved database and test employee are reopened rather than replaced with an empty database.
+
+### Upgrade v1.3.0 to v1.4.0
+
+Use a separate disposable Windows account. Install the latest stable v1.3.0 package first.
 
 ### Prepare a recoverable baseline
 
@@ -72,6 +90,19 @@ The installer invokes the bundled `scafa-updater.exe` helper for Task Scheduler 
 ## 3. macOS — Intel install, update, and LaunchAgent recovery
 
 Use a disposable Intel Mac and a standard login account.
+
+### Clean install on Intel macOS
+
+- [ ] Use a fresh macOS VM or a new standard user account with no SCAFA app bundle, no `pk.scafa.workforce.monitor.plist`, and no `~/SCAFAWorkforce` data directory.
+- [ ] Record macOS version, Intel CPU architecture, user account, and the exact Intel installer artifact ID/workflow run/commit/SHA-256.
+- [ ] Install the v1.4 Intel `.pkg` using the release-approved Gatekeeper procedure; record any unsigned-app warning and do not silently bypass a distribution policy.
+- [ ] Verify the installed app executable is x86_64, the bundle is in `/Applications`, and the displayed version is v1.4.0.
+- [ ] Launch the app and confirm first-run database creation at `~/SCAFAWorkforce/attendance.db`; run `PRAGMA integrity_check` and confirm `ok`.
+- [ ] Confirm the bundled monitor and updater helpers exist and are executable.
+- [ ] Record the first-run LaunchAgent state and verify it matches the user's monitor setting; do not assume that a missing/disabled agent should be enabled.
+- [ ] Restart/log out and back in; verify the app opens the same database and only the configured LaunchAgent starts.
+
+### Upgrade from v1.3.0
 
 - [ ] Record the macOS version, Intel architecture, installed SCAFA version, and package SHA-256.
 - [ ] Back up `~/SCAFAWorkforce` and record the database checksum and representative records.
@@ -142,13 +173,19 @@ Perform these tests against an available physical K50 device; CI cannot substitu
 
 For each test, record the result, date, operator, machine, exact commit, workflow run, artifact ID, and any log/screenshot reference.
 
+### Automated CI evidence — code commit `c7f2d751`
+
+- Validation run [#44060872518](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44060872518): Windows 191 tests (1 skipped because the hosted Windows runner may not grant symbolic-link creation), Intel macOS 191 tests, and Apple Silicon 191 tests; all three jobs passed.
+- Packaging run [#44060872601](https://github.com/NaveedQamar1/Paisa-Laya/actions/runs/44060872601): Windows installer, Intel macOS app ZIP, Intel macOS installer, Intel icon patch, and Apple Silicon app ZIP were all built and uploaded. The publish job was skipped as expected for a pull request.
+- These results validate code commit `c7f2d751`; this document-only update does not change application code or workflow files. CI artifacts are not a published release.
+
 | Gate | Result | Evidence |
 |---|---|---|
 | Windows clean install | Not run | |
 | Windows v1.3.0 → v1.4 upgrade | Not run | |
 | Windows monitor state preservation | Not run | |
-| Windows updater timeout/rollback | Automated tests pending; manual not run | |
-| Windows direct-installer PowerShell timeout/termination | CI pending; manual not run | |
+| Windows updater timeout/rollback | Automated tests passed on code commit `c7f2d751`; manual not run | |
+| Windows direct-installer PowerShell timeout/termination | Automated tests passed on code commit `c7f2d751`; manual fault injection not run | |
 | Windows uninstall/data preservation | Not run | |
 | Intel macOS clean install | Not run | |
 | Intel macOS v1.3.0 → v1.4 upgrade | Not run | |
