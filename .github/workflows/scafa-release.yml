@@ -60,7 +60,13 @@ jobs:
           if ($env:GITHUB_REF -like 'refs/tags/scafa-v*' -and $releaseTag -ne $env:GITHUB_REF.Substring('refs/tags/'.Length)) {
             throw "release_tag must match the versioned tag that triggered this workflow."
           }
-          if ($releaseTag -notmatch '^scafa-v[0-9]+\.[0-9]+\.[0-9]+
+          if ($releaseTag -notmatch '^scafa-v[0-9]+\.[0-9]+\.[0-9]+$') {
+            throw "release_tag must exactly match APP_VERSION as scafa-vMAJOR.MINOR.PATCH."
+          }
+          if ($releaseTag -ne "scafa-v$appVersion") {
+            throw "release_tag does not match APP_VERSION ($appVersion) in k50_attendance_build/app.py."
+          }
+          $version = $appVersion
           python -m pip install --upgrade pip
           python -m pip install -r k50_attendance_build/requirements.txt
           python -c "import base64; from pathlib import Path; from PIL import Image; p=Path('k50_attendance_build/assets'); (p/'scafa_workforce_icon.png').write_bytes(base64.b64decode((p/'scafa_workforce_icon.png.b64').read_text())); Image.open(p/'scafa_workforce_icon.png').save(p/'scafa_workforce_icon.ico',format='ICO',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
@@ -194,12 +200,12 @@ jobs:
         run: |
           set -euo pipefail
           RELEASE_TAG="${SCAFA_RELEASE_TAG_INPUT:-}"
+          APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
+          if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
           if [ -z "$RELEASE_TAG" ]; then
             if [[ "$GITHUB_REF" == refs/tags/scafa-v* ]]; then
               RELEASE_TAG="${GITHUB_REF#refs/tags/}"
             else
-              APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
-              if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
               RELEASE_TAG="scafa-v$APP_VERSION"
             fi
           fi
@@ -211,169 +217,8 @@ jobs:
             echo "release_tag must exactly match APP_VERSION as scafa-vMAJOR.MINOR.PATCH." >&2
             exit 1
           fi
-          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "Release $RELEASE_TAG already exists; skipping duplicate publication."
-            exit 0
-          fi
-          : > release-assets/checksums.txt
-          while IFS= read -r -d '' file; do
-            name="$(basename "$file")"
-            digest="$(sha256sum "$file" | cut -d ' ' -f 1)"
-            printf '%s  %s\n' "$digest" "$name" >> release-assets/checksums.txt
-          done < <(find release-assets -type f ! -name checksums.txt -print0)
-          mapfile -d '' assets < <(find release-assets -type f -print0)
-          gh release create "$RELEASE_TAG" "${assets[@]}" --repo "${{ github.repository }}" --target "$GITHUB_SHA" --title "SCAFA Workforce $RELEASE_TAG" --generate-notes
-) {
-            throw "release_tag must exactly match APP_VERSION as scafa-vMAJOR.MINOR.PATCH."
-          }
-          if ($releaseTag -ne "scafa-v$appVersion") {
-            throw "release_tag does not match APP_VERSION ($appVersion) in k50_attendance_build/app.py."
-          }
-          $version = $appVersion
-          python -m pip install --upgrade pip
-          python -m pip install -r k50_attendance_build/requirements.txt
-          python -c "import base64; from pathlib import Path; from PIL import Image; p=Path('k50_attendance_build/assets'); (p/'scafa_workforce_icon.png').write_bytes(base64.b64decode((p/'scafa_workforce_icon.png.b64').read_text())); Image.open(p/'scafa_workforce_icon.png').save(p/'scafa_workforce_icon.ico',format='ICO',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
-          python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
-          if ($LASTEXITCODE -ne 0) { throw "Python unit tests failed" }
-          python -m PyInstaller --noconfirm --clean --onedir --windowed --collect-data certifi --icon k50_attendance_build/assets/scafa_workforce_icon.ico --add-data "k50_attendance_build/assets/scafa_workforce_icon.png;assets" --name SCAFA_Workforce k50_attendance_build/app.py
-          python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor --collect-all winotify k50_attendance_build/monitor.py
-          python -m PyInstaller --noconfirm --clean --onefile --name scafa-updater k50_attendance_build/updater.py
-          Copy-Item dist/scafa-monitor.exe dist/SCAFA_Workforce/scafa-monitor.exe -Force
-          Copy-Item dist/scafa-updater.exe dist/SCAFA_Workforce/scafa-updater.exe -Force
-          choco install innosetup --yes --no-progress
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          & $iscc "/DMyAppVersion=$version" "k50_attendance_build\installer\SCAFA_Workforce.iss"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: release-windows
-          path: installer-output/SCAFA_Workforce_Setup.exe
-          if-no-files-found: error
-
-  macos:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15-intel
-            arch: intel
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: ${{ github.ref }}
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.12"
-      - name: Build macOS app
-        env:
-          SCAFA_RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag }}
-        run: |
-          RELEASE_TAG="${SCAFA_RELEASE_TAG_INPUT:-}"
-          if [ -z "$RELEASE_TAG" ]; then
-            if [[ "$GITHUB_REF" == refs/tags/scafa-v* ]]; then
-              RELEASE_TAG="${GITHUB_REF#refs/tags/}"
-            else
-              APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
-              if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
-              RELEASE_TAG="scafa-v$APP_VERSION"
-            fi
-          fi
-          if [[ "$GITHUB_REF" == refs/tags/scafa-v* && "$RELEASE_TAG" != "${GITHUB_REF#refs/tags/}" ]]; then
-            echo "release_tag must match the versioned tag that triggered this workflow." >&2
-            exit 1
-          fi
-          if [[ ! "$RELEASE_TAG" =~ ^scafa-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "release_tag must match scafa-vMAJOR.MINOR.PATCH, optionally with a prerelease suffix." >&2
-            exit 1
-          fi
-          VERSION="${RELEASE_TAG#scafa-v}"
-          python -m pip install --upgrade pip
-          python -m pip install -r k50_attendance_build/requirements.txt
-          python -c "import base64; from pathlib import Path; from PIL import Image; p=Path('k50_attendance_build/assets'); (p/'scafa_workforce_icon.png').write_bytes(base64.b64decode((p/'scafa_workforce_icon.png.b64').read_text())); Image.open(p/'scafa_workforce_icon.png').save(p/'scafa_workforce_icon.icns',format='ICNS',sizes=[(16,16),(32,32),(64,64),(128,128),(256,256),(512,512),(1024,1024)])"
-          python -m unittest discover -s k50_attendance_build -p "test_*.py" -v
-          python -m PyInstaller --noconfirm --clean --windowed --collect-data certifi --icon k50_attendance_build/assets/scafa_workforce_icon.icns --add-data "k50_attendance_build/assets/scafa_workforce_icon.png:assets" --name SCAFA_Workforce k50_attendance_build/app.py
-          python -m PyInstaller --noconfirm --clean --onefile --name scafa-monitor k50_attendance_build/monitor.py
-          python -m PyInstaller --noconfirm --clean --onefile --name scafa-updater k50_attendance_build/updater.py
-          install -m 755 dist/scafa-monitor dist/SCAFA_Workforce.app/Contents/MacOS/scafa-monitor
-          install -m 755 dist/scafa-updater dist/SCAFA_Workforce.app/Contents/MacOS/scafa-updater
-          # Apply an ad-hoc signature after all bundled executables/resources are in place.
-          # This is not Developer ID signing or notarization; it gives macOS a consistent
-          # sealed bundle for integrity verification and catches damaged bundle contents.
-          codesign --force --deep --sign - --timestamp=none dist/SCAFA_Workforce.app
-          codesign --verify --deep --strict --verbose=2 dist/SCAFA_Workforce.app
-          ditto -c -k --sequesterRsrc --keepParent dist/SCAFA_Workforce.app dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
-          if [ "${{ matrix.arch }}" = "intel" ]; then
-            pkgbuild --component dist/SCAFA_Workforce.app --install-location /Applications --identifier pk.scafa.workforce --version "$VERSION" dist/SCAFA_Workforce_Installer_Intel.pkg
-            mkdir -p icon-patch-scripts
-            cp k50_attendance_build/assets/scafa_workforce_icon.icns icon-patch-scripts/scafa_workforce_icon.icns
-            cp k50_attendance_build/installer/macos-icon-patch-postinstall icon-patch-scripts/postinstall
-            chmod 755 icon-patch-scripts/postinstall
-            chmod 644 icon-patch-scripts/scafa_workforce_icon.icns
-            pkgbuild --nopayload --scripts icon-patch-scripts --identifier pk.scafa.workforce.iconpatch --version "$VERSION" --install-location / dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
-            PATCH_CHECK_DIR="$(mktemp -d)"
-            trap 'rm -rf "$PATCH_CHECK_DIR"' EXIT
-            pkgutil --expand dist/SCAFA_Workforce_Icon_Patch_Intel.pkg "$PATCH_CHECK_DIR/expanded"
-            test -s "$PATCH_CHECK_DIR/expanded/Scripts/postinstall"
-            test -s "$PATCH_CHECK_DIR/expanded/Scripts/scafa_workforce_icon.icns"
-            test -x "$PATCH_CHECK_DIR/expanded/Scripts/postinstall"
-          fi
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: release-macos-${{ matrix.arch }}
-          path: dist/SCAFA_Workforce_macOS_${{ matrix.arch }}.zip
-          if-no-files-found: error
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        if: matrix.arch == 'intel'
-        with:
-          name: release-macos-intel-installer
-          path: dist/SCAFA_Workforce_Installer_Intel.pkg
-          if-no-files-found: error
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        if: matrix.arch == 'intel'
-        with:
-          name: release-macos-intel-icon-patch
-          path: dist/SCAFA_Workforce_Icon_Patch_Intel.pkg
-          if-no-files-found: error
-
-  publish:
-    if: startsWith(github.ref, 'refs/tags/scafa-v')
-    needs: [windows, macos]
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: ${{ github.ref }}
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          path: release-assets
-      - name: Generate checksums and publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SCAFA_RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          RELEASE_TAG="${SCAFA_RELEASE_TAG_INPUT:-}"
-          if [ -z "$RELEASE_TAG" ]; then
-            if [[ "$GITHUB_REF" == refs/tags/scafa-v* ]]; then
-              RELEASE_TAG="${GITHUB_REF#refs/tags/}"
-            else
-              APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
-              if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
-              RELEASE_TAG="scafa-v$APP_VERSION"
-            fi
-          fi
-          if [[ "$GITHUB_REF" == refs/tags/scafa-v* && "$RELEASE_TAG" != "${GITHUB_REF#refs/tags/}" ]]; then
-            echo "release_tag must match the versioned tag that triggered this workflow." >&2
-            exit 1
-          fi
-          if [[ ! "$RELEASE_TAG" =~ ^scafa-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "release_tag must match scafa-vMAJOR.MINOR.PATCH, optionally with a prerelease suffix." >&2
+          if [[ "$RELEASE_TAG" != "scafa-v$APP_VERSION" ]]; then
+            echo "release_tag does not match APP_VERSION ($APP_VERSION) in app.py." >&2
             exit 1
           fi
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then

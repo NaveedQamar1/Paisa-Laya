@@ -46,7 +46,12 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
             ),
             2,
         )
-        self.assertEqual(self.workflow.count("release_tag must match scafa-vMAJOR.MINOR.PATCH"), 3)
+        self.assertEqual(
+            self.workflow.count(
+                "release_tag must exactly match APP_VERSION as scafa-vMAJOR.MINOR.PATCH."
+            ),
+            3,
+        )
 
 
     def test_package_version_must_match_application_version(self):
@@ -54,14 +59,8 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
             '$appVersion = $versionLine.Matches[0].Groups[1].Value',
             self.workflow,
         )
-        self.assertIn(
-            'if ($releaseTag -ne "scafa-v$appVersion")',
-            self.workflow,
-        )
-        self.assertIn(
-            'if [[ "$RELEASE_TAG" != "scafa-v$APP_VERSION" ]]',
-            self.workflow,
-        )
+        self.assertIn('if ($releaseTag -ne "scafa-v$appVersion")', self.workflow)
+        self.assertIn('if [[ "$RELEASE_TAG" != "scafa-v$APP_VERSION" ]]', self.workflow)
         self.assertIn('VERSION="$APP_VERSION"', self.workflow)
         self.assertNotIn('optionally with a prerelease suffix', self.workflow)
         self.assertEqual(
