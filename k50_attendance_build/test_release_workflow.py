@@ -81,7 +81,7 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
         self.assertIn("permissions:\\n  contents: read", self.workflow)
         publish = self.workflow.split("  publish:", 1)[1]
         self.assertIn("permissions:\\n      contents: write", publish)
-        self.assertNotIn("contents: write", self.workflow.split("  jobs:", 1)[0])
+        self.assertNotIn("contents: write", self.workflow.split("\njobs:\n", 1)[0])
 
     def test_release_actions_are_pinned_to_immutable_revisions(self):
         for action in (
