@@ -49,10 +49,8 @@ class MacOSPackageLifecycleTests(unittest.TestCase):
         )
 
     def test_preinstall_persists_protected_recovery_state_before_stopping_monitor(self):
-        self.assertIn(
-            'STATE_FILE="/var/db/scafa-workforce-installer/monitor-state"',
-            self.preinstall,
-        )
+        self.assertIn('STATE_DIR="/var/db/scafa-workforce-installer"', self.preinstall)
+        self.assertIn('STATE_FILE="$STATE_DIR/monitor-state"', self.preinstall)
         self.assertIn('/usr/bin/install -d -o root -g wheel -m 700 "$STATE_DIR"', self.preinstall)
         self.assertIn('/bin/chmod 600 "$tmp_file"', self.preinstall)
         self.assertLess(
@@ -69,10 +67,15 @@ class MacOSPackageLifecycleTests(unittest.TestCase):
     def test_postinstall_confirms_monitor_before_removing_recovery_state(self):
         bootstrap = self.postinstall.index('launchctl bootstrap "$domain" "$plist"')
         confirmation = self.postinstall.index('launchctl print "$service"', bootstrap)
-        cleanup = self.postinstall.index('clear_state\\nlog "Restored and verified the previously loaded monitor', confirmation)
+        restored_log = self.postinstall.index(
+            'log "Restored and verified the previously loaded monitor',
+            confirmation,
+        )
+        cleanup = self.postinstall.rfind("clear_state", confirmation, restored_log)
         self.assertIn('/bin/rm -f "$STATE_FILE"', self.postinstall)
         self.assertLess(bootstrap, confirmation)
-        self.assertLess(confirmation, cleanup)
+        self.assertGreaterEqual(cleanup, confirmation)
+        self.assertLess(cleanup, restored_log)
         self.assertIn("The monitor bootstrap completed, but launchd did not confirm", self.postinstall)
 
     def test_release_workflow_builds_and_inspects_the_scripted_component_package(self):
