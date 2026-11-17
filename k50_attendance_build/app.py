@@ -2075,6 +2075,20 @@ class App(tk.Tk):
         device_users=[]
         rows=None
         total=inserted=saved_users=0
+        def cleanup_device_connection():
+            nonlocal conn
+            if conn is None:
+                return
+            connection, conn = conn, None
+            try:
+                connection.enable_device()
+            except Exception as e:
+                cleanup_errors.append(f"Could not re-enable attendance device: {e}")
+            try:
+                connection.disconnect()
+            except Exception as e:
+                cleanup_errors.append(f"Could not disconnect from attendance device: {e}")
+
         try:
             from zk import ZK
             conn=ZK(ip,port=port,timeout=12,password=key,force_udp=False, ommit_ping=False).connect()
@@ -2088,6 +2102,12 @@ class App(tk.Tk):
                 # Save any users already fetched and initialize their dated
                 # baseline even when the device's attendance read fails.
                 fetch_error=str(e)
+
+            # The device snapshot is complete. Re-enable and disconnect before
+            # waiting for the database maintenance lock, which may be held by a
+            # backup/restore operation. New punches remain on the device and are
+            # picked up by the next sync; they must not be blocked by SQLite work.
+            cleanup_device_connection()
 
             # Commit names, punches and employment baselines as one coordinated
             # database phase. Network I/O stays outside the maintenance lock, so
@@ -2123,15 +2143,9 @@ class App(tk.Tk):
         except Exception as e:
             fetch_error=f"{fetch_error}; {e}" if fetch_error else str(e)
         finally:
-            if conn:
-                try:
-                    conn.enable_device()
-                except Exception as e:
-                    cleanup_errors.append(f"Could not re-enable attendance device: {e}")
-                try:
-                    conn.disconnect()
-                except Exception as e:
-                    cleanup_errors.append(f"Could not disconnect from attendance device: {e}")
+            # Also clean up when connection, device-disable, or read operations
+            # fail before the normal post-read cleanup point.
+            cleanup_device_connection()
 
         device_warning="; ".join(cleanup_errors + sync_warnings) if cleanup_errors or sync_warnings else None
         if fetch_error is not None:
