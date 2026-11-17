@@ -38,11 +38,12 @@ def ensure_device_employee_status_history(db, user_id, first_punch_date=None, ef
     joining_is_valid = False
     if joining:
         try:
-            datetime.strptime(joining, "%Y-%m-%d")
+            effective = datetime.strptime(
+                joining, "%Y-%m-%d"
+            ).date().isoformat()
         except ValueError:
             pass
         else:
-            effective = joining
             joining_is_valid = True
     if not joining_is_valid and first_punch_date:
         try:

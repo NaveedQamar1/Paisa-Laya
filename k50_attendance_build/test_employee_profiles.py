@@ -237,6 +237,33 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             ],
         )
 
+    def test_migration_normalizes_non_padded_joining_date_before_history_creation(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                "INSERT INTO staff(user_id,name,joining_date,active) VALUES('56','Legacy Hire','2024-1-2',1)"
+            )
+
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            joining = db.execute(
+                "SELECT joining_date FROM staff WHERE user_id='56'"
+            ).fetchone()[0]
+            history = db.execute(
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='56' ORDER BY effective_date,id"
+            ).fetchall()
+            self.assertFalse(app.employee_active_on(db, "56", "2024-01-01"))
+            self.assertTrue(app.employee_active_on(db, "56", "2024-01-15"))
+
+        self.assertEqual(joining, "2024-01-02")
+        self.assertEqual(
+            history,
+            [
+                (0, "0001-01-01", "migration-baseline"),
+                (1, "2024-01-02", "migration"),
+            ],
+        )
+
     def test_new_database_has_employee_profile_fields(self):
         app.init_db()
         with sqlite3.connect(app.DB) as db:
@@ -453,6 +480,30 @@ class EmployeeProfileMigrationTests(unittest.TestCase):
             self.assertEqual(db.execute(
                 "SELECT COUNT(*) FROM staff_status_history WHERE user_id='53' AND active=1"
             ).fetchone()[0], 1)
+
+    def test_device_sync_canonicalizes_non_padded_legacy_joining_date(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                "INSERT INTO staff(user_id,name,joining_date,active) VALUES('57','Legacy Device Hire','2024-1-2',1)"
+            )
+            self.assertTrue(
+                app.ensure_device_employee_status_history(
+                    db, "57", "2024-01-03", effective_today="2026-11-16"
+                )
+            )
+            history = db.execute(
+                "SELECT active,effective_date,source FROM staff_status_history WHERE user_id='57' ORDER BY effective_date,id"
+            ).fetchall()
+            self.assertTrue(app.employee_active_on(db, "57", "2024-01-15"))
+
+        self.assertEqual(
+            history,
+            [
+                (0, "0001-01-01", "device-sync-baseline"),
+                (1, "2024-01-02", "device-sync"),
+            ],
+        )
 
     def test_device_sync_repairs_baseline_only_history_without_duplicates(self):
         app.init_db()
@@ -718,6 +769,17 @@ class EmployeeProfileSaveTests(unittest.TestCase):
         with sqlite3.connect(app.DB) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM staff").fetchone()[0], 0)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM staff_status_history").fetchone()[0], 0)
+
+    def test_non_padded_joining_date_is_rejected_without_writes(self):
+        with self.assertRaisesRegex(ValueError, "Use YYYY-MM-DD"):
+            self.save_profile("702", "Noncanonical Date", joining_date="2024-1-2")
+
+        with sqlite3.connect(app.DB) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM staff").fetchone()[0], 0)
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM staff_status_history").fetchone()[0],
+                0,
+            )
 
     def test_status_history_failure_rolls_back_profile_update(self):
         self.save_profile("701", "Original Employee")

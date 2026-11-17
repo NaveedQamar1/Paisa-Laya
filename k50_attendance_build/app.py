@@ -148,13 +148,24 @@ def init_db(*, maintenance_lock_held=False):
         for uid, active, joining in c.execute(
             "SELECT user_id,active,joining_date FROM staff"
         ).fetchall():
-            valid_joining = False
+            normalized_joining = ""
             if joining:
+                joining_text = str(joining).strip()
                 try:
-                    datetime.strptime(str(joining), "%Y-%m-%d")
-                    valid_joining = True
+                    normalized_joining = datetime.strptime(
+                        joining_text, "%Y-%m-%d"
+                    ).date().isoformat()
                 except ValueError:
                     pass
+                else:
+                    # strptime accepts unpadded month/day values. Normalize valid
+                    # legacy dates before they enter lexicographically ordered history.
+                    if joining_text != normalized_joining:
+                        c.execute(
+                            "UPDATE staff SET joining_date=? WHERE user_id=?",
+                            (normalized_joining, str(uid)),
+                        )
+            valid_joining = bool(normalized_joining)
             if int(active or 0):
                 # Baseline prevents an active employee from being counted before
                 # their joining date, but is not itself a complete status history.
@@ -175,7 +186,7 @@ def init_db(*, maintenance_lock_held=False):
             effective = date.today().isoformat()
             if int(active or 0):
                 if valid_joining:
-                    effective = str(joining)
+                    effective = normalized_joining
                 else:
                     first_punch = c.execute(
                         "SELECT MIN(substr(punch_time,1,10)) FROM punches WHERE user_id=?",
@@ -374,7 +385,9 @@ def save_employee_profile(db, user_id, name, department="", designation="", join
         raise ValueError("The device-assigned employee ID cannot be changed.")
     if joining:
         try:
-            datetime.strptime(joining, "%Y-%m-%d")
+            parsed_joining = datetime.strptime(joining, "%Y-%m-%d").date()
+            if parsed_joining.isoformat() != joining:
+                raise ValueError
         except ValueError:
             raise ValueError("Use YYYY-MM-DD for the joining date.") from None
 
