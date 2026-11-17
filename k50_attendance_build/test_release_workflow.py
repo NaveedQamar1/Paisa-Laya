@@ -110,7 +110,7 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
             with self.subTest(workflow="release" if workflow is self.workflow else "validation"):
                 self.assertIn("runner: macos-15-intel", workflow)
                 self.assertNotIn("apple-silicon", workflow)
-                self.assertNotIn("runner: macos-15\\n", workflow)
+                self.assertNotIn("runner: macos-15\n", workflow)
                 self.assertIn("runs-on: windows-latest", workflow)
 
     def test_build_workflow_uses_pinned_pillow_from_requirements(self):
