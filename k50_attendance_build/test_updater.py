@@ -332,6 +332,43 @@ class UpdaterHelperTests(unittest.TestCase):
         self.assertIn("partial output", raised.exception.output)
         self.assertIn("partial error", raised.exception.stderr)
 
+    def test_installer_powershell_runner_fails_closed_if_process_cannot_be_reaped(self):
+        process = unittest.mock.Mock(returncode=None)
+        timeout = updater.WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS
+        process.communicate.side_effect = [
+            updater.subprocess.TimeoutExpired(
+                cmd="powershell.exe",
+                timeout=timeout,
+                output=b"partial output",
+                stderr=b"partial error",
+            ),
+            updater.subprocess.TimeoutExpired(
+                cmd="powershell.exe",
+                timeout=5,
+            ),
+            updater.subprocess.TimeoutExpired(
+                cmd="powershell.exe",
+                timeout=5,
+            ),
+        ]
+        with patch.object(
+            updater.subprocess, "Popen", return_value=process
+        ), patch.object(
+            updater, "_terminate_installer_process_tree"
+        ) as terminate:
+            with self.assertRaisesRegex(
+                RuntimeError, "could not be terminated and reaped"
+            ):
+                updater.run_installer_powershell_script("Start-ScheduledTask")
+
+        terminate.assert_called_once_with(process)
+        process.kill.assert_called_once_with()
+        self.assertEqual(process.communicate.call_count, 3)
+        self.assertEqual(
+            [call.kwargs["timeout"] for call in process.communicate.call_args_list],
+            [timeout, 5, 5],
+        )
+
     @unittest.skipIf(os.name == "nt", "Uses a POSIX process group to verify descendant cleanup")
     def test_installer_powershell_timeout_kills_descendant_processes(self):
         with tempfile.TemporaryDirectory() as tmp:
