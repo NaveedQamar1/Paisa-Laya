@@ -255,6 +255,37 @@ class UpdaterHelperTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Timed out while trying to inspect"):
                 updater._run_windows_monitor_command("Get-ScheduledTask", "inspect")
 
+    def test_installer_powershell_runner_uses_bounded_timeout_and_captures_output(self):
+        script = "Get-ScheduledTask -TaskName 'SCAFA Workforce Attendance Monitor'"
+        result = unittest.mock.Mock(returncode=0, stdout="Running", stderr="")
+        with patch.object(
+            updater.subprocess, "run", return_value=result
+        ) as run:
+            self.assertIs(updater.run_installer_powershell_script(script), result)
+
+        self.assertEqual(run.call_args.args[0][0], "powershell.exe")
+        self.assertEqual(run.call_args.args[0][-1], script)
+        self.assertTrue(run.call_args.kwargs["capture_output"])
+        self.assertTrue(run.call_args.kwargs["text"])
+        self.assertEqual(
+            run.call_args.kwargs["timeout"],
+            updater.WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS,
+        )
+
+    def test_installer_powershell_runner_propagates_timeout_for_installer_recovery(self):
+        with patch.object(
+            updater.subprocess,
+            "run",
+            side_effect=updater.subprocess.TimeoutExpired(
+                cmd="powershell.exe",
+                timeout=updater.WINDOWS_MONITOR_COMMAND_TIMEOUT_SECONDS,
+                output=b"partial output",
+                stderr=b"partial error",
+            ),
+        ):
+            with self.assertRaises(updater.subprocess.TimeoutExpired):
+                updater.run_installer_powershell_script("Start-ScheduledTask")
+
     def test_zip_extraction_rejects_parent_directory_paths(self):
         import zipfile
         with tempfile.TemporaryDirectory() as tmp:
