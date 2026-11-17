@@ -25,6 +25,7 @@ BLUE = "#2f6b45"
 TEAL = "#477c57"
 MUTED = "#68756b"
 APP_VERSION = "1.4.0"
+MONITOR_COMMAND_TIMEOUT_SECONDS = 30
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
@@ -102,6 +103,24 @@ def verify_update_asset(package, checksum_file, asset_name, published_digest=Non
     if actual != expected:
         raise RuntimeError("The downloaded update failed SHA-256 verification. The installed application has not been changed.")
     return actual
+
+
+def run_monitor_command(command, operation):
+    """Run a background-monitor setup command with a finite wait."""
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=MONITOR_COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"Timed out after {MONITOR_COMMAND_TIMEOUT_SECONDS} seconds while trying to {operation}. "
+            "The background-monitor state may be unknown."
+        ) from exc
+    except OSError as exc:
+        raise RuntimeError(f"Could not {operation}: {exc}") from exc
 
 
 def format_worked_time(hours):
@@ -913,6 +932,17 @@ class App(tk.Tk):
         config = base / "device.json"
         config.write_text(json.dumps({"ip": ip, "port": port, "key": key, "interval": 10}), encoding="utf-8")
 
+        def run_command(command, operation):
+            try:
+                return run_monitor_command(command, operation)
+            except RuntimeError as exc:
+                self.status.set("Background monitoring state could not be confirmed")
+                messagebox.showwarning(
+                    "Could not confirm monitoring state",
+                    f"{exc}\n\nInspect Task Scheduler or the macOS Login Item before retrying.",
+                )
+                return None
+
         if sys.platform == "win32":
             task_name = "SCAFA Workforce Attendance Monitor"
             executable = Path(sys.executable).resolve().parent / "scafa-monitor.exe"
@@ -924,17 +954,22 @@ class App(tk.Tk):
                 "Enable attendance-device monitoring every 10 seconds and start automatically whenever you sign in to Windows?\n\nWindows notifications will appear when new punches are detected. Your PC must be awake and connected to the same network as the device."
             ):
                 command = f'"{executable}"'
-                result = subprocess.run(
+                result = run_command(
                     ["schtasks", "/Create", "/SC", "ONLOGON", "/TN", task_name,
                      "/TR", command, "/RL", "LIMITED", "/F"],
-                    capture_output=True, text=True
+                    "create the Windows monitor task",
                 )
+                if result is None:
+                    return
                 if result.returncode:
                     messagebox.showerror("Could not enable monitoring", result.stderr or result.stdout or "Task Scheduler failed.")
                     return
-                start_result = subprocess.run(
-                    ["schtasks", "/Run", "/TN", task_name], capture_output=True, text=True
+                start_result = run_command(
+                    ["schtasks", "/Run", "/TN", task_name],
+                    "start the Windows monitor task",
                 )
+                if start_result is None:
+                    return
                 if start_result.returncode:
                     detail = start_result.stderr or start_result.stdout or "Task Scheduler could not start the monitor."
                     self.status.set("Background monitoring scheduled • current start failed")
@@ -946,12 +981,18 @@ class App(tk.Tk):
                 self.status.set("Background device monitoring enabled • checks every 10 seconds")
                 messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now monitor the device in the background and start automatically when you sign in.")
             else:
-                end_result = subprocess.run(
-                    ["schtasks", "/End", "/TN", task_name], capture_output=True, text=True
+                end_result = run_command(
+                    ["schtasks", "/End", "/TN", task_name],
+                    "stop the Windows monitor task",
                 )
-                delete_result = subprocess.run(
-                    ["schtasks", "/Delete", "/TN", task_name, "/F"], capture_output=True, text=True
+                if end_result is None:
+                    return
+                delete_result = run_command(
+                    ["schtasks", "/Delete", "/TN", task_name, "/F"],
+                    "remove the Windows monitor task",
                 )
+                if delete_result is None:
+                    return
                 if delete_result.returncode:
                     detail = delete_result.stderr or delete_result.stdout or "Task Scheduler could not remove the monitor task."
                     self.status.set("Background monitoring could not be disabled")
@@ -996,8 +1037,18 @@ class App(tk.Tk):
                 }
                 plist.write_bytes(plistlib.dumps(payload))
                 uid = os.getuid()
-                subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(plist)], capture_output=True, text=True)
-                result = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(plist)], capture_output=True, text=True)
+                bootout_result = run_command(
+                    ["launchctl", "bootout", f"gui/{uid}", str(plist)],
+                    "refresh the macOS monitor service",
+                )
+                if bootout_result is None:
+                    return
+                result = run_command(
+                    ["launchctl", "bootstrap", f"gui/{uid}", str(plist)],
+                    "start the macOS monitor service",
+                )
+                if result is None:
+                    return
                 if result.returncode:
                     messagebox.showerror("Could not start monitoring", result.stderr or result.stdout or "launchctl failed")
                     return
@@ -1005,10 +1056,12 @@ class App(tk.Tk):
                 messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now check the device in the background and start automatically when you log in.")
             else:
                 uid = os.getuid()
-                stop_result = subprocess.run(
+                stop_result = run_command(
                     ["launchctl", "bootout", f"gui/{uid}", str(plist)],
-                    capture_output=True, text=True,
+                    "stop the macOS monitor service",
                 )
+                if stop_result is None:
+                    return
                 if stop_result.returncode:
                     detail = stop_result.stderr or stop_result.stdout or "launchctl could not confirm the monitor stopped."
                     self.status.set("Background monitoring stop was not confirmed")
