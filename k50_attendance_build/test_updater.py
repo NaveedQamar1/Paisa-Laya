@@ -1141,5 +1141,65 @@ class MacOSLaunchAgentTests(unittest.TestCase):
                     updater.stop_macos_monitor(501)
 
 
+class MacOSUpdateAuthorizationTests(unittest.TestCase):
+    def _arguments(self):
+        return [
+            "scafa-updater",
+            "--pid", "123",
+            "--package", "/Users/test user/SCAFAWorkforce/updates/SCAFA_Workforce_macOS_intel.zip",
+            "--target", "/Applications/SCAFA Workforce.app",
+            "--platform", "macos",
+            "--user-uid", "501",
+        ]
+
+    def test_macos_update_requests_admin_authorization_for_protected_application_directory(self):
+        arguments = self._arguments()
+        helper = "/Applications/SCAFA Workforce.app/Contents/MacOS/scafa-updater"
+        package = arguments[arguments.index("--package") + 1]
+        target = arguments[arguments.index("--target") + 1]
+        expected_command = updater.shlex.join([helper, *arguments[1:]])
+        escaped = expected_command.replace("\\", "\\\\").replace('"', '\\"')
+        expected_script = (
+            'do shell script "' + escaped + '" with administrator privileges'
+        )
+
+        with patch.object(updater.sys, "argv", arguments), \
+             patch.object(updater.sys, "executable", helper), \
+             patch.object(updater, "wait_for_process") as wait, \
+             patch.object(updater.os, "access", return_value=False), \
+             patch.object(updater.subprocess, "run") as run, \
+             patch.object(updater, "apply_macos") as apply:
+            self.assertEqual(updater.main(), 0)
+
+        wait.assert_called_once_with(123)
+        run.assert_called_once_with(
+            ["/usr/bin/osascript", "-e", expected_script],
+            check=True,
+        )
+        apply.assert_not_called()
+        self.assertIn(shlex_quote_for_test(package), expected_script)
+        self.assertIn(shlex_quote_for_test(target), expected_script)
+
+    def test_macos_update_applies_directly_when_application_directory_is_writable(self):
+        arguments = self._arguments()
+        package = arguments[arguments.index("--package") + 1]
+        target = arguments[arguments.index("--target") + 1]
+
+        with patch.object(updater.sys, "argv", arguments), \
+             patch.object(updater, "wait_for_process") as wait, \
+             patch.object(updater.os, "access", return_value=True), \
+             patch.object(updater, "apply_macos") as apply, \
+             patch.object(updater.subprocess, "run") as run:
+            self.assertEqual(updater.main(), 0)
+
+        wait.assert_called_once_with(123)
+        apply.assert_called_once_with(package, target, 501)
+        run.assert_not_called()
+
+
+def shlex_quote_for_test(value):
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
 if __name__=="__main__":
     unittest.main()
