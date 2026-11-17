@@ -6,6 +6,7 @@ from employee_history import ensure_device_employee_status_history, get_device_u
 from html import escape
 from datetime import datetime, date, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
@@ -86,6 +87,36 @@ def restore_csv_spreadsheet_value(value):
     if text.startswith("'") and csv_formula_candidate(text[1:]):
         return text[1:]
     return text
+
+def validate_release_asset_url(url, tag, asset_name):
+    """Accept only this repository's HTTPS release asset for the selected tag."""
+    try:
+        parsed = urlsplit(str(url or ""))
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Release asset {asset_name} has an invalid download URL."
+        ) from exc
+
+    expected_path = (
+        f"/NaveedQamar1/Paisa-Laya/releases/download/{tag}/{asset_name}"
+    )
+    if (
+        parsed.scheme.lower() != "https"
+        or parsed.hostname != "github.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in (None, 443)
+        or parsed.query
+        or parsed.fragment
+        or parsed.path != expected_path
+    ):
+        raise RuntimeError(
+            f"Release asset {asset_name} does not point to its expected "
+            "GitHub repository release download."
+        )
+    return str(url)
+
 
 def verify_update_asset(package, checksum_file, asset_name, published_digest=None):
     """Verify an update against its release checksum manifest and GitHub asset metadata."""
@@ -850,6 +881,12 @@ class App(tk.Tk):
                     raise RuntimeError("In-app updates are currently supported on Windows and macOS only.")
                 if asset_name not in assets or "checksums.txt" not in assets:
                     raise RuntimeError(f"Release {tag} is missing {asset_name} or checksums.txt.")
+                for required_asset in (asset_name, "checksums.txt"):
+                    validate_release_asset_url(
+                        assets[required_asset].get("browser_download_url"),
+                        tag,
+                        required_asset,
+                    )
                 # Store the release before scheduling the UI callback to avoid a worker/UI race.
                 self._pending_release=(release,asset_name,platform)
                 self.after(0,lambda t=latest:self._update_offer(t))
@@ -875,14 +912,16 @@ class App(tk.Tk):
             if not pending:
                 raise RuntimeError("Update details are no longer available. Please check again.")
             release,asset_name,platform=pending
+            tag = str(release.get("tag_name") or "")
             assets={str(a.get("name")):a for a in (release.get("assets") or [])}
             base=Path.home()/"SCAFAWorkforce"/"updates"
             base.mkdir(parents=True,exist_ok=True)
             package=base/asset_name
             checksum_file=base/"checksums.txt"
             for name,destination in ((asset_name,package),("checksums.txt",checksum_file)):
-                url=assets[name].get("browser_download_url")
-                if not url: raise RuntimeError(f"Release asset {name} has no download URL.")
+                url = validate_release_asset_url(
+                    assets[name].get("browser_download_url"), tag, name
+                )
                 req=urllib.request.Request(url,headers={"User-Agent":"SCAFA-Workforce-Updater"})
                 with urllib.request.urlopen(req,timeout=90,context=SSL_CONTEXT) as response, open(destination,"wb") as out:
                     while True:
