@@ -43,9 +43,16 @@ jobs:
         run: |
           $releaseTag = $env:SCAFA_RELEASE_TAG_INPUT
           if ([string]::IsNullOrWhiteSpace($releaseTag)) {
-            $versionLine = Select-String -Path "k50_attendance_build/app.py" -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
-            if (-not $versionLine) { throw "APP_VERSION was not found in app.py" }
-            $releaseTag = "scafa-v$($versionLine.Matches[0].Groups[1].Value)"
+            if ($env:GITHUB_REF -like 'refs/tags/scafa-v*') {
+              $releaseTag = $env:GITHUB_REF.Substring('refs/tags/'.Length)
+            } else {
+              $versionLine = Select-String -Path "k50_attendance_build/app.py" -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
+              if (-not $versionLine) { throw "APP_VERSION was not found in app.py" }
+              $releaseTag = "scafa-v$($versionLine.Matches[0].Groups[1].Value)"
+            }
+          }
+          if ($env:GITHUB_REF -like 'refs/tags/scafa-v*' -and $releaseTag -ne $env:GITHUB_REF.Substring('refs/tags/'.Length)) {
+            throw "release_tag must match the versioned tag that triggered this workflow."
           }
           if (-not [string]::IsNullOrWhiteSpace($releaseTag) -and $releaseTag -notmatch '^scafa-v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {
             throw "release_tag must match scafa-vMAJOR.MINOR.PATCH, optionally with a prerelease suffix."
@@ -92,10 +99,20 @@ jobs:
         run: |
           RELEASE_TAG="${SCAFA_RELEASE_TAG_INPUT:-}"
           if [ -z "$RELEASE_TAG" ]; then
-            APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
-            if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
-            RELEASE_TAG="scafa-v$APP_VERSION"
+            if [[ "$GITHUB_REF" == refs/tags/scafa-v* ]]; then
+              RELEASE_TAG="${GITHUB_REF#refs/tags/}"
+            else
+              APP_VERSION="$(sed -n 's/^APP_VERSION = "\([^"]*\)"/\1/p' k50_attendance_build/app.py | head -n 1)"
+              if [ -z "$APP_VERSION" ]; then echo "APP_VERSION not found"; exit 1; fi
+              RELEASE_TAG="scafa-v$APP_VERSION"
+            fi
           fi
+          if [[ "$GITHUB_REF" == refs/tags/scafa-v* && "$RELEASE_TAG" != "${GITHUB_REF#refs/tags/}" ]]; then
+            echo "release_tag must match the versioned tag that triggered this workflow." >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^scafa-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+          if [[ ! "$RELEASE_TAG" =~ ^scafa-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
           if [[ ! "$RELEASE_TAG" =~ ^scafa-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "release_tag must match scafa-vMAJOR.MINOR.PATCH, optionally with a prerelease suffix." >&2
             exit 1
@@ -153,7 +170,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/scafa-v')
     needs: [windows, macos]
     runs-on: ubuntu-latest
     steps:
