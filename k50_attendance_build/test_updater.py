@@ -158,7 +158,7 @@ class UpdaterHelperTests(unittest.TestCase):
                 updater.stop_windows_monitor()
 
     def test_windows_monitor_command_uses_a_bounded_timeout(self):
-        result = unittest.mock.Mock(returncode=0, stdout="RUNNING\\n", stderr="")
+        result = unittest.mock.Mock(returncode=0, stdout="RUNNING\n", stderr="")
         with patch.object(updater.subprocess, "run", return_value=result) as run:
             self.assertEqual(
                 updater._run_windows_monitor_command("Get-ScheduledTask", "inspect"),
