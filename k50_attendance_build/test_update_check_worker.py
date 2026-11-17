@@ -48,7 +48,7 @@ class UpdateCheckWorkerTests(unittest.TestCase):
         ) as open_release, patch.object(app.sys, "platform", platform):
             if platform == "darwin":
                 with patch.object(
-                    app.os, "uname", return_value=Mock(machine=machine)
+                    app.os, "uname", return_value=Mock(machine=machine), create=True
                 ):
                     self.window.check_for_updates()
                     target = self.thread_class.call_args.kwargs["target"]
@@ -80,7 +80,7 @@ class UpdateCheckWorkerTests(unittest.TestCase):
         self.update_failed.assert_called_once()
         self.assertIn("invalid SCAFA version tag", self.update_failed.call_args.args[0])
         self.update_offer.assert_not_called()
-        self.assertFalse(hasattr(self.window, "_pending_release"))
+        self.assertFalse("_pending_release" in self.window.__dict__)
 
     def test_windows_selects_setup_exe_and_requires_checksum_manifest(self):
         release = self.release(
@@ -134,7 +134,7 @@ class UpdateCheckWorkerTests(unittest.TestCase):
                 self.update_failed.assert_called_once()
                 self.assertIn("missing", self.update_failed.call_args.args[0])
                 self.update_offer.assert_not_called()
-                self.assertFalse(hasattr(self.window, "_pending_release"))
+                self.assertFalse("_pending_release" in self.window.__dict__)
 
     def test_equal_or_older_release_does_not_offer_an_update(self):
         release = self.release(
@@ -148,7 +148,7 @@ class UpdateCheckWorkerTests(unittest.TestCase):
         self.update_no_update.assert_called_once_with("1.4.0")
         self.update_offer.assert_not_called()
         self.update_failed.assert_not_called()
-        self.assertFalse(hasattr(self.window, "_pending_release"))
+        self.assertFalse("_pending_release" in self.window.__dict__)
 
 
 if __name__ == "__main__":
