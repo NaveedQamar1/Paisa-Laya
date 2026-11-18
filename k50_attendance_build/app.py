@@ -417,23 +417,57 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
             return
     if first:
         target = start
-        # A later status event only blocks the revised start date when it
-        # would fall on or before that new start. Events after the revised
-        # start remain valid and must retain their original effective dates.
-        conflict = db.execute(
-            """SELECT effective_date FROM staff_status_history
-               WHERE user_id=? AND id<>? AND effective_date>? AND effective_date<=?
-               ORDER BY effective_date,id LIMIT 1""",
-            (uid, first[0], first[2], target)
+        target_collision = db.execute(
+            """SELECT 1 FROM staff_status_history
+               WHERE user_id=? AND id<>? AND effective_date=? LIMIT 1""",
+            (uid, first[0], target)
         ).fetchone()
-        if conflict:
+        if target_collision:
             raise ValueError(
-                "The revised joining date must be earlier than subsequent employment-status changes."
+                f"The revised joining date conflicts with an existing employment-status event on {target}."
             )
-        db.execute(
-            "UPDATE staff_status_history SET effective_date=?,changed_at=CURRENT_TIMESTAMP,source='profile' WHERE id=?",
-            (target, first[0])
-        )
+
+        # If a real status event predates the first active event, that active
+        # event is a reactivation, not the employee's original start. Preserve
+        # it rather than moving it and silently making the employee inactive.
+        earlier_status_event = db.execute(
+            """SELECT active,effective_date,source FROM staff_status_history
+               WHERE user_id=? AND effective_date<? AND source NOT LIKE '%-baseline'
+               ORDER BY effective_date DESC,id DESC LIMIT 1""",
+            (uid, first[2])
+        ).fetchone()
+        if earlier_status_event:
+            if target > first[2]:
+                raise ValueError(
+                    "This employee has an earlier inactive period and a later reactivation. "
+                    "The joining date cannot be moved after that reactivation without rewriting status history."
+                )
+            if target < first[2]:
+                # Record the original employment start while retaining the
+                # inactive period and the later reactivation as separate events.
+                db.execute(
+                    """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                       VALUES(?,1,?,'profile')""",
+                    (uid, target)
+                )
+        else:
+            # A later status event only blocks the revised start date when it
+            # would fall on or before that new start. Events after the revised
+            # start remain valid and must retain their original effective dates.
+            conflict = db.execute(
+                """SELECT effective_date FROM staff_status_history
+                   WHERE user_id=? AND id<>? AND effective_date>? AND effective_date<=?
+                   ORDER BY effective_date,id LIMIT 1""",
+                (uid, first[0], first[2], target)
+            ).fetchone()
+            if conflict:
+                raise ValueError(
+                    "The revised joining date must be earlier than subsequent employment-status changes."
+                )
+            db.execute(
+                "UPDATE staff_status_history SET effective_date=?,changed_at=CURRENT_TIMESTAMP,source='profile' WHERE id=?",
+                (target, first[0])
+            )
         # A blank joining date uses today's date as the revised employment
         # start. Keep the inactive baseline even when the date field is blank;
         # otherwise the fallback-active lookup would count earlier days as active.
