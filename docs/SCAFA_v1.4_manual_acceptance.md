@@ -1,8 +1,16 @@
 # SCAFA Workforce v1.4 — manual release acceptance checklist
 
-**Status: NOT YET EXECUTED.** This document is a test procedure, not evidence that clean-machine, installer, database-preservation, or physical-device tests have passed.
+**Status: PARTIALLY EXECUTED.** An owner-reported Intel Mac in-place upgrade from v1.3.0 to v1.4.0 completed and the application launched successfully on 18 November 2026. This is a limited field smoke test, not full release acceptance.
 
-Use a disposable test machine and a copy of production data. Never use the only copy of a live attendance database for upgrade or rollback testing.
+### Field test evidence recorded — 18 November 2026
+
+- The owner confirmed that the existing attendance database file remained present after the in-place v1.3.0-to-v1.4.0 upgrade.
+- The owner reported that application settings were not preserved and accepted reconfiguring them. Record this as a known limitation, not as a passed settings-preservation check.
+- The report does **not** establish row-level database integrity, employee/attendance/leave/schedule record counts, LaunchAgent state before and after upgrade, monitor restoration after restart, rollback, or clean-install behavior.
+- Windows clean-install/upgrade/uninstall checks and physical K50 acceptance have not been reported as completed.
+- The owner-reported field result is recorded in [PR #11 comment 6970466058](https://github.com/NaveedQamar1/Paisa-Laya/pull/11#issuecomment-6970466058), with upgrade clarification in [comment 6970518688](https://github.com/NaveedQamar1/Paisa-Laya/pull/11#issuecomment-6970518688) and database/settings clarification in [comment 6970554863](https://github.com/NaveedQamar1/Paisa-Laya/pull/11#issuecomment-6970554863).
+
+Do not mark the remaining checklist items complete based only on successful installation and launch. Use a disposable test machine and a copy of production data. Never use the only copy of a live attendance database for upgrade or rollback testing.
 ## Language scope
 
 SCAFA Workforce v1.4 is an English-only application. Interface labels, prompts, validation messages, and report headings are expected in English. The release-acceptance dataset uses Latin-script employee names and English status text. Urdu/Arabic font embedding, right-to-left layout, and script shaping are explicitly out of scope and are not release blockers. Continue testing PDF/CSV/Excel escaping, wrapping, and legibility for ordinary English text and long employee names/identifiers.
