@@ -88,7 +88,7 @@ def _exclusive_file_lock(lock_path, timeout, timeout_error=TimeoutError):
 
             handle.seek(0, os.SEEK_END)
             if handle.tell() == 0:
-                handle.write(b"\\0")
+                handle.write(b"\0")
                 handle.flush()
 
             def acquire():
