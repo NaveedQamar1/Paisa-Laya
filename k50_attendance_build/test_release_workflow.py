@@ -174,15 +174,15 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
             windows_build.index("& $iscc"),
         )
         self.assertIn(
-            r'Source: "..\\..\\dist\\SCAFA_Workforce\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs',
+            r'Source: "..\..\dist\SCAFA_Workforce\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs',
             installer_script,
         )
         self.assertIn(
-            r"MonitorHelperPath := ExpandConstant('{app}\\scafa-updater.exe')",
+            r"MonitorHelperPath := ExpandConstant('{app}\scafa-updater.exe')",
             installer_script,
         )
         self.assertIn(
-            r'Source: "..\\..\\dist\\scafa-updater.exe"; Flags: dontcopy',
+            r'Source: "..\..\dist\scafa-updater.exe"; Flags: dontcopy',
             installer_script,
         )
 
