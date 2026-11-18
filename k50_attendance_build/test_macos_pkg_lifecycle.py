@@ -174,7 +174,7 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self._write_command(
             "pgrep",
             'if [ "$1" != "-x" ] || [ "$2" != "SCAFA_Workforce" ]; then echo "unexpected pgrep query: $*" >&2; exit 2; fi\n'
-            'if [ "\${SCAFA_TEST_GUI_RUNNING:-0}" = "1" ]; then echo 4242; exit 0; fi\nexit 1\n',
+            'if [ "${SCAFA_TEST_GUI_RUNNING:-0}" = "1" ]; then echo 4242; exit 0; fi\nexit 1\n',
         )
         self._write_command(
             "dscl",
