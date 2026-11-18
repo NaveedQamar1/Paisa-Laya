@@ -13,6 +13,8 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
             / "scafa-release.yml"
         )
         cls.workflow = workflow_path.read_text(encoding="utf-8")
+        validation_workflow_path = workflow_path.with_name("scafa-validation.yml")
+        cls.validation_workflow = validation_workflow_path.read_text(encoding="utf-8")
 
     def test_dispatch_input_is_passed_through_environment_not_shell_source(self):
         self.assertNotIn(
@@ -173,7 +175,7 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
             self.workflow.count("python -m pip install --upgrade pip==26.3"),
             2,
         )
-        self.assertNotIn("python -m pip install --upgrade pip\\n", self.workflow)
+        self.assertNotIn("python -m pip install --upgrade pip\n", self.workflow)
 
 
     def test_windows_uninstaller_helper_is_copied_into_the_installed_application_tree(self):
@@ -213,6 +215,18 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
         self.assertIn(
             "choco install innosetup --version=6.7.1 --allow-downgrade --yes --no-progress",
             self.workflow,
+        )
+
+    def test_validation_workflow_uses_the_same_pinned_pip_version(self):
+        self.assertEqual(
+            self.validation_workflow.count(
+                "python -m pip install --upgrade pip==26.3"
+            ),
+            2,
+        )
+        self.assertNotIn(
+            "python -m pip install --upgrade pip\\n",
+            self.validation_workflow,
         )
 
 if __name__ == "__main__":
