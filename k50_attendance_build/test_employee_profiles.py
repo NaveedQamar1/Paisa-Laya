@@ -712,6 +712,33 @@ class EmployeeProfileSaveTests(unittest.TestCase):
         self.assertEqual(profile, ("Mariam Khan", "Pastry", "Head Chef"))
         self.assertEqual(after, before)
 
+    def test_clearing_joining_date_starts_employment_today(self):
+        self.save_profile(
+            "703", "Mariam", joining_date="2024-01-01",
+            effective_today="2026-11-18",
+        )
+        self.save_profile(
+            "703", "Mariam", joining_date="", current_user_id="703",
+            effective_today="2026-11-18",
+        )
+
+        with sqlite3.connect(app.DB) as db:
+            history = db.execute(
+                """SELECT active,effective_date,source
+                   FROM staff_status_history WHERE user_id='703'
+                   ORDER BY effective_date,id"""
+            ).fetchall()
+            self.assertFalse(app.employee_active_on(db, "703", "2026-11-17"))
+            self.assertTrue(app.employee_active_on(db, "703", "2026-11-18"))
+
+        self.assertEqual(
+            history,
+            [
+                (0, "0001-01-01", "profile-baseline"),
+                (1, "2026-11-18", "profile"),
+            ],
+        )
+
     def test_device_name_sync_refreshes_device_managed_names(self):
         app.init_db()
         with sqlite3.connect(app.DB) as db:
