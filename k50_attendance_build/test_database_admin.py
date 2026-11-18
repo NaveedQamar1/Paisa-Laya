@@ -793,7 +793,10 @@ with application_instance_lock(sys.argv[1]):
         existing_safety = self.root / f"Pre_Restore_Backup_{timestamp}.db"
         existing_bytes = b"previous safety snapshot must not be overwritten"
         existing_safety.write_bytes(existing_bytes)
-        expected_new_safety = self.root / f"Pre_Restore_Backup_{timestamp}_1.db"
+        existing_suffix = self.root / f"Pre_Restore_Backup_{timestamp}_1.db"
+        suffix_bytes = b"the first collision suffix must also be preserved"
+        existing_suffix.write_bytes(suffix_bytes)
+        expected_new_safety = self.root / f"Pre_Restore_Backup_{timestamp}_2.db"
         fixed_datetime = SimpleNamespace(
             now=lambda: SimpleNamespace(strftime=lambda _format: timestamp)
         )
@@ -810,6 +813,7 @@ with application_instance_lock(sys.argv[1]):
         showerror.assert_not_called()
         showinfo.assert_called_once()
         self.assertEqual(existing_safety.read_bytes(), existing_bytes)
+        self.assertEqual(existing_suffix.read_bytes(), suffix_bytes)
         self.assertTrue(expected_new_safety.exists())
         with sqlite3.connect(expected_new_safety) as safety:
             self.assertEqual(
@@ -821,6 +825,36 @@ with application_instance_lock(sys.argv[1]):
                 restored.execute("SELECT name FROM staff WHERE user_id='101'").fetchone()[0],
                 "Restored Replacement",
             )
+
+
+
+    def test_restore_safety_backup_path_skips_a_dangling_symlink(self):
+        timestamp = "20261118_120000"
+        linked_name = self.root / f"Pre_Restore_Backup_{timestamp}.db"
+        missing_target = self.root / "missing-safety-backup-target.db"
+        try:
+            linked_name.symlink_to(missing_target)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Symbolic links are unavailable on this filesystem: {exc}")
+
+        self.add_current_record("101", "Current Staff", "2026-11-16 09:00:00")
+        selected = app.next_restore_safety_backup_path(self.root, timestamp)
+        expected = self.root / f"Pre_Restore_Backup_{timestamp}_1.db"
+
+        self.assertEqual(selected, expected)
+        self.assertTrue(linked_name.is_symlink())
+        self.assertEqual(os.readlink(linked_name), str(missing_target))
+        self.assertFalse(missing_target.exists())
+
+        app.write_database_backup(app.DB, selected)
+        with sqlite3.connect(selected) as safety:
+            self.assertEqual(safety.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(
+                safety.execute("SELECT name FROM staff WHERE user_id='101'").fetchone()[0],
+                "Current Staff",
+            )
+        self.assertTrue(linked_name.is_symlink())
+        self.assertFalse(missing_target.exists())
 
 if __name__ == "__main__":
     unittest.main()
