@@ -79,7 +79,20 @@ while IFS=' ' read -r username uid _; do
     esac
     [ "$uid" -gt 0 ] || continue
 
-    service="gui/$uid/$LABEL"
+    # Local Directory Service accounts include system/service users that do
+    # not own a GUI bootstrap domain. Probe the GUI domain first; querying a
+    # service beneath a non-GUI UID can return launchctl error 125
+    # ("Domain does not support specified action"), which is not an
+    # indeterminate monitor state and must not block installation.
+    domain="gui/$uid"
+    if ! domain_output=$(/bin/launchctl print "$domain" 2>&1); then
+        case "$domain_output" in
+            *"Could not find domain"*|*"No such process"*|*"Domain does not support specified action"*) continue ;;
+            *) fail "Could not determine whether GUI domain $domain is available: $domain_output" ;;
+        esac
+    fi
+
+    service="$domain/$LABEL"
     if service_output=$(/bin/launchctl print "$service" 2>&1); then
         if [ -n "$loaded_uid" ]; then
             fail "More than one SCAFA Workforce monitor is loaded. Disable monitoring for the other login session(s) before installing."
