@@ -54,8 +54,11 @@ fi
 
 # Replacing an app bundle while its GUI process is open can leave a running
 # process mapped to files that the package installer has replaced.
-if /usr/bin/pgrep -f 'SCAFA_Workforce\.app/Contents/MacOS/SCAFA_Workforce' >/dev/null 2>&1; then
-    fail "Quit SCAFA Workforce before installing or upgrading, then run the installer again."
+# Match the executable process name, not an arbitrary command line. Using
+# pgrep -f here can produce false positives when a parent shell or diagnostic
+# command itself contains the bundle path in its arguments.
+if gui_pids=$(/usr/bin/pgrep -x 'SCAFA_Workforce' 2>/dev/null); then
+    fail "SCAFA Workforce is still running (PID(s): $gui_pids). Quit the application completely before installing or upgrading."
 else
     pgrep_status=$?
     if [ "$pgrep_status" -gt 1 ]; then
