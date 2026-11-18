@@ -7,6 +7,7 @@ intentionally persistent: unlinking a locked file can let another process
 lock a different inode and bypass the first process.
 """
 from contextlib import contextmanager
+import errno
 import os
 import time
 from pathlib import Path
@@ -28,12 +29,40 @@ def _deadline(timeout):
     return time.monotonic() + seconds
 
 
+def _is_lock_contention(exc, *, windows=None):
+    """Return whether an OS error means the lock is currently held.
+
+    Do not retry permanent errors such as an invalid descriptor or filesystem
+    I/O failure: waiting cannot make those operations succeed. Windows'
+    msvcrt.locking reports a conflicting LK_NBLCK request as EACCES, whereas
+    POSIX flock reports non-blocking contention as EAGAIN/EWOULDBLOCK.
+    """
+    if windows is None:
+        windows = os.name == "nt"
+
+    if isinstance(exc, BlockingIOError) or exc.errno in {
+        errno.EAGAIN,
+        errno.EWOULDBLOCK,
+        errno.EINTR,
+    }:
+        return True
+
+    if windows and (
+        exc.errno == errno.EACCES or getattr(exc, "winerror", None) == 33
+    ):
+        return True
+
+    return False
+
+
 def _wait_for_lock(attempt, deadline, lock_path, timeout_error=TimeoutError):
     while True:
         try:
             attempt()
             return
         except OSError as exc:
+            if not _is_lock_contention(exc):
+                raise
             if deadline is not None and time.monotonic() >= deadline:
                 raise timeout_error(
                     f"Timed out waiting for the attendance database lock: {lock_path}"
@@ -53,7 +82,7 @@ def _exclusive_file_lock(lock_path, timeout, timeout_error=TimeoutError):
 
             handle.seek(0, os.SEEK_END)
             if handle.tell() == 0:
-                handle.write(b"\0")
+                handle.write(b"\\0")
                 handle.flush()
 
             def acquire():
