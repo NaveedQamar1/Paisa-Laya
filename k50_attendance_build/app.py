@@ -383,13 +383,13 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
         (uid,)
     ).fetchone()
     if not first:
-        has_real_event = db.execute(
-            """SELECT 1 FROM staff_status_history
-               WHERE user_id=? AND source<>'profile-baseline'
-               LIMIT 1""",
+        first_real_event = db.execute(
+            """SELECT id,active,effective_date,source FROM staff_status_history
+               WHERE user_id=? AND source NOT LIKE '%-baseline'
+               ORDER BY effective_date,id LIMIT 1""",
             (uid,)
         ).fetchone()
-        if not has_real_event:
+        if not first_real_event:
             db.execute(
                 """INSERT OR IGNORE INTO staff_status_history
                    (user_id,active,effective_date,source)
@@ -415,6 +415,38 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
                     (uid, int(bool(active)), effective_status_date)
                 )
             return
+
+        # A legacy inactive profile can have only a migration-day deactivation
+        # event because its original joining date was unknown. Once an operator
+        # supplies a joining date before that event, reconstruct the initial
+        # active period without moving or replacing the historical deactivation.
+        # A date on/after the first inactive event does not prove an earlier
+        # employment period, so leave that history untouched.
+        if not bool(first_real_event[1]) and start <= first_real_event[2]:
+            if start == first_real_event[2]:
+                raise ValueError(
+                    "The revised joining date conflicts with the first recorded inactive status event."
+                )
+            target_collision = db.execute(
+                """SELECT 1 FROM staff_status_history
+                   WHERE user_id=? AND effective_date=? LIMIT 1""",
+                (uid, start)
+            ).fetchone()
+            if target_collision:
+                raise ValueError(
+                    f"The revised joining date conflicts with an existing employment-status event on {start}."
+                )
+            db.execute(
+                """INSERT OR IGNORE INTO staff_status_history
+                   (user_id,active,effective_date,source)
+                   VALUES(?,0,'0001-01-01','profile-baseline')""",
+                (uid,)
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES(?,1,?,'profile')""",
+                (uid, start)
+            )
     if first:
         target = start
         target_collision = db.execute(
