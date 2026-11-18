@@ -194,7 +194,7 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
             'case "$2" in\n'
             '  "Print :Label") echo "pk.scafa.workforce.monitor" ;;\n'
             '  "Print :ProgramArguments:0") echo "$SCAFA_TEST_APP_BUNDLE/Contents/MacOS/scafa-monitor" ;;\n'
-            '  "Print :RunAtLoad") echo "true" ;;\n'
+            '  "Print :RunAtLoad") echo "${SCAFA_TEST_RUN_AT_LOAD:-true}" ;;\n'
             '  *) echo "unexpected plist query: $2" >&2; exit 2 ;;\n'
             'esac\n',
         )
@@ -562,6 +562,59 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
                     if path.is_symlink() or path.is_file():
                         path.unlink()
                     original.rename(path)
+
+    def test_preinstall_refuses_to_overwrite_an_existing_recovery_marker(self):
+        self._prepare_loaded_state("loaded")
+        self._prepare_recovery_marker()
+        previous_state = self.state_file.read_bytes()
+
+        result = self._run(PREINSTALL, "preinstall-stale-recovery-marker")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("previous installation left recovery state", result.stderr)
+        self.assertEqual(self.state_file.read_bytes(), previous_state)
+        self.assertFalse(any(call.startswith("bootout ") for call in self._calls()))
+
+    def test_preinstall_rejects_a_symlinked_recovery_directory_before_bootout(self):
+        real_directory = self.state_dir.with_name("installer-state-real")
+        self.state_dir.symlink_to(real_directory, target_is_directory=True)
+        self._prepare_loaded_state("loaded")
+
+        result = self._run(PREINSTALL, "preinstall-linked-recovery-directory")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("recovery directory is a symbolic link", result.stderr)
+        self.assertFalse(any(call.startswith("bootout ") for call in self._calls()))
+        self.assertTrue(self.state_dir.is_symlink())
+        self.state_dir.unlink()
+
+    def test_postinstall_rejects_recovery_marker_with_unexpected_extra_data(self):
+        self._prepare_loaded_state("unloaded")
+        self._prepare_recovery_marker()
+        self.state_file.write_text("501\\nunexpected\\n", encoding="ascii")
+
+        result = self._run(POSTINSTALL, "postinstall-extra-recovery-data")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unexpected extra data", result.stderr)
+        self.assertTrue(self.state_file.exists())
+        self.assertFalse(any(call.startswith("bootstrap ") for call in self._calls()))
+
+    def test_postinstall_retains_recovery_marker_when_run_at_load_is_disabled(self):
+        self._prepare_loaded_state("unloaded")
+        self._prepare_recovery_marker()
+
+        result = self._run(
+            POSTINSTALL,
+            "postinstall-run-at-load-disabled",
+            SCAFA_TEST_NO_GUI_DOMAIN="1",
+            SCAFA_TEST_RUN_AT_LOAD="false",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not have RunAtLoad enabled", result.stderr)
+        self.assertTrue(self.state_file.exists())
+        self.assertFalse(any(call.startswith("bootstrap ") for call in self._calls()))
 
 if __name__ == "__main__":
     unittest.main()
