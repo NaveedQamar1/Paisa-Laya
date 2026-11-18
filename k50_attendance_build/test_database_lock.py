@@ -94,5 +94,22 @@ class DatabaseLockWaitTests(unittest.TestCase):
         self.assertIs(raised.exception.__cause__, failure)
 
 
+    def test_non_finite_or_unrepresentable_timeouts_are_rejected(self):
+        invalid_timeouts = (
+            ("NaN", float("nan")),
+            ("positive infinity", float("inf")),
+            ("negative infinity", float("-inf")),
+            ("NaN string", "nan"),
+            ("float conversion overflow", 10 ** 10000),
+        )
+
+        for label, timeout in invalid_timeouts:
+            with self.subTest(value=label):
+                with self.assertRaisesRegex(
+                    ValueError, "finite non-negative number"
+                ):
+                    database_lock._deadline(timeout)
+
+
 if __name__ == "__main__":
     unittest.main()
