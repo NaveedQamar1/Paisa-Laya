@@ -154,5 +154,37 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
             2,
         )
 
+
+    def test_windows_uninstaller_helper_is_copied_into_the_installed_application_tree(self):
+        windows_build = self.workflow.split(
+            "      - name: Build Windows installer", 1
+        )[1].split("\n  macos:", 1)[0]
+        installer_script = (
+            Path(__file__).with_name("installer")
+            / "SCAFA_Workforce.iss"
+        ).read_text(encoding="utf-8")
+
+        helper_copy = (
+            "Copy-Item dist/scafa-updater.exe "
+            "dist/SCAFA_Workforce/scafa-updater.exe -Force"
+        )
+        self.assertIn(helper_copy, windows_build)
+        self.assertLess(
+            windows_build.index(helper_copy),
+            windows_build.index("& $iscc"),
+        )
+        self.assertIn(
+            r'Source: "..\\..\\dist\\SCAFA_Workforce\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs',
+            installer_script,
+        )
+        self.assertIn(
+            r"MonitorHelperPath := ExpandConstant('{app}\\scafa-updater.exe')",
+            installer_script,
+        )
+        self.assertIn(
+            r'Source: "..\\..\\dist\\scafa-updater.exe"; Flags: dontcopy',
+            installer_script,
+        )
+
 if __name__ == "__main__":
     unittest.main()
