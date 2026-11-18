@@ -161,6 +161,7 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
             "SCAFA_TEST_CALL_LOG": str(self.call_log),
             "SCAFA_TEST_GUI_RUNNING": "0",
             "SCAFA_TEST_NO_GUI_DOMAIN": "0",
+            "SCAFA_TEST_GUI_DOMAIN_ERROR": "0",
             "SCAFA_TEST_BOOTOUT_FAIL": "0",
             "SCAFA_TEST_BOOTOUT_STATE": "loaded",
             "SCAFA_TEST_BOOTSTRAP_FAIL": "0",
@@ -217,6 +218,7 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
             '  print)\n'
             '    if [ "$2" = "gui/278" ]; then echo "Could not print domain: 125: Domain does not support specified action" >&2; exit 125; fi\n'
             '    if [ "$2" = "gui/501" ]; then\n'
+            '      if [ "${SCAFA_TEST_GUI_DOMAIN_ERROR:-0}" = "1" ]; then echo "Operation not permitted" >&2; exit 1; fi\n'
             '      if [ "${SCAFA_TEST_NO_GUI_DOMAIN:-0}" = "1" ]; then echo "Could not find domain specified." >&2; exit 113; fi\n'
             '      exit 0\n'
             '    fi\n'
@@ -323,6 +325,20 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self.assertIn("print gui/501/pk.scafa.workforce.monitor", calls)
         self.assertIn("bootout gui/501/pk.scafa.workforce.monitor", calls)
         self.assertEqual(self.state_file.read_text(encoding="ascii").strip(), "501")
+
+    def test_preinstall_fails_closed_on_unexpected_gui_domain_error(self):
+        self._prepare_loaded_state("loaded")
+        result = self._run(
+            PREINSTALL,
+            "preinstall",
+            SCAFA_TEST_GUI_DOMAIN_ERROR="1",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Could not determine whether GUI domain gui/501 is available", result.stderr)
+        calls = self._calls()
+        self.assertNotIn("print gui/501/pk.scafa.workforce.monitor", calls)
+        self.assertFalse(self.state_file.exists())
+        self.assertFalse(any(call.startswith("bootout ") for call in calls))
 
     def test_preinstall_aborts_on_ambiguous_launchd_state_before_stopping(self):
         self._prepare_loaded_state("unknown")
