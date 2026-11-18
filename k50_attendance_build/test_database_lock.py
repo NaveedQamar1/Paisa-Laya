@@ -1,4 +1,6 @@
 import errno
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -109,6 +111,18 @@ class DatabaseLockWaitTests(unittest.TestCase):
                     ValueError, "finite non-negative number"
                 ):
                     database_lock._deadline(timeout)
+
+
+    def test_invalid_timeout_is_rejected_before_lock_directory_is_created(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            parent = Path(temporary_directory) / "not-created"
+            lock_path = parent / "attendance.db.lock"
+
+            with self.assertRaisesRegex(ValueError, "finite non-negative number"):
+                with database_lock._exclusive_file_lock(lock_path, float("nan")):
+                    self.fail("An invalid timeout must not acquire a lock.")
+
+            self.assertFalse(parent.exists())
 
 
 if __name__ == "__main__":
