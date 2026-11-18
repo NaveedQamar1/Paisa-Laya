@@ -1990,7 +1990,10 @@ class App(tk.Tk):
             self.comparison_tree.delete(item)
         selected=self.dashboard_employee.get() if hasattr(self,"dashboard_employee") else "All staff"
         selected_uid=None if selected=="All staff" else selected.rsplit(" (",1)[-1].rstrip(")")
-        latest=max(rows,key=lambda r:str(r[1])) if rows else None
+        latest_rows = rows if selected_uid is None else [
+            row for row in rows if str(row[0]) == selected_uid
+        ]
+        latest=max(latest_rows,key=lambda r:str(r[1])) if latest_rows else None
         if latest:
             uid,stamp,state=latest
             self.latest_punch_label.configure(text=f"LATEST PUNCH  •  {self._name(uid)}  (ID {uid})  •  {datetime.strptime(stamp,'%Y-%m-%d %H:%M:%S').strftime('%d %b %Y, %I:%M:%S %p')}")
