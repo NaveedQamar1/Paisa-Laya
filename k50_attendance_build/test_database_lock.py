@@ -45,6 +45,18 @@ class DatabaseLockWaitTests(unittest.TestCase):
 
         self.assertTrue(database_lock._is_lock_contention(failure, windows=True))
         self.assertFalse(database_lock._is_lock_contention(failure, windows=False))
+
+        lock_violation = OSError(errno.EACCES, "Windows lock violation")
+        lock_violation.winerror = 33
+        self.assertTrue(
+            database_lock._is_lock_contention(lock_violation, windows=True)
+        )
+
+        access_denied = OSError(errno.EACCES, "Windows access denied")
+        access_denied.winerror = 5
+        self.assertFalse(
+            database_lock._is_lock_contention(access_denied, windows=True)
+        )
         self.assertFalse(
             database_lock._is_lock_contention(
                 OSError(errno.EIO, "filesystem I/O failure"), windows=True
