@@ -591,7 +591,7 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
     def test_postinstall_rejects_recovery_marker_with_unexpected_extra_data(self):
         self._prepare_loaded_state("unloaded")
         self._prepare_recovery_marker()
-        self.state_file.write_text("501\\nunexpected\\n", encoding="ascii")
+        self.state_file.write_text("501\nunexpected\n", encoding="ascii")
 
         result = self._run(POSTINSTALL, "postinstall-extra-recovery-data")
 
