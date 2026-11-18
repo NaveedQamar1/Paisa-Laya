@@ -169,6 +169,11 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
             ),
             2,
         )
+        self.assertEqual(
+            self.workflow.count("python -m pip install --upgrade pip==26.3"),
+            2,
+        )
+        self.assertNotIn("python -m pip install --upgrade pip\\n", self.workflow)
 
 
     def test_windows_uninstaller_helper_is_copied_into_the_installed_application_tree(self):
@@ -206,7 +211,7 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
         # The latest successful Windows package log reported Inno Setup 6.7.1.
         # Pin it so future Chocolatey releases cannot silently change installer output.
         self.assertIn(
-            "choco install innosetup --version=6.7.1 --yes --no-progress",
+            "choco install innosetup --version=6.7.1 --allow-downgrade --yes --no-progress",
             self.workflow,
         )
 
