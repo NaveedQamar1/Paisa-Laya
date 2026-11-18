@@ -174,6 +174,30 @@ class UpdateCheckWorkerTests(unittest.TestCase):
         self.update_failed.assert_not_called()
         self.assertFalse("_pending_release" in self.window.__dict__)
 
+    def test_older_published_release_does_not_offer_a_downgrade(self):
+        release = self.release(
+            "scafa-v1.3.0",
+            ("SCAFA_Workforce_Setup.exe", "checksums.txt"),
+        )
+
+        self.run_worker(release, platform="win32")
+        self.deliver_ui_callback()
+
+        self.update_no_update.assert_called_once_with("1.3.0")
+        self.update_offer.assert_not_called()
+        self.update_failed.assert_not_called()
+        self.assertFalse("_pending_release" in self.window.__dict__)
+
+    def test_no_update_message_explains_installed_build_is_newer_than_published(self):
+        with patch.object(app.messagebox, "showinfo") as showinfo:
+            app.App._update_no_update(self.window, "1.3.0")
+
+        showinfo.assert_called_once()
+        message = showinfo.call_args.args[1]
+        self.assertIn("version 1.4.0", message)
+        self.assertIn("newer than the latest published release (1.3.0)", message)
+        self.assertIn("will not downgrade", message)
+
 
     def test_arm64_macos_selects_only_the_arm64_release_asset(self):
         asset_name = "SCAFA_Workforce_macOS_apple-silicon.zip"
