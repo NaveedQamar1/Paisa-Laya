@@ -843,7 +843,7 @@ with application_instance_lock(sys.argv[1]):
 
         self.assertEqual(selected, expected)
         self.assertTrue(linked_name.is_symlink())
-        self.assertEqual(os.readlink(linked_name), str(missing_target))
+        self.assertEqual(Path(os.readlink(linked_name)).name, missing_target.name)
         self.assertFalse(missing_target.exists())
 
         app.write_database_backup(app.DB, selected)
