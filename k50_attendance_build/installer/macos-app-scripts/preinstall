@@ -3,8 +3,10 @@ set -euo pipefail
 
 LABEL="pk.scafa.workforce.monitor"
 APP_BUNDLE="/Applications/SCAFA_Workforce.app"
-APP_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/SCAFA_Workforce"
-MONITOR_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/scafa-monitor"
+CONTENTS_DIR="$APP_BUNDLE/Contents"
+MACOS_DIR="$CONTENTS_DIR/MacOS"
+APP_EXECUTABLE="$MACOS_DIR/SCAFA_Workforce"
+MONITOR_EXECUTABLE="$MACOS_DIR/scafa-monitor"
 STATE_DIR="/var/db/scafa-workforce-installer"
 STATE_FILE="$STATE_DIR/monitor-state"
 
@@ -30,6 +32,18 @@ fi
 if [ -e "$APP_BUNDLE" ] && [ ! -d "$APP_BUNDLE" ]; then
     fail "The application bundle path exists but is not a directory."
 fi
+
+# Do not let a privileged component install traverse linked bundle parents.
+# Missing parents are allowed on a clean install; existing parents must be real
+# directories so the package cannot write through an unexpected symlink.
+for component_dir in "$CONTENTS_DIR" "$MACOS_DIR"; do
+    if [ -L "$component_dir" ]; then
+        fail "The application bundle contains a symbolic-link directory: $component_dir"
+    fi
+    if [ -e "$component_dir" ] && [ ! -d "$component_dir" ]; then
+        fail "The application bundle path component is not a directory: $component_dir"
+    fi
+done
 
 if [ -L "$STATE_DIR" ]; then
     fail "The installer recovery directory is a symbolic link; refusing to continue."
