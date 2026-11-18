@@ -29,7 +29,7 @@ class MacOSPackageLifecycleTests(unittest.TestCase):
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
 
     def test_preinstall_refuses_to_replace_an_open_gui_application(self):
-        self.assertIn("pgrep -f", self.preinstall)
+        self.assertIn("pgrep -x 'SCAFA_Workforce'", self.preinstall)
         self.assertIn("Quit SCAFA Workforce before installing or upgrading", self.preinstall)
         self.assertIn("exit 1", self.preinstall)
 
@@ -173,7 +173,8 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self._write_command("id", 'echo 0\n')
         self._write_command(
             "pgrep",
-            'if [ "${SCAFA_TEST_GUI_RUNNING:-0}" = "1" ]; then exit 0; fi\nexit 1\n',
+            'if [ "$1" != "-x" ] || [ "$2" != "SCAFA_Workforce" ]; then echo "unexpected pgrep query: $*" >&2; exit 2; fi\\n'
+            'if [ "${SCAFA_TEST_GUI_RUNNING:-0}" = "1" ]; then echo 4242; exit 0; fi\\nexit 1\\n',
         )
         self._write_command(
             "dscl",
