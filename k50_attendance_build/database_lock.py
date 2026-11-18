@@ -79,8 +79,9 @@ def _wait_for_lock(attempt, deadline, lock_path, timeout_error=TimeoutError):
 @contextmanager
 def _exclusive_file_lock(lock_path, timeout, timeout_error=TimeoutError):
     lock_path = Path(lock_path)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    # Validate the timeout before creating directories or touching the filesystem.
     deadline = _deadline(timeout)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
 
     with lock_path.open("a+b") as handle:
         if os.name == "nt":
