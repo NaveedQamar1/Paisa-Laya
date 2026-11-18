@@ -430,12 +430,14 @@ def save_profile_status_history(db, user_id, joining_date, active, previous_join
             "UPDATE staff_status_history SET effective_date=?,changed_at=CURRENT_TIMESTAMP,source='profile' WHERE id=?",
             (target, first[0])
         )
-        if joining_date:
-            db.execute(
-                """INSERT OR IGNORE INTO staff_status_history
-                   (user_id,active,effective_date,source) VALUES(?,0,'0001-01-01','profile-baseline')""",
-                (uid,)
-            )
+        # A blank joining date uses today's date as the revised employment
+        # start. Keep the inactive baseline even when the date field is blank;
+        # otherwise the fallback-active lookup would count earlier days as active.
+        db.execute(
+            """INSERT OR IGNORE INTO staff_status_history
+               (user_id,active,effective_date,source) VALUES(?,0,'0001-01-01','profile-baseline')""",
+            (uid,)
+        )
     if status_changed:
         effective_status_date = today
         if active and joining_date and joining_date > today:
