@@ -21,6 +21,16 @@ if [ "$(/usr/bin/id -u)" -ne 0 ]; then
     fail "The Intel macOS installer lifecycle script must run as root."
 fi
 
+# The component package targets this exact bundle path. Refuse a symlink or
+# non-directory target rather than letting a privileged installer follow an
+# unexpected path in /Applications. A missing bundle is valid on clean install.
+if [ -L "$APP_BUNDLE" ]; then
+    fail "The application bundle path is a symbolic link; refusing to continue."
+fi
+if [ -e "$APP_BUNDLE" ] && [ ! -d "$APP_BUNDLE" ]; then
+    fail "The application bundle path exists but is not a directory."
+fi
+
 if [ -L "$STATE_DIR" ]; then
     fail "The installer recovery directory is a symbolic link; refusing to continue."
 fi
@@ -77,6 +87,9 @@ while IFS=' ' read -r username uid _; do
         [ "$plist_label" = "$LABEL" ] || fail "The loaded LaunchAgent has an unexpected label."
         program=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$plist" 2>/dev/null) || fail "Could not read the loaded monitor executable path."
         [ "$program" = "$MONITOR_EXECUTABLE" ] || fail "The loaded monitor points to a different installation. Disable that monitor from its existing installation before upgrading."
+        if [ -L "$MONITOR_EXECUTABLE" ] || [ ! -f "$MONITOR_EXECUTABLE" ] || [ ! -x "$MONITOR_EXECUTABLE" ]; then
+            fail "The loaded monitor executable is missing, linked, or not a regular executable file."
+        fi
 
         loaded_uid="$uid"
         loaded_home="$home"

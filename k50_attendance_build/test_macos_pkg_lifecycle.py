@@ -84,6 +84,27 @@ class MacOSPackageLifecycleTests(unittest.TestCase):
         self.assertLess(cleanup, restored_log)
         self.assertIn("The monitor bootstrap completed, but launchd did not confirm", self.postinstall)
 
+    def test_preinstall_rejects_linked_or_invalid_bundle_and_monitor_paths(self):
+        self.assertIn('if [ -L "$APP_BUNDLE" ]; then', self.preinstall)
+        self.assertIn('if [ -e "$APP_BUNDLE" ] && [ ! -d "$APP_BUNDLE" ]; then', self.preinstall)
+        self.assertIn('if [ -L "$MONITOR_EXECUTABLE" ] || [ ! -f "$MONITOR_EXECUTABLE" ] || [ ! -x "$MONITOR_EXECUTABLE" ]; then', self.preinstall)
+        self.assertLess(
+            self.preinstall.index('if [ -L "$APP_BUNDLE" ]; then'),
+            self.preinstall.index('launchctl bootout "$service"'),
+        )
+
+    def test_postinstall_rejects_linked_bundle_and_monitor_helper(self):
+        self.assertIn('if [ -L "$APP_BUNDLE" ] || [ ! -d "$APP_BUNDLE" ]; then', self.postinstall)
+        self.assertIn('if [ -L "$MONITOR_EXECUTABLE" ] || [ ! -f "$MONITOR_EXECUTABLE" ] || [ ! -x "$MONITOR_EXECUTABLE" ]; then', self.postinstall)
+        self.assertLess(
+            self.postinstall.index('if [ -L "$APP_BUNDLE" ]'),
+            self.postinstall.index('launchctl bootstrap "$domain" "$plist"'),
+        )
+        self.assertLess(
+            self.postinstall.index('if [ -L "$MONITOR_EXECUTABLE" ]'),
+            self.postinstall.index('launchctl bootstrap "$domain" "$plist"'),
+        )
+
     def test_release_workflow_builds_and_inspects_the_scripted_component_package(self):
         self.assertIn(
             'pkgbuild --component dist/SCAFA_Workforce.app --install-location /Applications --scripts "$MACOS_INSTALLER_SCRIPTS"',
@@ -384,6 +405,66 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self.assertTrue(self.state_file.exists())
         self.assertEqual(self.launch_state.read_text(encoding="ascii").strip(), "unloaded")
 
+
+    def test_preinstall_aborts_for_symlinked_application_bundle_before_launchd_changes(self):
+        real_bundle = self.app_bundle.with_name("SCAFA_Workforce.real.app")
+        self.app_bundle.rename(real_bundle)
+        self.app_bundle.symlink_to(real_bundle, target_is_directory=True)
+        self._prepare_loaded_state("loaded")
+
+        result = self._run(PREINSTALL, "preinstall-symlinked-bundle")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symbolic link", result.stderr)
+        self.assertFalse(self.state_file.exists())
+        self.assertFalse(any(call.startswith("bootout ") for call in self._calls()))
+
+    def test_preinstall_aborts_for_symlinked_monitor_before_bootout(self):
+        monitor = self.app_bundle / "Contents" / "MacOS" / "scafa-monitor"
+        external_monitor = self.root / "external-monitor"
+        external_monitor.write_text("external monitor", encoding="utf-8")
+        external_monitor.chmod(0o755)
+        monitor.unlink()
+        monitor.symlink_to(external_monitor)
+        self._prepare_loaded_state("loaded")
+
+        result = self._run(PREINSTALL, "preinstall-symlinked-monitor")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("linked", result.stderr)
+        self.assertFalse(self.state_file.exists())
+        self.assertFalse(any(call.startswith("bootout ") for call in self._calls()))
+
+    def test_postinstall_retains_recovery_marker_for_symlinked_application_bundle(self):
+        real_bundle = self.app_bundle.with_name("SCAFA_Workforce.real.app")
+        self.app_bundle.rename(real_bundle)
+        self.app_bundle.symlink_to(real_bundle, target_is_directory=True)
+        self._prepare_loaded_state("unloaded")
+        self._prepare_recovery_marker()
+
+        result = self._run(POSTINSTALL, "postinstall-symlinked-bundle")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("linked", result.stderr)
+        self.assertTrue(self.state_file.exists())
+        self.assertFalse(any(call.startswith("bootstrap ") for call in self._calls()))
+
+    def test_postinstall_retains_recovery_marker_for_symlinked_monitor_helper(self):
+        monitor = self.app_bundle / "Contents" / "MacOS" / "scafa-monitor"
+        external_monitor = self.root / "external-monitor"
+        external_monitor.write_text("external monitor", encoding="utf-8")
+        external_monitor.chmod(0o755)
+        monitor.unlink()
+        monitor.symlink_to(external_monitor)
+        self._prepare_loaded_state("unloaded")
+        self._prepare_recovery_marker()
+
+        result = self._run(POSTINSTALL, "postinstall-symlinked-monitor")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("linked", result.stderr)
+        self.assertTrue(self.state_file.exists())
+        self.assertFalse(any(call.startswith("bootstrap ") for call in self._calls()))
 
 if __name__ == "__main__":
     unittest.main()
