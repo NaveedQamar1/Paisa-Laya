@@ -93,7 +93,12 @@ class MacOSPackageLifecycleTests(unittest.TestCase):
     def test_preinstall_rejects_linked_or_invalid_bundle_and_monitor_paths(self):
         self.assertIn('if [ -L "$APP_BUNDLE" ]; then', self.preinstall)
         self.assertIn('if [ -e "$APP_BUNDLE" ] && [ ! -d "$APP_BUNDLE" ]; then', self.preinstall)
-        self.assertIn('if [ -L "$MONITOR_EXECUTABLE" ] || [ ! -f "$MONITOR_EXECUTABLE" ] || [ ! -x "$MONITOR_EXECUTABLE" ]; then', self.preinstall)
+        self.assertIn('if [ -L "$MONITOR_EXECUTABLE" ]; then', self.preinstall)
+        self.assertIn(
+            'if [ -e "$MONITOR_EXECUTABLE" ] && { [ ! -f "$MONITOR_EXECUTABLE" ] || [ ! -x "$MONITOR_EXECUTABLE" ]; }; then',
+            self.preinstall,
+        )
+        self.assertIn('if [ ! -e "$MONITOR_EXECUTABLE" ]; then', self.preinstall)
         self.assertLess(
             self.preinstall.index('if [ -L "$APP_BUNDLE" ]; then'),
             self.preinstall.index('launchctl bootout "$service"'),
@@ -502,7 +507,7 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         result = self._run(PREINSTALL, "preinstall-symlinked-monitor")
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("linked", result.stderr)
+        self.assertIn("symbolic link", result.stderr)
         self.assertFalse(self.state_file.exists())
         self.assertFalse(any(call.startswith("bootout ") for call in self._calls()))
 
