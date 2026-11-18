@@ -1,8 +1,13 @@
-import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, subprocess, sys, urllib.request, webbrowser, ssl
+import csv, sqlite3, threading, calendar, ipaddress, socket, json, os, re, subprocess, sys, urllib.request, webbrowser, ssl
+import platform as platform_module
+import tempfile
 import certifi
+from database_lock import ApplicationAlreadyRunningError, application_instance_lock, database_maintenance_lock
+from employee_history import ensure_device_employee_status_history, get_device_user_id, normalize_device_user_id
 from html import escape
 from datetime import datetime, date, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
@@ -21,23 +26,261 @@ NAVY = "#17251d"
 BLUE = "#2f6b45"
 TEAL = "#477c57"
 MUTED = "#68756b"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
+# Do not distribute in-app updates until real-machine updater and rollback acceptance passes.
+IN_APP_UPDATES_ENABLED = False
+UPDATE_BUTTON_STATE = "normal" if IN_APP_UPDATES_ENABLED else "disabled"
+UPDATE_BUTTON_TEXT = "Check for Updates" if IN_APP_UPDATES_ENABLED else "Updates Disabled"
+MONITOR_COMMAND_TIMEOUT_SECONDS = 30
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
+
+def parse_release_tag(tag):
+    """Parse only the exact versioned tag format used by SCAFA releases."""
+    if not isinstance(tag, str):
+        raise RuntimeError("The latest GitHub release has an invalid SCAFA version tag.")
+
+    match = re.fullmatch(
+        re.escape(RELEASE_PREFIX) + r"([0-9]+)\.([0-9]+)\.([0-9]+)",
+        tag,
+    )
+    if match is None:
+        raise RuntimeError(
+            "The latest GitHub release has an invalid SCAFA version tag. "
+            "Expected scafa-vMAJOR.MINOR.PATCH."
+        )
+    return tuple(int(part) for part in match.groups())
+
+
 TIME_VALUES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
+CSV_EXPORT_FORMAT_COLUMN = "SCAFA Export Format"
+CSV_EXPORT_FORMAT_MARKER = "scafa-workforce-csv-v1"
+CSV_EXPORT_HEADERS = (
+    "Device User ID",
+    "Staff Name",
+    "Attendance date & time",
+    "Punch status",
+    CSV_EXPORT_FORMAT_COLUMN,
+)
+
+
+def csv_formula_candidate(value):
+    """Return whether a CSV cell could be interpreted as a spreadsheet formula."""
+    text = "" if value is None else str(value)
+    if not text:
+        return False
+    if text[0] in "\t\r\n":
+        return True
+    return text.lstrip(" \t\r\n").startswith(("=", "+", "-", "@"))
+
+
+def escape_csv_spreadsheet_value(value):
+    """Prefix dangerous CSV values for spreadsheet viewing while preserving reversibility."""
+    text = "" if value is None else str(value)
+    # Double a literal leading apostrophe so spreadsheet software displays it
+    # rather than consuming it as the text-forcing prefix.
+    if text.startswith("'") or csv_formula_candidate(text):
+        return "'" + text
+    return text
+
+
+def restore_csv_spreadsheet_value(value):
+    """Undo only the escaping convention used by SCAFA's BOM-marked CSV exports."""
+    text = "" if value is None else str(value)
+    if text.startswith("''"):
+        return text[1:]
+    if text.startswith("'") and csv_formula_candidate(text[1:]):
+        return text[1:]
+    return text
+
+def validate_release_asset_url(url, tag, asset_name):
+    """Accept only this repository's HTTPS release asset for the selected tag."""
+    try:
+        parsed = urlsplit(str(url or ""))
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Release asset {asset_name} has an invalid download URL."
+        ) from exc
+
+    expected_path = (
+        f"/NaveedQamar1/Paisa-Laya/releases/download/{tag}/{asset_name}"
+    )
+    if (
+        parsed.scheme.lower() != "https"
+        or parsed.hostname != "github.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in (None, 443)
+        or parsed.query
+        or parsed.fragment
+        or parsed.path != expected_path
+    ):
+        raise RuntimeError(
+            f"Release asset {asset_name} does not point to its expected "
+            "GitHub repository release download."
+        )
+    return str(url)
+
+
+def verify_update_asset(package, checksum_file, asset_name, published_digest=None):
+    """Verify an update against its release checksum manifest and GitHub asset metadata."""
+    expected = None
+    for line in Path(checksum_file).read_text(encoding="utf-8").splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and parts[1].lstrip("*").strip() == asset_name:
+            expected = parts[0].lower()
+            break
+    if not expected or len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
+        raise RuntimeError(f"No valid SHA-256 entry was published for {asset_name}.")
+
+    metadata = str(published_digest or "").strip()
+    if metadata:
+        algorithm, separator, value = metadata.partition(":")
+        value = value.lower()
+        if (
+            not separator
+            or algorithm.lower() != "sha256"
+            or len(value) != 64
+            or any(c not in "0123456789abcdef" for c in value)
+        ):
+            raise RuntimeError("GitHub did not provide a valid SHA-256 digest for the update asset.")
+        if value != expected:
+            raise RuntimeError("The release checksum manifest does not match GitHub's published asset digest.")
+
+    import hashlib
+    digest = hashlib.sha256()
+    with open(package, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest().lower()
+    if actual != expected:
+        raise RuntimeError("The downloaded update failed SHA-256 verification. The installed application has not been changed.")
+    return actual
+
+
+def run_monitor_command(command, operation):
+    """Run a background-monitor setup command with a finite wait."""
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=MONITOR_COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"Timed out after {MONITOR_COMMAND_TIMEOUT_SECONDS} seconds while trying to {operation}. "
+            "The background-monitor state may be unknown."
+        ) from exc
+    except OSError as exc:
+        raise RuntimeError(f"Could not {operation}: {exc}") from exc
+
 
 def format_worked_time(hours):
     total_minutes=max(0,int(round(float(hours)*60)))
     whole_hours,minutes=divmod(total_minutes,60)
     return f"{whole_hours} hours {minutes} minutes"
 
-def init_db():
+def init_db(*, maintenance_lock_held=False):
+    """Apply schema migrations while excluding concurrent attendance-monitor writes."""
+    if not maintenance_lock_held:
+        with database_maintenance_lock(DB, timeout=300):
+            return init_db(maintenance_lock_held=True)
     with sqlite3.connect(DB) as c:
         c.execute("""CREATE TABLE IF NOT EXISTS punches (
             user_id TEXT NOT NULL, punch_time TEXT NOT NULL, status TEXT DEFAULT '',
             UNIQUE(user_id,punch_time,status))""")
         c.execute("""CREATE TABLE IF NOT EXISTS staff (
             user_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')""")
+        # Employee profile fields are additive migrations; existing staff IDs and
+        # attendance history remain unchanged when upgrading older databases.
+        staff_columns = {row[1] for row in c.execute("PRAGMA table_info(staff)")}
+        for column, definition in (
+            ("department", "TEXT NOT NULL DEFAULT ''"),
+            ("designation", "TEXT NOT NULL DEFAULT ''"),
+            ("joining_date", "TEXT NOT NULL DEFAULT ''"),
+            ("active", "INTEGER NOT NULL DEFAULT 1"),
+            # Existing names are treated as profile-managed during migration so
+            # a background device poll cannot silently replace a curated name.
+            ("name_source", "TEXT NOT NULL DEFAULT 'profile'"),
+        ):
+            if column not in staff_columns:
+                c.execute(f"ALTER TABLE staff ADD COLUMN {column} {definition}")
+        # Keep dated employment-status events so inactive periods do not create
+        # false absences and historical attendance remains available.
+        c.execute("""CREATE TABLE IF NOT EXISTS staff_status_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            active INTEGER NOT NULL CHECK(active IN (0,1)),
+            effective_date TEXT NOT NULL,
+            changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            source TEXT NOT NULL DEFAULT 'profile',
+            UNIQUE(user_id,effective_date))""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_staff_status_history_lookup ON staff_status_history(user_id,effective_date)")
+        for uid, active, joining in c.execute(
+            "SELECT user_id,active,joining_date FROM staff"
+        ).fetchall():
+            normalized_joining = ""
+            if joining:
+                joining_text = str(joining).strip()
+                try:
+                    normalized_joining = datetime.strptime(
+                        joining_text, "%Y-%m-%d"
+                    ).date().isoformat()
+                except ValueError:
+                    pass
+                else:
+                    # strptime accepts unpadded month/day values. Normalize valid
+                    # legacy dates before they enter lexicographically ordered history.
+                    if joining_text != normalized_joining:
+                        c.execute(
+                            "UPDATE staff SET joining_date=? WHERE user_id=?",
+                            (normalized_joining, str(uid)),
+                        )
+            valid_joining = bool(normalized_joining)
+            if int(active or 0):
+                # Baseline prevents an active employee from being counted before
+                # their joining date, but is not itself a complete status history.
+                c.execute(
+                    """INSERT OR IGNORE INTO staff_status_history
+                       (user_id,active,effective_date,source)
+                       VALUES(?,0,'0001-01-01','migration-baseline')""",
+                    (str(uid),)
+                )
+            has_status_event = c.execute(
+                """SELECT 1 FROM staff_status_history
+                   WHERE user_id=? AND source NOT LIKE '%-baseline'
+                   LIMIT 1""",
+                (str(uid),)
+            ).fetchone()
+            if has_status_event:
+                continue
+            if not int(active or 0):
+                # A legacy inactive profile has no known deactivation date. Remove
+                # only synthetic baselines before recording migration-day inactivity;
+                # real status events are preserved by the guard above.
+                c.execute(
+                    "DELETE FROM staff_status_history WHERE user_id=? AND source LIKE '%-baseline'",
+                    (str(uid),),
+                )
+            effective = date.today().isoformat()
+            if int(active or 0):
+                if valid_joining:
+                    effective = normalized_joining
+                else:
+                    first_punch = c.execute(
+                        "SELECT MIN(substr(punch_time,1,10)) FROM punches WHERE user_id=?",
+                        (str(uid),)
+                    ).fetchone()[0]
+                    if first_punch:
+                        effective = str(first_punch)
+            # For legacy inactive profiles the deactivation date is unknown.
+            # Use migration day rather than retroactively erasing expected days.
+            c.execute(
+                "INSERT INTO staff_status_history(user_id,active,effective_date,source) VALUES(?,?,?,?)",
+                (str(uid), int(bool(active)), effective, "migration")
+            )
         c.execute("""CREATE TABLE IF NOT EXISTS staff_rules (
             user_id TEXT PRIMARY KEY, start_time TEXT NOT NULL DEFAULT '10:00',
             end_time TEXT NOT NULL DEFAULT '18:00', grace_minutes INTEGER NOT NULL DEFAULT 10,
@@ -58,6 +301,612 @@ def init_db():
                 "saturday_window_start":"09:00","saturday_window_end":"17:00"}
         for k,v in seed.items():
             c.execute("INSERT OR IGNORE INTO app_settings(setting,value) VALUES(?,?)",(k,v))
+
+def employee_active_on(db, user_id, day, fallback_active=True):
+    """Return employment status on an ISO date using the latest effective event."""
+    row = db.execute(
+        """SELECT active FROM staff_status_history
+           WHERE user_id=? AND effective_date<=?
+           ORDER BY effective_date DESC,id DESC LIMIT 1""",
+        (str(user_id), str(day))
+    ).fetchone()
+    return bool(row[0]) if row else bool(fallback_active)
+
+
+def employee_active_from_events(events, day, fallback_active=True):
+    """Evaluate preloaded (effective_date, active) events without repeated DB queries."""
+    for effective_date, active in reversed(events):
+        if effective_date <= str(day):
+            return bool(active)
+    return bool(fallback_active)
+
+
+
+
+def count_expected_present_days(employee_performance):
+    """Count present days only from eligible scheduled-day performance totals."""
+    return sum(stats["present"] for _, stats in employee_performance)
+
+
+def is_expected_attendance_day(active_on_day, status):
+    """Whether a date belongs in scheduled attendance performance denominators."""
+    return (
+        bool(active_on_day)
+        and status not in ("Day off", "Holiday", "Inactive")
+        and not status.startswith("On leave")
+    )
+
+
+def save_profile_status_history(db, user_id, joining_date, active, previous_joining_date=None,
+                                is_new=False, status_changed=False, effective_today=None):
+    """Persist a profile's employment start without overwriting later status changes."""
+    uid = str(user_id)
+    today = effective_today or date.today().isoformat()
+    start = joining_date or today
+    if is_new:
+        # A new profile must not be counted before its employment start, even
+        # when the joining date is omitted (then the start defaults to today).
+        db.execute(
+            """INSERT OR IGNORE INTO staff_status_history
+               (user_id,active,effective_date,source) VALUES(?,0,'0001-01-01','profile-baseline')""",
+            (uid,)
+        )
+        db.execute(
+            """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+               VALUES(?,?,?,'profile')
+               ON CONFLICT(user_id,effective_date) DO UPDATE SET
+               active=excluded.active,changed_at=CURRENT_TIMESTAMP,source='profile'""",
+            (uid, int(bool(active)), start)
+        )
+        return
+
+    if joining_date == (previous_joining_date or ""):
+        if status_changed:
+            effective_status_date = today
+            if active and joining_date and joining_date > today:
+                effective_status_date = joining_date
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES(?,?,?,'profile')
+                   ON CONFLICT(user_id,effective_date) DO UPDATE SET
+                   active=excluded.active,changed_at=CURRENT_TIMESTAMP,source='profile'""",
+                (uid, int(bool(active)), effective_status_date)
+            )
+        return
+
+    # Move only the original employment-start event. Later activation/deactivation
+    # events remain on their original dates and retain their ordering.
+    first = db.execute(
+        """SELECT id,active,effective_date,source FROM staff_status_history
+           WHERE user_id=? AND active=1 AND source IN ('profile','migration','device-sync')
+           ORDER BY effective_date,id LIMIT 1""",
+        (uid,)
+    ).fetchone()
+    if not first:
+        first_real_event = db.execute(
+            """SELECT id,active,effective_date,source FROM staff_status_history
+               WHERE user_id=? AND source NOT LIKE '%-baseline'
+               ORDER BY effective_date,id LIMIT 1""",
+            (uid,)
+        ).fetchone()
+        if not first_real_event:
+            db.execute(
+                """INSERT OR IGNORE INTO staff_status_history
+                   (user_id,active,effective_date,source)
+                   VALUES(?,0,'0001-01-01','profile-baseline')""",
+                (uid,)
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES(?,?,?,'profile')
+                   ON CONFLICT(user_id,effective_date) DO UPDATE SET
+                   active=excluded.active,changed_at=CURRENT_TIMESTAMP,source='profile'""",
+                (uid, int(bool(active)), start)
+            )
+            if status_changed:
+                effective_status_date = today
+                if active and joining_date and joining_date > today:
+                    effective_status_date = joining_date
+                db.execute(
+                    """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                       VALUES(?,?,?,'profile')
+                       ON CONFLICT(user_id,effective_date) DO UPDATE SET
+                       active=excluded.active,changed_at=CURRENT_TIMESTAMP,source='profile'""",
+                    (uid, int(bool(active)), effective_status_date)
+                )
+            return
+
+        # A legacy inactive profile can have only a migration-day deactivation
+        # event because its original joining date was unknown. Once an operator
+        # supplies a joining date before that event, reconstruct the initial
+        # active period without moving or replacing the historical deactivation.
+        # A date on/after the first inactive event does not prove an earlier
+        # employment period, so leave that history untouched.
+        if not bool(first_real_event[1]) and start <= first_real_event[2]:
+            if start == first_real_event[2]:
+                raise ValueError(
+                    "The revised joining date conflicts with the first recorded inactive status event."
+                )
+            target_collision = db.execute(
+                """SELECT 1 FROM staff_status_history
+                   WHERE user_id=? AND effective_date=? LIMIT 1""",
+                (uid, start)
+            ).fetchone()
+            if target_collision:
+                raise ValueError(
+                    f"The revised joining date conflicts with an existing employment-status event on {start}."
+                )
+            db.execute(
+                """INSERT OR IGNORE INTO staff_status_history
+                   (user_id,active,effective_date,source)
+                   VALUES(?,0,'0001-01-01','profile-baseline')""",
+                (uid,)
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES(?,1,?,'profile')""",
+                (uid, start)
+            )
+    if first:
+        target = start
+        target_collision = db.execute(
+            """SELECT 1 FROM staff_status_history
+               WHERE user_id=? AND id<>? AND effective_date=? LIMIT 1""",
+            (uid, first[0], target)
+        ).fetchone()
+        if target_collision:
+            raise ValueError(
+                f"The revised joining date conflicts with an existing employment-status event on {target}."
+            )
+
+        # If a real status event predates the first active event, that active
+        # event is a reactivation, not the employee's original start. Preserve
+        # it rather than moving it and silently making the employee inactive.
+        earlier_status_event = db.execute(
+            """SELECT active,effective_date,source FROM staff_status_history
+               WHERE user_id=? AND effective_date<? AND source NOT LIKE '%-baseline'
+               ORDER BY effective_date DESC,id DESC LIMIT 1""",
+            (uid, first[2])
+        ).fetchone()
+        if earlier_status_event:
+            if target > first[2]:
+                raise ValueError(
+                    "This employee has an earlier inactive period and a later reactivation. "
+                    "The joining date cannot be moved after that reactivation without rewriting status history."
+                )
+            if target < first[2]:
+                # Record the original employment start while retaining the
+                # inactive period and the later reactivation as separate events.
+                db.execute(
+                    """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                       VALUES(?,1,?,'profile')""",
+                    (uid, target)
+                )
+        else:
+            # A later status event only blocks the revised start date when it
+            # would fall on or before that new start. Events after the revised
+            # start remain valid and must retain their original effective dates.
+            conflict = db.execute(
+                """SELECT effective_date FROM staff_status_history
+                   WHERE user_id=? AND id<>? AND effective_date>? AND effective_date<=?
+                   ORDER BY effective_date,id LIMIT 1""",
+                (uid, first[0], first[2], target)
+            ).fetchone()
+            if conflict:
+                raise ValueError(
+                    "The revised joining date must be earlier than subsequent employment-status changes."
+                )
+            db.execute(
+                "UPDATE staff_status_history SET effective_date=?,changed_at=CURRENT_TIMESTAMP,source='profile' WHERE id=?",
+                (target, first[0])
+            )
+        # A blank joining date uses today's date as the revised employment
+        # start. Keep the inactive baseline even when the date field is blank;
+        # otherwise the fallback-active lookup would count earlier days as active.
+        db.execute(
+            """INSERT OR IGNORE INTO staff_status_history
+               (user_id,active,effective_date,source) VALUES(?,0,'0001-01-01','profile-baseline')""",
+            (uid,)
+        )
+    if status_changed:
+        effective_status_date = today
+        if active and joining_date and joining_date > today:
+            effective_status_date = joining_date
+        db.execute(
+            """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+               VALUES(?,?,?,'profile')
+               ON CONFLICT(user_id,effective_date) DO UPDATE SET
+               active=excluded.active,changed_at=CURRENT_TIMESTAMP,source='profile'""",
+            (uid, int(bool(active)), effective_status_date)
+        )
+
+
+def save_employee_profile(db, user_id, name, department="", designation="", joining_date="",
+                          active=True, current_user_id=None, effective_today=None,
+                          expected_profile=None):
+    """Save an employee profile atomically without changing its device-assigned ID."""
+    uid = normalize_device_user_id(user_id)
+    full_name = str(name or "").strip()
+    joining = str(joining_date or "").strip()
+    if not uid or not full_name:
+        raise ValueError("Employee ID and full name are required.")
+    if current_user_id is not None and uid != str(current_user_id):
+        raise ValueError("The device-assigned employee ID cannot be changed.")
+    if joining:
+        try:
+            parsed_joining = datetime.strptime(joining, "%Y-%m-%d").date()
+            if parsed_joining.isoformat() != joining:
+                raise ValueError
+        except ValueError:
+            raise ValueError("Use YYYY-MM-DD for the joining date.") from None
+
+    department = str(department or "").strip()
+    designation = str(designation or "").strip()
+    new_active = int(bool(active))
+    db.execute("SAVEPOINT employee_profile_save")
+    try:
+        previous = db.execute(
+            """SELECT name,department,designation,joining_date,active
+               FROM staff WHERE user_id=?""",
+            (uid,)
+        ).fetchone()
+        if current_user_id is None and previous is not None:
+            raise ValueError(
+                "This device ID already belongs to an employee. Select that employee from the directory to edit the profile."
+            )
+        if current_user_id is not None and previous is None:
+            raise ValueError(
+                "This employee profile no longer exists. Refresh the directory and select it again."
+            )
+
+        if previous is None:
+            db.execute(
+                """INSERT INTO staff(user_id,name,department,designation,joining_date,active,name_source)
+                   VALUES(?,?,?,?,?,?,'profile')""",
+                (uid, full_name, department, designation, joining, new_active)
+            )
+            save_profile_status_history(
+                db, uid, joining, new_active, is_new=True, effective_today=effective_today
+            )
+        else:
+            previous_snapshot = (
+                str(previous[0] or "").strip(),
+                str(previous[1] or "").strip(),
+                str(previous[2] or "").strip(),
+                str(previous[3] or "").strip(),
+                int(bool(previous[4])),
+            )
+            if expected_profile is not None:
+                expected_values = tuple(expected_profile)
+                if len(expected_values) != 5:
+                    raise ValueError(
+                        "This employee profile changed after it was loaded. Refresh the directory and select the employee again before saving."
+                    )
+                expected_snapshot = (
+                    str(expected_values[0] or "").strip(),
+                    str(expected_values[1] or "").strip(),
+                    str(expected_values[2] or "").strip(),
+                    str(expected_values[3] or "").strip(),
+                    int(bool(expected_values[4])),
+                )
+                if previous_snapshot != expected_snapshot:
+                    raise ValueError(
+                        "This employee profile changed after it was loaded. Refresh the directory and select the employee again before saving."
+                    )
+            previous_active = int(previous[4])
+            previous_joining = previous[3] or ""
+            cursor = db.execute(
+                """UPDATE staff SET name=?,department=?,designation=?,joining_date=?,active=?,name_source='profile'
+                   WHERE user_id=? AND name IS ? AND department IS ? AND designation IS ?
+                     AND joining_date IS ? AND active IS ?""",
+                (
+                    full_name, department, designation, joining, new_active, uid,
+                    previous[0], previous[1], previous[2], previous[3], previous[4]
+                )
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    "This employee profile changed while you were editing it. Refresh the directory and select the employee again before saving."
+                )
+            if previous_active != new_active or previous_joining != joining:
+                save_profile_status_history(
+                    db, uid, joining, new_active,
+                    previous_joining_date=previous_joining,
+                    status_changed=previous_active != new_active,
+                    effective_today=effective_today
+                )
+        db.execute("RELEASE SAVEPOINT employee_profile_save")
+    except Exception:
+        db.execute("ROLLBACK TO SAVEPOINT employee_profile_save")
+        db.execute("RELEASE SAVEPOINT employee_profile_save")
+        raise
+    return uid
+
+
+def filter_employee_rows(rows, query):
+    """Filter directory rows across profile fields, including the displayed status label."""
+    needle = str(query or "").strip().casefold()
+    if not needle:
+        return list(rows)
+    matches = []
+    for row in rows:
+        status = "Active" if bool(row[5]) else "Inactive"
+        profile_fields = row[:5]
+        if (
+            any(needle in str(value or "").casefold() for value in profile_fields)
+            or status.casefold().startswith(needle)
+        ):
+            matches.append(row)
+    return matches
+
+
+def retain_visible_employee_selection(current_user_id, visible_rows):
+    """Keep an edited profile selected only while it remains visible in the filtered directory."""
+    if current_user_id is None:
+        return None
+    visible_ids = {str(row[0]) for row in visible_rows}
+    selected_id = str(current_user_id)
+    return selected_id if selected_id in visible_ids else None
+
+
+def employee_profile_selection_data(selected_user_id, row):
+    """Return form data only when the selected employee still matches the database row."""
+    selected_id = normalize_device_user_id(selected_user_id)
+    if not selected_id or row is None or len(row) < 6:
+        return None
+    if str(row[0]) != selected_id:
+        return None
+    return {
+        "user_id": selected_id,
+        "fields": tuple(str(value or "") for value in row[:5]),
+        "active": bool(row[5]),
+    }
+
+
+def add_employee_leave(db, user_id, start_date, end_date, label="Annual Leave"):
+    """Add a bounded leave period without allowing ambiguous overlapping records."""
+    uid = normalize_device_user_id(user_id)
+    if not uid:
+        raise ValueError("Select an employee before adding leave.")
+    try:
+        first = datetime.strptime(str(start_date).strip(), "%Y-%m-%d").date()
+        last = datetime.strptime(str(end_date).strip(), "%Y-%m-%d").date()
+    except ValueError:
+        raise ValueError("Enter valid dates in YYYY-MM-DD format.") from None
+    if last < first:
+        raise ValueError("The end date must not be before the start date.")
+    if (last - first).days > 366:
+        raise ValueError("A leave period cannot exceed 367 days.")
+    if not db.execute("SELECT 1 FROM staff WHERE user_id=?", (uid,)).fetchone():
+        raise ValueError("The selected employee is no longer registered. Refresh the directory.")
+
+    overlap = db.execute(
+        """SELECT start_date,end_date,label FROM staff_leave
+           WHERE user_id=? AND start_date<=? AND end_date>=?
+           ORDER BY start_date,end_date,id LIMIT 1""",
+        (uid, last.isoformat(), first.isoformat())
+    ).fetchone()
+    if overlap:
+        raise ValueError(
+            f"This leave period overlaps an existing {overlap[2]} period "
+            f"({overlap[0]} to {overlap[1]}). Remove or adjust the existing period first."
+        )
+    reason = str(label or "").strip() or "Approved Leave"
+    cursor = db.execute(
+        "INSERT INTO staff_leave(user_id,start_date,end_date,label) VALUES(?,?,?,?)",
+        (uid, first.isoformat(), last.isoformat(), reason)
+    )
+    return cursor.lastrowid
+
+
+def normalize_punch_timestamp(value):
+    """Normalize supported device-export timestamps; reject values that cannot be reported safely."""
+    raw = str(value or "").strip()
+    if not raw or ("T" not in raw and " " not in raw):
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        parsed = None
+        for date_format in (
+            "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M",
+            "%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M",
+            "%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %I:%M %p",
+        ):
+            try:
+                parsed = datetime.strptime(raw, date_format)
+                break
+            except ValueError:
+                continue
+    if parsed is None or parsed.tzinfo is not None:
+        return None
+    return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def import_punch_rows(db, records):
+    """Insert valid attendance rows idempotently and count malformed rows separately."""
+    inserted = 0
+    skipped = 0
+    for user_id, timestamp, status in records:
+        # Preserve numeric device ID 0; only None and empty text mean a missing ID.
+        uid = str("" if user_id is None else user_id).strip()
+        stamp = normalize_punch_timestamp(timestamp)
+        if not uid or stamp is None:
+            skipped += 1
+            continue
+        # Numeric status 0 is a valid check-in code; do not collapse it to an empty string.
+        state = str("" if status is None else status).strip()
+        inserted += db.execute(
+            "INSERT OR IGNORE INTO punches(user_id,punch_time,status) VALUES(?,?,?)",
+            (uid, stamp, state),
+        ).rowcount
+    return inserted, skipped
+
+
+def paths_refer_to_same_file(first, second):
+    """Detect identical paths, symlinks, and hard-link aliases."""
+    first_path = Path(first).expanduser()
+    second_path = Path(second).expanduser()
+    if first_path.resolve() == second_path.resolve():
+        return True
+    try:
+        return os.path.samefile(first_path, second_path)
+    except FileNotFoundError:
+        return False
+
+
+def next_restore_safety_backup_path(base_dir, timestamp):
+    """Choose a fresh path so a same-second restore cannot overwrite an earlier safety copy."""
+    directory = Path(base_dir)
+    stem = f"Pre_Restore_Backup_{timestamp}"
+    candidate = directory / f"{stem}.db"
+    suffix = 1
+    while candidate.exists() or candidate.is_symlink():
+        candidate = directory / f"{stem}_{suffix}.db"
+        suffix += 1
+    return candidate
+
+
+def write_database_backup(source_path, destination_path):
+    """Write and validate a temporary SQLite snapshot before replacing a backup file."""
+    destination = Path(destination_path)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=str(destination.parent)
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    source = None
+    target = None
+    try:
+        source = sqlite3.connect(source_path)
+        target = sqlite3.connect(temporary)
+        source.backup(target)
+        integrity = target.execute("PRAGMA integrity_check").fetchone()
+        if not integrity or integrity[0] != "ok":
+            raise ValueError("The generated backup failed SQLite's integrity check.")
+        target.close()
+        target = None
+        source.close()
+        source = None
+        # Same-directory replacement is atomic; an existing good backup remains
+        # untouched if snapshot creation or validation fails.
+        os.replace(temporary, destination)
+    finally:
+        if target is not None:
+            target.close()
+        if source is not None:
+            source.close()
+        temporary.unlink(missing_ok=True)
+
+
+def restore_database_snapshot(source_path, destination_path, *, pages=-1, progress=None):
+    """Copy a validated SQLite snapshot into the live database transactionally."""
+    source_uri = Path(source_path).resolve().as_uri() + "?mode=ro"
+    source = sqlite3.connect(source_uri, uri=True, timeout=20)
+    target = None
+    try:
+        target = sqlite3.connect(destination_path, timeout=20)
+        source.backup(target, pages=pages, progress=progress)
+    finally:
+        try:
+            if target is not None:
+                target.close()
+        finally:
+            source.close()
+
+
+def validate_attendance_backup(db):
+    """Reject structurally incomplete backups before they can replace live data."""
+    integrity = db.execute("PRAGMA integrity_check").fetchone()
+    if not integrity or integrity[0] != "ok":
+        raise ValueError("The selected file failed SQLite's integrity check.")
+
+    tables = {
+        row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if not {"punches", "staff"}.issubset(tables):
+        raise ValueError(
+            "This file does not look like a SCAFA Workforce attendance database."
+        )
+
+    required_columns = {
+        "staff": {"user_id", "name"},
+        "punches": {"user_id", "punch_time", "status"},
+    }
+    for table, required in required_columns.items():
+        actual = {
+            row[1] for row in db.execute(f"PRAGMA table_info('{table}')")
+        }
+        missing = sorted(required - actual)
+        if missing:
+            raise ValueError(
+                f"The backup is missing required {table} columns: {', '.join(missing)}."
+            )
+
+    # Optional legacy tables are allowed to be absent so older backups can be migrated,
+    # but an existing table with an incomplete schema cannot be repaired by CREATE TABLE IF NOT EXISTS.
+    optional_columns = {
+        "staff_rules": {"user_id", "start_time", "end_time", "grace_minutes", "half_day_after", "min_hours"},
+        "app_settings": {"setting", "value"},
+        "holidays": {"holiday_date", "label"},
+        "staff_day_rules": {"user_id", "weekday", "start_time", "end_time", "grace_minutes", "shift_type"},
+        "staff_leave": {"id", "user_id", "start_date", "end_date", "label"},
+        "staff_status_history": {"id", "user_id", "active", "effective_date", "changed_at", "source"},
+    }
+    for table, required in optional_columns.items():
+        if table not in tables:
+            continue
+        actual = {
+            row[1] for row in db.execute(f"PRAGMA table_info('{table}')")
+        }
+        missing = sorted(required - actual)
+        if missing:
+            raise ValueError(
+                f"The backup has an incomplete {table} table; missing required columns: {', '.join(missing)}."
+            )
+
+    def has_unique_key(table, expected_columns):
+        table_columns = list(db.execute(f"PRAGMA table_info('{table}')"))
+        if len(expected_columns) == 1 and any(
+            row[1] == expected_columns[0] and row[5] > 0
+            for row in table_columns
+        ):
+            return True
+        for index in db.execute(f"PRAGMA index_list('{table}')"):
+            if not index[2] or (len(index) > 4 and index[4]):
+                continue
+            index_name = str(index[1]).replace('"', '""')
+            indexed_columns = [
+                row[2] for row in db.execute(
+                    f'PRAGMA index_info("{index_name}")'
+                )
+            ]
+            if len(indexed_columns) == len(expected_columns) and set(indexed_columns) == set(expected_columns):
+                return True
+        return False
+
+    optional_unique_keys = {
+        "staff_rules": ("user_id",),
+        "app_settings": ("setting",),
+        "holidays": ("holiday_date",),
+        "staff_day_rules": ("user_id", "weekday"),
+        "staff_leave": ("id",),
+        "staff_status_history": ("user_id", "effective_date"),
+    }
+    for table, columns in optional_unique_keys.items():
+        if table in tables and not has_unique_key(table, columns):
+            raise ValueError(
+                f"The backup must enforce unique {table} records by {', '.join(columns)}."
+            )
+
+    if not has_unique_key("staff", ("user_id",)):
+        raise ValueError("The backup must enforce unique staff device IDs.")
+    if not has_unique_key("punches", ("user_id", "punch_time", "status")):
+        raise ValueError("The backup must prevent duplicate attendance punch records.")
+    return True
+
 
 class App(tk.Tk):
     def __init__(self):
@@ -90,6 +939,11 @@ class App(tk.Tk):
 
     def check_for_updates(self):
         """Check GitHub Releases and offer a verified in-app update."""
+        if not IN_APP_UPDATES_ENABLED:
+            self.status.set(
+                "In-app updates are disabled until updater and rollback acceptance is complete."
+            )
+            return
         self.status.set(f"Checking for updates… (installed version {APP_VERSION})")
         def worker():
             try:
@@ -99,24 +953,43 @@ class App(tk.Tk):
                 with urllib.request.urlopen(request,timeout=20,context=SSL_CONTEXT) as response:
                     release=json.loads(response.read().decode("utf-8"))
                 tag=str(release.get("tag_name") or "")
-                latest=tag.removeprefix(RELEASE_PREFIX).lstrip("v")
-                current_parts=tuple(int(x) for x in APP_VERSION.split("."))
-                latest_parts=tuple(int(x) for x in latest.split("."))
+                latest_parts = parse_release_tag(tag)
+                latest = tag[len(RELEASE_PREFIX):]
+                current_parts = tuple(int(x) for x in APP_VERSION.split("."))
                 if latest_parts<=current_parts:
                     self.after(0,lambda:self._update_no_update(latest or tag))
                     return
                 assets={str(a.get("name")):a for a in (release.get("assets") or [])}
                 if sys.platform=="win32":
+                    machine = platform_module.machine().lower()
+                    if machine not in ("amd64", "x86_64"):
+                        raise RuntimeError(
+                            "In-app updates require a Windows x64 installation; "
+                            f"this system reports {machine or 'an unknown architecture'}."
+                        )
                     platform="windows"; asset_name="SCAFA_Workforce_Setup.exe"
                 elif sys.platform=="darwin":
                     machine=os.uname().machine.lower()
+                    if machine in ("arm64", "aarch64"):
+                        asset_name="SCAFA_Workforce_macOS_apple-silicon.zip"
+                    elif machine in ("x86_64", "amd64"):
+                        asset_name="SCAFA_Workforce_macOS_intel.zip"
+                    else:
+                        raise RuntimeError(
+                            "In-app updates are not available for this macOS architecture: "
+                            f"{machine or 'unknown'}."
+                        )
                     platform="macos"
-                    asset_name=("SCAFA_Workforce_macOS_apple-silicon.zip"
-                                if machine in ("arm64","aarch64") else "SCAFA_Workforce_macOS_intel.zip")
                 else:
                     raise RuntimeError("In-app updates are currently supported on Windows and macOS only.")
                 if asset_name not in assets or "checksums.txt" not in assets:
                     raise RuntimeError(f"Release {tag} is missing {asset_name} or checksums.txt.")
+                for required_asset in (asset_name, "checksums.txt"):
+                    validate_release_asset_url(
+                        assets[required_asset].get("browser_download_url"),
+                        tag,
+                        required_asset,
+                    )
                 # Store the release before scheduling the UI callback to avoid a worker/UI race.
                 self._pending_release=(release,asset_name,platform)
                 self.after(0,lambda t=latest:self._update_offer(t))
@@ -127,8 +1000,26 @@ class App(tk.Tk):
 
     def _update_no_update(self,latest):
         self.status.set(f"Up to date • version {APP_VERSION}")
-        messagebox.showinfo("SCAFA Workforce updates",
-            f"You are using version {APP_VERSION}. The latest published version is {latest or APP_VERSION}. No update is required.")
+        latest_parts = tuple(int(part) for part in str(latest).split("."))
+        current_parts = tuple(int(part) for part in APP_VERSION.split("."))
+        if latest_parts < current_parts:
+            message = (
+                f"You are using version {APP_VERSION}, which is newer than the "
+                f"latest published release ({latest}). No update is available. "
+                "SCAFA Workforce will not downgrade your installation."
+            )
+        elif latest_parts == current_parts:
+            message = (
+                f"You are using version {APP_VERSION}, the latest published "
+                "version. No update is required."
+            )
+        else:
+            message = (
+                f"The latest published version ({latest}) is newer than installed "
+                f"version {APP_VERSION}, but no update was offered. Please retry "
+                "the update check or contact support."
+            )
+        messagebox.showinfo("SCAFA Workforce updates", message)
 
     def _update_offer(self,latest):
         self.status.set(f"Update available • version {latest}")
@@ -137,39 +1028,32 @@ class App(tk.Tk):
             threading.Thread(target=self._download_and_prepare_update,daemon=True).start()
 
     def _download_and_prepare_update(self):
+        staged_paths = []
         try:
             pending=getattr(self,"_pending_release",None)
             if not pending:
                 raise RuntimeError("Update details are no longer available. Please check again.")
             release,asset_name,platform=pending
+            tag = str(release.get("tag_name") or "")
             assets={str(a.get("name")):a for a in (release.get("assets") or [])}
             base=Path.home()/"SCAFAWorkforce"/"updates"
             base.mkdir(parents=True,exist_ok=True)
             package=base/asset_name
             checksum_file=base/"checksums.txt"
             for name,destination in ((asset_name,package),("checksums.txt",checksum_file)):
-                url=assets[name].get("browser_download_url")
-                if not url: raise RuntimeError(f"Release asset {name} has no download URL.")
+                staged_paths.append(destination)
+                url = validate_release_asset_url(
+                    assets[name].get("browser_download_url"), tag, name
+                )
                 req=urllib.request.Request(url,headers={"User-Agent":"SCAFA-Workforce-Updater"})
                 with urllib.request.urlopen(req,timeout=90,context=SSL_CONTEXT) as response, open(destination,"wb") as out:
                     while True:
                         chunk=response.read(1024*1024)
                         if not chunk: break
                         out.write(chunk)
-            expected=None
-            for line in checksum_file.read_text(encoding="utf-8").splitlines():
-                parts=line.strip().split(None,1)
-                if len(parts)==2 and parts[1].lstrip("*").strip()==asset_name:
-                    expected=parts[0].lower(); break
-            if not expected or len(expected)!=64:
-                raise RuntimeError(f"No valid SHA-256 entry was published for {asset_name}.")
-            import hashlib
-            digest=hashlib.sha256()
-            with open(package,"rb") as stream:
-                for chunk in iter(lambda:stream.read(1024*1024),b""): digest.update(chunk)
-            if digest.hexdigest().lower()!=expected:
-                package.unlink(missing_ok=True)
-                raise RuntimeError("The downloaded update failed SHA-256 verification. The installed application has not been changed.")
+            verify_update_asset(
+                package, checksum_file, asset_name, assets[asset_name].get("digest")
+            )
             helper_name="scafa-updater.exe" if platform=="windows" else "scafa-updater"
             helper_source=Path(sys.executable).resolve().parent/helper_name
             if platform=="macos":
@@ -181,6 +1065,7 @@ class App(tk.Tk):
                 raise RuntimeError("The update helper is missing from this installation. Install the latest full setup package first.")
             import shutil
             helper_copy=base/("scafa-updater-run.exe" if platform=="windows" else "scafa-updater-run")
+            staged_paths.append(helper_copy)
             shutil.copy2(helper_source,helper_copy)
             command=[str(helper_copy),"--pid",str(os.getpid()),"--package",str(package),
                      "--target",str(app_target),"--platform",platform]
@@ -188,6 +1073,11 @@ class App(tk.Tk):
                 command.extend(["--user-uid",str(os.getuid())])
             self.after(0,lambda:self._launch_update_helper(command))
         except Exception as exc:
+            for staged_path in staged_paths:
+                try:
+                    staged_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
             message=str(exc)
             self.after(0,lambda m=message:self._update_check_failed(m))
 
@@ -224,6 +1114,17 @@ class App(tk.Tk):
         config = base / "device.json"
         config.write_text(json.dumps({"ip": ip, "port": port, "key": key, "interval": 10}), encoding="utf-8")
 
+        def run_command(command, operation):
+            try:
+                return run_monitor_command(command, operation)
+            except RuntimeError as exc:
+                self.status.set("Background monitoring state could not be confirmed")
+                messagebox.showwarning(
+                    "Could not confirm monitoring state",
+                    f"{exc}\n\nInspect Task Scheduler or the macOS Login Item before retrying.",
+                )
+                return None
+
         if sys.platform == "win32":
             task_name = "SCAFA Workforce Attendance Monitor"
             executable = Path(sys.executable).resolve().parent / "scafa-monitor.exe"
@@ -235,20 +1136,61 @@ class App(tk.Tk):
                 "Enable attendance-device monitoring every 10 seconds and start automatically whenever you sign in to Windows?\n\nWindows notifications will appear when new punches are detected. Your PC must be awake and connected to the same network as the device."
             ):
                 command = f'"{executable}"'
-                result = subprocess.run(
+                result = run_command(
                     ["schtasks", "/Create", "/SC", "ONLOGON", "/TN", task_name,
                      "/TR", command, "/RL", "LIMITED", "/F"],
-                    capture_output=True, text=True
+                    "create the Windows monitor task",
                 )
+                if result is None:
+                    return
                 if result.returncode:
                     messagebox.showerror("Could not enable monitoring", result.stderr or result.stdout or "Task Scheduler failed.")
                     return
-                subprocess.run(["schtasks", "/Run", "/TN", task_name], capture_output=True, text=True)
+                start_result = run_command(
+                    ["schtasks", "/Run", "/TN", task_name],
+                    "start the Windows monitor task",
+                )
+                if start_result is None:
+                    return
+                if start_result.returncode:
+                    detail = start_result.stderr or start_result.stdout or "Task Scheduler could not start the monitor."
+                    self.status.set("Background monitoring scheduled • current start failed")
+                    messagebox.showwarning(
+                        "Monitoring scheduled but not started",
+                        f"The monitor task was created for future sign-ins, but it could not start now.\n\n{detail}\n\nCheck Task Scheduler or sign out and back in.",
+                    )
+                    return
                 self.status.set("Background device monitoring enabled • checks every 10 seconds")
                 messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now monitor the device in the background and start automatically when you sign in.")
             else:
-                subprocess.run(["schtasks", "/End", "/TN", task_name], capture_output=True, text=True)
-                subprocess.run(["schtasks", "/Delete", "/TN", task_name, "/F"], capture_output=True, text=True)
+                end_result = run_command(
+                    ["schtasks", "/End", "/TN", task_name],
+                    "stop the Windows monitor task",
+                )
+                if end_result is None:
+                    return
+                delete_result = run_command(
+                    ["schtasks", "/Delete", "/TN", task_name, "/F"],
+                    "remove the Windows monitor task",
+                )
+                if delete_result is None:
+                    return
+                if delete_result.returncode:
+                    detail = delete_result.stderr or delete_result.stdout or "Task Scheduler could not remove the monitor task."
+                    self.status.set("Background monitoring could not be disabled")
+                    messagebox.showwarning(
+                        "Could not disable monitoring",
+                        f"The Windows monitor task could not be removed from startup. It may still run.\n\n{detail}",
+                    )
+                    return
+                if end_result.returncode:
+                    detail = end_result.stderr or end_result.stdout or "Task Scheduler could not confirm the monitor stopped."
+                    self.status.set("Background monitoring task removed • current stop not confirmed")
+                    messagebox.showwarning(
+                        "Monitoring task removed, but stop was not confirmed",
+                        f"The task was removed from Windows startup, but the current monitor process may still be running. Check Task Manager before assuming it has stopped.\n\n{detail}",
+                    )
+                    return
                 self.status.set("Background device monitoring disabled")
                 messagebox.showinfo("Monitoring disabled", "The background attendance-device monitor has been stopped and removed from Windows startup.")
             return
@@ -277,8 +1219,18 @@ class App(tk.Tk):
                 }
                 plist.write_bytes(plistlib.dumps(payload))
                 uid = os.getuid()
-                subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(plist)], capture_output=True, text=True)
-                result = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(plist)], capture_output=True, text=True)
+                bootout_result = run_command(
+                    ["launchctl", "bootout", f"gui/{uid}", str(plist)],
+                    "refresh the macOS monitor service",
+                )
+                if bootout_result is None:
+                    return
+                result = run_command(
+                    ["launchctl", "bootstrap", f"gui/{uid}", str(plist)],
+                    "start the macOS monitor service",
+                )
+                if result is None:
+                    return
                 if result.returncode:
                     messagebox.showerror("Could not start monitoring", result.stderr or result.stdout or "launchctl failed")
                     return
@@ -286,9 +1238,30 @@ class App(tk.Tk):
                 messagebox.showinfo("Monitoring enabled", "SCAFA Workforce will now check the device in the background and start automatically when you log in.")
             else:
                 uid = os.getuid()
-                subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(plist)], capture_output=True, text=True)
-                if plist.exists():
-                    plist.unlink()
+                stop_result = run_command(
+                    ["launchctl", "bootout", f"gui/{uid}", str(plist)],
+                    "stop the macOS monitor service",
+                )
+                if stop_result is None:
+                    return
+                if stop_result.returncode:
+                    detail = stop_result.stderr or stop_result.stdout or "launchctl could not confirm the monitor stopped."
+                    self.status.set("Background monitoring stop was not confirmed")
+                    messagebox.showwarning(
+                        "Could not confirm monitoring stopped",
+                        f"The macOS monitor was not confirmed as unloaded. The login item was left in place so it can be inspected or retried.\n\n{detail}",
+                    )
+                    return
+                try:
+                    if plist.exists():
+                        plist.unlink()
+                except OSError as exc:
+                    self.status.set("Monitor stopped • login item removal failed")
+                    messagebox.showwarning(
+                        "Monitor stopped, but login item remains",
+                        f"The monitor was unloaded, but its login item could not be removed. It may start again at the next login.\n\n{exc}",
+                    )
+                    return
                 self.status.set("Background device monitoring disabled")
                 messagebox.showinfo("Monitoring disabled", "The background K50 monitor has been stopped and removed from login startup.")
             return
@@ -380,11 +1353,12 @@ class App(tk.Tk):
         ttk.Button(conn,text="＋  Import CSV",command=self.import_csv).grid(row=1,column=7)
         ttk.Button(conn,text="⚙  Custom Rules",command=self.open_rules).grid(row=1,column=8,padx=(8,0))
         ttk.Button(conn,text="Staff Schedules",command=self.open_staff_schedules).grid(row=1,column=9,padx=(8,0))
+        ttk.Button(conn,text="Employee Management",command=self.open_employee_management).grid(row=1,column=10,padx=(8,0))
         ttk.Button(conn,text="Backup Database",command=self.backup_database).grid(row=2,column=6,sticky="w",pady=(8,0))
         ttk.Button(conn,text="Restore Database",command=self.restore_database).grid(row=2,column=7,sticky="w",pady=(8,0))
         ttk.Button(conn,text="Discover Compatible Devices",command=self.discover_device).grid(row=2,column=8,sticky="w",padx=(8,0),pady=(8,0))
         ttk.Button(conn,text="Background Monitoring",command=self.configure_background_monitoring).grid(row=2,column=9,sticky="w",padx=(8,0),pady=(8,0))
-        ttk.Button(conn,text="Check for Updates",command=self.check_for_updates).grid(row=2,column=10,sticky="w",padx=(8,0),pady=(8,0))
+        ttk.Button(conn,text=UPDATE_BUTTON_TEXT,command=self.check_for_updates,state=UPDATE_BUTTON_STATE).grid(row=2,column=10,sticky="w",padx=(8,0),pady=(8,0))
         filters=ttk.Frame(self,padding=(18,0,18,10)); filters.pack(fill="x")
         ttk.Label(filters,text="From").pack(side="left")
         self._date_field(filters,self.start_date).pack(side="left",padx=(6,14))
@@ -673,15 +1647,13 @@ class App(tk.Tk):
         def add_leave():
             uid=selected.get().rsplit(" (",1)[-1].rstrip(")") if selected.get() else ""
             try:
-                first=datetime.strptime(leave_start.get().strip(),"%Y-%m-%d").date()
-                last=datetime.strptime(leave_end.get().strip(),"%Y-%m-%d").date()
-                if last<first or (last-first).days>366: raise ValueError()
-                reason=leave_reason.get().strip() or "Approved Leave"
-            except ValueError:
-                messagebox.showerror("Invalid leave dates","Enter valid YYYY-MM-DD dates. The end date must not be before the start date, and a leave period cannot exceed 367 days."); return
-            with sqlite3.connect(DB) as c:
-                c.execute("INSERT INTO staff_leave(user_id,start_date,end_date,label) VALUES(?,?,?,?)",
-                          (uid,first.isoformat(),last.isoformat(),reason))
+                with sqlite3.connect(DB) as c:
+                    add_employee_leave(
+                        c, uid, leave_start.get(), leave_end.get(), leave_reason.get()
+                    )
+            except ValueError as exc:
+                messagebox.showerror("Invalid leave period", str(exc))
+                return
             refresh_leave()
             self.status.set(f"Leave added for {self._name(uid)}")
         def remove_leave():
@@ -724,7 +1696,12 @@ class App(tk.Tk):
         with sqlite3.connect(DB) as c:
             leave=c.execute("SELECT label FROM staff_leave WHERE user_id=? AND start_date<=? AND end_date>=? ORDER BY id LIMIT 1",
                             (str(uid),day,day)).fetchone()
+            active_on_day = employee_active_on(c, uid, day)
         if leave: return f"On leave — {leave[0]}", "", "", 0.0
+        # Actual punches remain visible even if an employee was inactive on that
+        # date; only no-punch days are excluded from expected attendance.
+        if not active_on_day and not stamps:
+            return "Inactive", "", "", 0.0
         try: workdays={int(x.strip()) for x in rules["workdays"].split(",") if x.strip()}
         except ValueError: workdays={0,1,2,3,4}
         d=datetime.strptime(day,"%Y-%m-%d").date()
@@ -768,6 +1745,171 @@ class App(tk.Tk):
             status += " (early departure)"
         return status,first.strftime("%H:%M"),last.strftime("%H:%M"),worked
 
+    def open_employee_management(self):
+        """Manage employee profile metadata while preserving device-assigned IDs."""
+        win = tk.Toplevel(self)
+        win.title("Employee Management")
+        win.geometry("900x610")
+        win.minsize(760, 500)
+        win.transient(self)
+        win.grab_set()
+
+        outer = ttk.Frame(win, padding=16)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text="EMPLOYEE DIRECTORY", font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        ttk.Label(outer, text="Employee IDs are synchronised from the attendance device. Profile details are managed here.",
+                  style="Sub.TLabel").pack(anchor="w", pady=(3, 12))
+
+        body = ttk.Frame(outer)
+        body.pack(fill="both", expand=True)
+        left = ttk.Frame(body)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 14))
+        right = ttk.LabelFrame(body, text="Employee profile", padding=12)
+        right.pack(side="right", fill="y")
+
+        search_var = tk.StringVar()
+        ttk.Label(left, text="Search employees").pack(anchor="w")
+        search = ttk.Entry(left, textvariable=search_var)
+        search.pack(fill="x", pady=(4, 8))
+        columns = ("uid", "name", "department", "designation", "status")
+        tree = ttk.Treeview(left, columns=columns, show="headings", height=18)
+        for key, label, width in (
+            ("uid", "Device ID", 75), ("name", "Employee", 150),
+            ("department", "Department", 115), ("designation", "Designation", 125),
+            ("status", "Status", 75)
+        ):
+            tree.heading(key, text=label)
+            tree.column(key, width=width, minwidth=55, anchor="w")
+        tree.pack(fill="both", expand=True)
+
+        fields = {}
+        for label, key in (("Device-assigned ID", "uid"), ("Full name", "name"),
+                           ("Department", "department"), ("Designation", "designation"),
+                           ("Joining date (YYYY-MM-DD)", "joining_date")):
+            ttk.Label(right, text=label).pack(anchor="w", pady=(7, 2))
+            var = tk.StringVar()
+            fields[key] = var
+            entry = ttk.Entry(right, textvariable=var, width=29)
+            entry.pack(fill="x")
+            if key == "uid":
+                uid_entry = entry
+                uid_entry.configure(state="normal")
+        active_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(right, text="Active employee", variable=active_var).pack(anchor="w", pady=(12, 8))
+        feedback = tk.StringVar(value="Select an employee or add a profile.")
+        ttk.Label(right, textvariable=feedback, wraplength=220, style="Sub.TLabel").pack(anchor="w", pady=(0, 8))
+
+        def load_rows():
+            with sqlite3.connect(DB) as db:
+                rows = db.execute(
+                    "SELECT user_id,name,department,designation,joining_date,active FROM staff ORDER BY name COLLATE NOCASE,user_id"
+                ).fetchall()
+            visible_rows = filter_employee_rows(rows, search_var.get())
+            for item in tree.get_children():
+                tree.delete(item)
+            for row in visible_rows:
+                tree.insert("", "end", iid=str(row[0]), values=(
+                    row[0], row[1], row[2], row[3], "Active" if row[5] else "Inactive"
+                ))
+            selected_uid = retain_visible_employee_selection(
+                current_profile_uid["value"], visible_rows
+            )
+            if current_profile_uid["value"] is not None:
+                if selected_uid is None:
+                    # Never leave a hidden employee editable after the search filter changes.
+                    clear_form()
+                else:
+                    tree.selection_set(selected_uid)
+                    tree.focus(selected_uid)
+
+        current_profile_uid = {"value": None}
+        current_profile_snapshot = {"value": None}
+
+        def clear_form():
+            current_profile_uid["value"] = None
+            current_profile_snapshot["value"] = None
+            uid_entry.configure(state="normal")
+            for key, var in fields.items():
+                var.set("")
+            active_var.set(True)
+            feedback.set("Enter the employee's device ID and profile details. Existing IDs cannot be reused.")
+
+        def select_employee(_event=None):
+            selected = tree.selection()
+            if not selected:
+                clear_form()
+                feedback.set("Select an employee or add a profile.")
+                return
+            uid = selected[0]
+            with sqlite3.connect(DB) as db:
+                row = db.execute(
+                    "SELECT user_id,name,department,designation,joining_date,active FROM staff WHERE user_id=?",
+                    (uid,)
+                ).fetchone()
+            profile = employee_profile_selection_data(uid, row)
+            if profile is None:
+                # The row may have been deleted after the directory was populated.
+                # Never leave stale details editable after a selection disappears.
+                clear_form()
+                feedback.set("The selected employee is no longer registered. Refresh the directory.")
+                return
+            current_profile_uid["value"] = profile["user_id"]
+            current_profile_snapshot["value"] = (
+                str(row[1] or "").strip(),
+                str(row[2] or "").strip(),
+                str(row[3] or "").strip(),
+                str(row[4] or "").strip(),
+                bool(row[5]),
+            )
+            uid_entry.configure(state="normal")
+            for key, value in zip(("uid", "name", "department", "designation", "joining_date"), profile["fields"]):
+                fields[key].set(value)
+            active_var.set(profile["active"])
+            uid_entry.configure(state="readonly")
+            feedback.set("Profile loaded. The device-assigned ID is protected; edit the remaining details and save.")
+
+        def save_profile():
+            uid = fields["uid"].get().strip()
+            try:
+                with sqlite3.connect(DB) as db:
+                    uid = save_employee_profile(
+                        db, uid, fields["name"].get(),
+                        department=fields["department"].get(),
+                        designation=fields["designation"].get(),
+                        joining_date=fields["joining_date"].get(),
+                        active=active_var.get(),
+                        current_user_id=current_profile_uid["value"],
+                        expected_profile=current_profile_snapshot["value"]
+                    )
+            except (ValueError, sqlite3.IntegrityError) as exc:
+                messagebox.showwarning("Unable to save employee profile", str(exc), parent=win)
+                return
+            current_profile_uid["value"] = uid
+            current_profile_snapshot["value"] = (
+                fields["name"].get().strip(),
+                fields["department"].get().strip(),
+                fields["designation"].get().strip(),
+                fields["joining_date"].get().strip(),
+                bool(active_var.get()),
+            )
+            uid_entry.configure(state="readonly")
+            self._names_cache = None
+            load_rows()
+            if uid in tree.get_children():
+                tree.selection_set(uid)
+                tree.focus(uid)
+            feedback.set("Employee profile saved.")
+            self.refresh()
+
+
+        tree.bind("<<TreeviewSelect>>", select_employee)
+        search_var.trace_add("write", lambda *_: load_rows())
+        ttk.Button(right, text="New profile", command=clear_form).pack(fill="x", pady=(4, 4))
+        ttk.Button(right, text="Save profile", style="Accent.TButton", command=save_profile).pack(fill="x")
+        ttk.Label(outer, text="Inactive employees remain in historical reports; their attendance records are never deleted. From the effective date, days without punches are excluded from expected attendance.",
+                  style="Sub.TLabel").pack(anchor="w", pady=(10, 0))
+        load_rows()
+
     def _staff_names(self):
         if not hasattr(self,"_names_cache") or self._names_cache is None:
             with sqlite3.connect(DB) as c:
@@ -778,17 +1920,22 @@ class App(tk.Tk):
         name=self._staff_names().get(str(uid), "")
         return name if name else f"User {uid}"
 
-    def _store_device_users(self, users):
+    def _store_device_users(self, users, db=None):
+        """Store device names under the restore/sync maintenance lock."""
+        if db is None:
+            with database_maintenance_lock(DB, timeout=300):
+                with sqlite3.connect(DB) as connection:
+                    return self._store_device_users(users, connection)
         saved=0
-        with sqlite3.connect(DB) as c:
-            for user in users:
-                uid=str(getattr(user,"user_id",None) or getattr(user,"uid","")).strip()
-                name=str(getattr(user,"name","") or "").strip()
-                if not uid or not name:
-                    continue
-                c.execute("""INSERT INTO staff(user_id,name) VALUES(?,?)
-                             ON CONFLICT(user_id) DO UPDATE SET name=excluded.name""",(uid,name))
-                saved+=1
+        for user in users:
+            uid=get_device_user_id(user)
+            name=str(getattr(user,"name","") or "").strip()
+            if not uid or not name:
+                continue
+            db.execute("""INSERT INTO staff(user_id,name,name_source) VALUES(?,?,'device')
+                         ON CONFLICT(user_id) DO UPDATE SET name=excluded.name
+                         WHERE staff.name_source='device'""",(uid,name))
+            saved+=1
         self._names_cache=None
         return saved
 
@@ -936,7 +2083,10 @@ class App(tk.Tk):
             self.comparison_tree.delete(item)
         selected=self.dashboard_employee.get() if hasattr(self,"dashboard_employee") else "All staff"
         selected_uid=None if selected=="All staff" else selected.rsplit(" (",1)[-1].rstrip(")")
-        latest=max(rows,key=lambda r:str(r[1])) if rows else None
+        latest_rows = rows if selected_uid is None else [
+            row for row in rows if str(row[0]) == selected_uid
+        ]
+        latest=max(latest_rows,key=lambda r:str(r[1])) if latest_rows else None
         if latest:
             uid,stamp,state=latest
             self.latest_punch_label.configure(text=f"LATEST PUNCH  •  {self._name(uid)}  (ID {uid})  •  {datetime.strptime(stamp,'%Y-%m-%d %H:%M:%S').strftime('%d %b %Y, %I:%M:%S %p')}")
@@ -949,6 +2099,11 @@ class App(tk.Tk):
         last=datetime.strptime(self.end_date.get(),"%Y-%m-%d").date()
         with sqlite3.connect(DB) as c:
             registered={str(r[0]) for r in c.execute("SELECT user_id FROM staff")}
+            status_history={}
+            for status_uid,active_value,effective_date in c.execute(
+                "SELECT user_id,active,effective_date FROM staff_status_history ORDER BY effective_date,id"
+            ):
+                status_history.setdefault(str(status_uid),[]).append((str(effective_date),bool(active_value)))
         staff_ids=sorted(registered|{uid for uid,day in grouped},
             key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
         if selected_uid:
@@ -963,21 +2118,23 @@ class App(tk.Tk):
                 day=cursor.isoformat()
                 stamps=sorted(grouped.get((uid,day),[]))
                 status,first_p,last_p,worked=self._attendance_day_status(uid,day,stamps)
-                if status not in ("Day off","Holiday") and not status.startswith("On leave"):
+                active_on_day=employee_active_from_events(status_history.get(uid,()),day)
+                eligible_day=is_expected_attendance_day(active_on_day,status)
+                if eligible_day:
                     stats["expected"]+=1
-                if status=="Absent":
-                    stats["absent"]+=1
-                elif status.startswith("Incomplete punch"):
-                    stats["incomplete"]+=1
-                    stats["present"]+=1
-                    if "Late" in status: stats["late"]+=1
-                elif stamps:
-                    stats["present"]+=1
-                    if "Late" in status: stats["late"]+=1
-                    else: stats["ontime"]+=1
-                    if "early departure" in status: stats["early"]+=1
-                    try: arrivals.append(datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S").hour*60+datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S").minute)
-                    except ValueError: pass
+                    if status=="Absent":
+                        stats["absent"]+=1
+                    elif status.startswith("Incomplete punch"):
+                        stats["incomplete"]+=1
+                        stats["present"]+=1
+                        if "Late" in status: stats["late"]+=1
+                    elif stamps:
+                        stats["present"]+=1
+                        if "Late" in status: stats["late"]+=1
+                        else: stats["ontime"]+=1
+                        if "early departure" in status: stats["early"]+=1
+                        try: arrivals.append(datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S").hour*60+datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S").minute)
+                        except ValueError: pass
                 cursor+=timedelta(days=1)
             rate=(stats["ontime"]/stats["expected"]*100) if stats["expected"] else 0
             avg=""
@@ -1086,7 +2243,17 @@ class App(tk.Tk):
             except ValueError:
                 messagebox.showerror("Network unavailable","Could not determine this computer's local network. Enter the device IP manually and try again.")
                 return
-        network=ipaddress.ip_network(f"{local_ip}/24",strict=False)
+        try:
+            local_address=ipaddress.ip_address(local_ip)
+            if local_address.version != 4:
+                raise ValueError()
+            network=ipaddress.ip_network(f"{local_address}/24",strict=False)
+        except ValueError:
+            messagebox.showerror(
+                "IPv4 required",
+                "Automatic discovery scans a local IPv4 /24 network. Enter a valid IPv4 address or connect this computer to an IPv4 network.",
+            )
+            return
         self.status.set(f"Searching {network} for compatible attendance devices on port {port}…")
         threading.Thread(target=self._discover_worker,args=(network,port,key),daemon=True).start()
 
@@ -1134,6 +2301,12 @@ class App(tk.Tk):
         messagebox.showerror("Discovery failed",msg)
 
     def fetch(self):
+        if getattr(self, "_fetch_in_progress", False):
+            messagebox.showwarning(
+                "Attendance sync already running",
+                "An attendance sync is already in progress. Wait for it to finish before starting another.",
+            )
+            return
         ip=self.ip.get().strip()
         try:
             parsed_ip=ipaddress.ip_address(ip)
@@ -1144,67 +2317,187 @@ class App(tk.Tk):
         try: port=int(self.port.get()); key=int(self.key.get() or "0")
         except ValueError:
             messagebox.showerror("Invalid settings","Port and communication key must be numbers."); return
+        if not 1 <= port <= 65535:
+            messagebox.showerror("Invalid settings","Port must be between 1 and 65535.")
+            return
+        self._fetch_in_progress=True
         self.status.set("Connecting to device…")
-        threading.Thread(target=self._fetch_worker,args=(ip,port,key),daemon=True).start()
+        try:
+            threading.Thread(target=self._fetch_worker,args=(ip,port,key),daemon=True).start()
+        except Exception as exc:
+            self._fetch_in_progress=False
+            self.status.set("Could not start attendance sync.")
+            messagebox.showerror("Could not start attendance sync",str(exc))
 
     def _fetch_worker(self,ip,port,key):
         conn=None
+        fetch_error=None
+        cleanup_errors=[]
+        sync_warnings=[]
+        synced_ids=set()
+        device_users=[]
+        rows=None
+        total=inserted=saved_users=0
+        def cleanup_device_connection():
+            nonlocal conn
+            if conn is None:
+                return
+            connection, conn = conn, None
+            try:
+                connection.enable_device()
+            except Exception as e:
+                cleanup_errors.append(f"Could not re-enable attendance device: {e}")
+            try:
+                connection.disconnect()
+            except Exception as e:
+                cleanup_errors.append(f"Could not disconnect from attendance device: {e}")
+
         try:
             from zk import ZK
             conn=ZK(ip,port=port,timeout=12,password=key,force_udp=False, ommit_ping=False).connect()
             conn.disable_device()
             device_users=conn.get_users()
-            saved_users=self._store_device_users(device_users)
-            rows=conn.get_attendance()
-            inserted=0
-            with sqlite3.connect(DB) as c:
-                for row in rows:
-                    stamp=row.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-                    cur=c.execute("INSERT OR IGNORE INTO punches(user_id,punch_time,status) VALUES(?,?,?)",(str(row.user_id),stamp,str(getattr(row,"status",""))))
-                    inserted+=cur.rowcount
-            self.after(0,lambda:self._fetch_done(len(rows),inserted,saved_users))
+            synced_ids = {get_device_user_id(user) for user in device_users} - {""}
+            try:
+                rows=conn.get_attendance()
+                total=len(rows)
+            except Exception as e:
+                # Save any users already fetched and initialize their dated
+                # baseline even when the device's attendance read fails.
+                fetch_error=str(e)
+
+            # The device snapshot is complete. Re-enable and disconnect before
+            # waiting for the database maintenance lock, which may be held by a
+            # backup/restore operation. New punches remain on the device and are
+            # picked up by the next sync; they must not be blocked by SQLite work.
+            cleanup_device_connection()
+
+            # Commit names, punches and employment baselines as one coordinated
+            # database phase. Network I/O stays outside the maintenance lock, so
+            # restore waits only for the actual SQLite transaction.
+            if device_users or rows is not None:
+                with database_maintenance_lock(DB, timeout=300):
+                    with sqlite3.connect(DB) as c:
+                        saved_users=self._store_device_users(device_users, c)
+                        skipped=0
+                        if rows is not None:
+                            inserted, skipped = import_punch_rows(
+                                c,
+                                (
+                                    (
+                                        get_device_user_id(row),
+                                        getattr(row, "timestamp", None),
+                                        getattr(row, "status", None),
+                                    )
+                                    for row in rows
+                                ),
+                            )
+                        for uid in synced_ids:
+                            first_punch = c.execute(
+                                "SELECT MIN(substr(punch_time,1,10)) FROM punches WHERE user_id=?",
+                                (uid,)
+                            ).fetchone()[0]
+                            ensure_device_employee_status_history(c, uid, first_punch)
+                if skipped:
+                    sync_warnings.append(
+                        f"Skipped {skipped} malformed attendance records "
+                        "(missing device IDs or invalid timestamps)."
+                    )
         except Exception as e:
-            msg=str(e); self.after(0,lambda m=msg:self._fetch_error(m))
+            fetch_error=f"{fetch_error}; {e}" if fetch_error else str(e)
         finally:
-            if conn:
-                try: conn.enable_device()
-                except Exception: pass
-                try: conn.disconnect()
-                except Exception: pass
+            # Also clean up when connection, device-disable, or read operations
+            # fail before the normal post-read cleanup point.
+            cleanup_device_connection()
 
-    def _fetch_done(self,total,inserted,saved_users=0):
+        device_warning="; ".join(cleanup_errors + sync_warnings) if cleanup_errors or sync_warnings else None
+        if fetch_error is not None:
+            if device_warning:
+                self.after(0,lambda m=fetch_error,w=device_warning:self._fetch_error(m,w))
+            else:
+                self.after(0,lambda m=fetch_error:self._fetch_error(m))
+        elif device_warning:
+            self.after(0,lambda t=total,i=inserted,s=saved_users,w=device_warning:self._fetch_done(t,i,s,w))
+        else:
+            self.after(0,lambda t=total,i=inserted,s=saved_users:self._fetch_done(t,i,s))
+
+    def _fetch_done(self,total,inserted,saved_users=0,device_warning=None):
+        self._fetch_in_progress=False
         self.refresh()
-        self.status.set(f"Sync complete • {saved_users} staff names synced • {total} punches read • {inserted} new")
-        messagebox.showinfo("Sync complete",f"Staff names fetched: {saved_users}\nAttendance records read: {total}\nNew attendance records saved: {inserted}")
+        summary=f"Device users processed: {saved_users}\nAttendance records read: {total}\nNew attendance records saved: {inserted}"
+        if device_warning:
+            self.status.set(f"Sync complete • {saved_users} device users processed • {total} punches read • {inserted} new • DEVICE WARNING")
+            messagebox.showwarning(
+                "Sync completed with device warning",
+                f"{summary}\n\n{device_warning}\n\nCheck the attendance device before the next sync.",
+            )
+        else:
+            self.status.set(f"Sync complete • {saved_users} device users processed • {total} punches read • {inserted} new")
+            messagebox.showinfo("Sync complete",summary)
 
-    def _fetch_error(self,msg):
-        self.status.set("Device connection failed.")
-        messagebox.showerror("Could not fetch attendance",f"{msg}\n\nCheck the device IP, LAN connection, port, and communication key.")
+    def _fetch_error(self,msg,device_warning=None):
+        self._fetch_in_progress=False
+        if device_warning:
+            self.status.set("Device connection failed; attendance device needs attention.")
+            detail=f"\n\nDevice cleanup warning: {device_warning}\n\nCheck the device before the next fetch."
+        else:
+            self.status.set("Device connection failed.")
+            detail=""
+        messagebox.showerror(
+            "Could not fetch attendance",
+            f"{msg}\n\nCheck the device IP, LAN connection, port, and communication key.{detail}",
+        )
 
     def import_csv(self):
         path=filedialog.askopenfilename(title="Import attendance CSV",filetypes=[("CSV files","*.csv"),("All files","*.*")])
         if not path: return
-        count=0
         try:
             with open(path,"r",newline="",encoding="utf-8-sig") as f:
                 sample=f.read(4096); f.seek(0)
-                try: dialect=csv.Sniffer().sniff(sample) if sample.strip() else csv.excel
-                except csv.Error: dialect=csv.excel
-                reader=csv.DictReader(f,dialect=dialect)
+                delimiter=","
+                skipinitialspace=False
+                if sample.strip():
+                    try:
+                        detected=csv.Sniffer().sniff(sample, delimiters=",;\t|")
+                        delimiter=detected.delimiter
+                        skipinitialspace=detected.skipinitialspace
+                    except csv.Error:
+                        pass
+                # Sniffer can mistake formula-protection apostrophes for a quote
+                # character and even infer '=' as a delimiter. Keep the standard
+                # CSV double-quote convention and restrict delimiter detection.
+                reader=csv.DictReader(
+                    f, delimiter=delimiter, quotechar='"', doublequote=True,
+                    skipinitialspace=skipinitialspace
+                )
                 fields={x.strip().lower():x for x in (reader.fieldnames or [])}
                 uidcol=next((fields[x] for x in ("user id","userid","pin","employee id","device user id") if x in fields),None)
-                timecol=next((fields[x] for x in ("date/time","datetime","timestamp","punch time","date time","time") if x in fields),None)
+                timecol=next((fields[x] for x in ("date/time","datetime","timestamp","punch time","date time","attendance date & time","attendance date time","time") if x in fields),None)
                 statecol=next((fields[x] for x in ("status","state","punch status") if x in fields),None)
                 if not uidcol or not timecol: raise ValueError("CSV needs User ID/PIN and Date/Time/Timestamp columns.")
+                formatcol=fields.get(CSV_EXPORT_FORMAT_COLUMN.lower())
+                is_scafa_export = (
+                    tuple(reader.fieldnames or ()) == CSV_EXPORT_HEADERS
+                    and formatcol is not None
+                )
+
+                def imported_value(row, column):
+                    value = row.get(column)
+                    marked_export = (
+                        is_scafa_export
+                        and row.get(formatcol) == CSV_EXPORT_FORMAT_MARKER
+                    )
+                    return restore_csv_spreadsheet_value(value) if marked_export else value
+
+                records=(
+                    (imported_value(row,uidcol), imported_value(row,timecol),
+                     imported_value(row,statecol) if statecol else "")
+                    for row in reader
+                )
                 with sqlite3.connect(DB) as c:
-                    for row in reader:
-                        uid=(row.get(uidcol) or "").strip(); stamp=(row.get(timecol) or "").strip(); state=(row.get(statecol) or "").strip() if statecol else ""
-                        if uid and stamp:
-                            try: stamp=datetime.fromisoformat(stamp).strftime("%Y-%m-%d %H:%M:%S")
-                            except ValueError: pass
-                            count+=c.execute("INSERT OR IGNORE INTO punches(user_id,punch_time,status) VALUES(?,?,?)",(uid,stamp,state)).rowcount
+                    count,skipped=import_punch_rows(c,records)
             self.refresh()
-            messagebox.showinfo("Import complete",f"Imported {count} new records.")
+            messagebox.showinfo("Import complete",f"Imported {count} new records.\nSkipped {skipped} rows with missing IDs or invalid timestamps.")
         except Exception as e: messagebox.showerror("Import failed",str(e))
 
     def backup_database(self):
@@ -1217,43 +2510,57 @@ class App(tk.Tk):
         if not path:
             return
         try:
-            with sqlite3.connect(DB) as source, sqlite3.connect(path) as target:
-                source.backup(target)
+            # Resolve symlinks so a destination alias cannot overwrite the live database.
+            if paths_refer_to_same_file(path, DB):
+                messagebox.showerror(
+                    "Invalid backup destination",
+                    "Choose a separate backup file. The live attendance database cannot be used as its own backup destination.",
+                )
+                return
+            write_database_backup(DB, path)
             messagebox.showinfo("Backup complete",f"Database backup saved to:\n{path}")
             self.status.set(f"Database backup saved • {path}")
         except Exception as e:
             messagebox.showerror("Backup failed",f"Could not back up the database:\n{e}")
 
     def restore_database(self):
-        """Validate a backup, preserve the current database, then restore safely."""
+        """Validate an immutable SQLite snapshot before replacing the live database."""
         path=filedialog.askopenfilename(
             title="Select SCAFA Workforce database backup",
             filetypes=[("SQLite database","*.db *.sqlite *.sqlite3"),("All files","*.*")])
         if not path:
             return
         try:
-            if Path(path).resolve()==DB.resolve():
+            if paths_refer_to_same_file(path, DB):
                 messagebox.showerror("Invalid backup","Choose a backup file, not the database currently in use.")
                 return
-            with sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro",uri=True) as check:
-                integrity=check.execute("PRAGMA integrity_check").fetchone()
-                tables={r[0] for r in check.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                if not integrity or integrity[0]!="ok":
-                    raise ValueError("The selected file failed SQLite's integrity check.")
-                if not {"punches","staff"}.issubset(tables):
-                    raise ValueError("This file does not look like a SCAFA Workforce attendance database.")
-            if not messagebox.askyesno(
-                "Confirm database restore",
-                "Restoring replaces the current attendance data and settings. "
-                "A safety backup of the current database will be created first. Continue?"):
-                return
-            safety=BASE / f"Pre_Restore_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-            with sqlite3.connect(DB) as current, sqlite3.connect(safety) as backup:
-                current.backup(backup)
-            with sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro",uri=True) as source, sqlite3.connect(DB) as target:
-                source.backup(target)
+            # Stage the selected file once. Validation and restoration both use this
+            # private snapshot, so a changed/replaced source path cannot bypass checks.
+            with tempfile.TemporaryDirectory(prefix="scafa-restore-", dir=str(BASE)) as staging_dir:
+                staged=Path(staging_dir) / "validated-restore.db"
+                write_database_backup(path, staged)
+                check=sqlite3.connect(staged.as_uri() + "?mode=ro", uri=True)
+                try:
+                    validate_attendance_backup(check)
+                finally:
+                    check.close()
+                if not messagebox.askyesno(
+                    "Confirm database restore",
+                    "Restoring replaces the current attendance data and settings. "
+                    "A safety backup of the current database will be created first. Continue?"):
+                    return
+                # Hold the same cross-process lock as the attendance monitor from
+                # the safety snapshot through replacement and schema migration. This
+                # prevents a monitor commit from landing between backup and restore.
+                with database_maintenance_lock(DB, timeout=300):
+                    safety=next_restore_safety_backup_path(
+                        BASE, datetime.now().strftime('%Y%m%d_%H%M%S')
+                    )
+                    # If the atomic pre-restore snapshot fails, abort before replacing live data.
+                    write_database_backup(DB, safety)
+                    restore_database_snapshot(staged, DB)
+                    init_db(maintenance_lock_held=True)
             self._names_cache=None
-            init_db()
             self.refresh()
             messagebox.showinfo("Restore complete",f"Database restored successfully.\nSafety backup: {safety}")
             self.status.set("Database restored • current database safety backup retained")
@@ -1266,8 +2573,13 @@ class App(tk.Tk):
         path=filedialog.asksaveasfilename(title="Save punch report",defaultextension=".csv",filetypes=[("CSV report","*.csv")],initialfile=f"SCAFA_Workforce_Punches_{date.today().isoformat()}.csv")
         if not path: return
         with open(path,"w",newline="",encoding="utf-8-sig") as f:
-            w=csv.writer(f); w.writerow(["Device User ID","Staff Name","Attendance date & time","Punch status"])
-            w.writerows((uid,self._name(uid),stamp,state) for uid,stamp,state in rows)
+            w=csv.writer(f)
+            w.writerow(CSV_EXPORT_HEADERS)
+            w.writerows(
+                tuple(escape_csv_spreadsheet_value(value) for value in (uid,self._name(uid),stamp,state))
+                + (CSV_EXPORT_FORMAT_MARKER,)
+                for uid,stamp,state in rows
+            )
         messagebox.showinfo("CSV exported",f"Exported {len(rows)} records.")
 
     def _report_scope_rows(self):
@@ -1318,6 +2630,11 @@ class App(tk.Tk):
             with sqlite3.connect(DB) as c:
                 known=sorted({str(r[0]) for r in c.execute("SELECT user_id FROM staff")} | {str(r[0]) for r in rows},
                     key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x.lower()))
+                status_history={}
+                for status_uid,active_value,effective_date in c.execute(
+                    "SELECT user_id,active,effective_date FROM staff_status_history ORDER BY effective_date,id"
+                ):
+                    status_history.setdefault(str(status_uid),[]).append((str(effective_date),bool(active_value)))
             first=datetime.strptime(self.start_date.get(),"%Y-%m-%d").date()
             last=datetime.strptime(self.end_date.get(),"%Y-%m-%d").date()
             if last<first: raise ValueError("End date must not precede start date.")
@@ -1336,20 +2653,23 @@ class App(tk.Tk):
                     worked_display="—" if status.startswith("Incomplete punch") else format_worked_time(hours)
                     summary.append([uid,self._name(uid),f"{day} ({weekday})",len(stamps),first_p or "—",last_p or "—",worked_display,status])
                     status_values.append(status)
-                    if status not in ("Day off","Holiday") and not status.startswith("On leave"): perf["expected"]+=1
-                    if status=="Absent": perf["absent"]+=1
-                    elif status.startswith("Incomplete punch"):
-                        perf["incomplete"]+=1; perf["present"]+=1
-                        if "Late" in status: perf["late"]+=1
-                    elif stamps:
-                        perf["present"]+=1
-                        if "Late" in status: perf["late"]+=1
-                        else: perf["ontime"]+=1
-                        if "early departure" in status: perf["early"]+=1
-                        try:
-                            arrival=datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S")
-                            perf["arrivals"].append(arrival.hour*60+arrival.minute)
-                        except ValueError: pass
+                    active_on_day=employee_active_from_events(status_history.get(uid,()),day)
+                    eligible_day=is_expected_attendance_day(active_on_day,status)
+                    if eligible_day:
+                        perf["expected"]+=1
+                        if status=="Absent": perf["absent"]+=1
+                        elif status.startswith("Incomplete punch"):
+                            perf["incomplete"]+=1; perf["present"]+=1
+                            if "Late" in status: perf["late"]+=1
+                        elif stamps:
+                            perf["present"]+=1
+                            if "Late" in status: perf["late"]+=1
+                            else: perf["ontime"]+=1
+                            if "early departure" in status: perf["early"]+=1
+                            try:
+                                arrival=datetime.strptime(stamps[0],"%Y-%m-%d %H:%M:%S")
+                                perf["arrivals"].append(arrival.hour*60+arrival.minute)
+                            except ValueError: pass
                     punch_totals[uid]+=len(stamps)
                     if stamps: active_days[uid]+=1
                     cursor+=timedelta(days=1)
@@ -1375,8 +2695,8 @@ class App(tk.Tk):
             # immediately in Excel, LibreOffice, and macOS preview applications.
             overview.append(["Total punches",sum(punch_totals.values())])
             overview.append(["Staff included",len(users)])
-            overview.append(["Active attendance days",sum(active_days.values())])
-            overview.append(["Present / late days",sum(1 for s in status_values if "present" in s.casefold() or "late" in s.casefold())])
+            overview.append(["Days with punches",sum(active_days.values())])
+            overview.append(["Present days",count_expected_present_days(employee_performance)])
             overview.append(["Late arrivals",sum(p["late"] for _,p in employee_performance)])
             overview.append(["Early departures",sum(p["early"] for _,p in employee_performance)])
             overview.append(["Absences",sum(p["absent"] for _,p in employee_performance)])
@@ -1393,6 +2713,7 @@ class App(tk.Tk):
                 "Day off":sum(1 for s in status_values if s.casefold()=="day off"),
                 "Holiday":sum(1 for s in status_values if s.casefold()=="holiday"),
                 "On leave":sum(1 for s in status_values if s.casefold().startswith("on leave")),
+                "Inactive":sum(1 for s in status_values if s.casefold()=="inactive"),
                 "Incomplete punch":sum(1 for s in status_values if s.casefold().startswith("incomplete punch"))
             }
             for offset,(status_name,count) in enumerate(status_counts.items()):
@@ -1401,7 +2722,7 @@ class App(tk.Tk):
                 overview.cell(rr,6,count)
             staff_start=17
             overview.cell(staff_start,1,"STAFF PUNCH TOTALS")
-            for j,h in enumerate(["Device User ID","Staff Name","Punches","Active Days"],1):
+            for j,h in enumerate(["Device User ID","Staff Name","Punches","Days with Punches"],1):
                 overview.cell(staff_start+1,j,h)
             for idx,uid in enumerate(users,staff_start+2):
                 overview.cell(idx,1,uid)
@@ -1446,9 +2767,7 @@ class App(tk.Tk):
                                                   wrap_text=(cell.row==header_row))
                 for rr in range(header_row+1,ws.max_row+1):
                     ws.row_dimensions[rr].height=21
-                if ws is summary:
-                    pass
-                else:
+                if ws is raw:
                     for rr in range(2,ws.max_row+1):
                         ws.cell(rr,3).number_format="yyyy-mm-dd hh:mm:ss"
             if performance.max_row>=2:
@@ -1485,6 +2804,14 @@ class App(tk.Tk):
             raw.page_setup.orientation="landscape"; raw.page_setup.paperSize=raw.PAPERSIZE_A4
             raw.page_setup.fitToWidth=1; raw.page_setup.fitToHeight=0
             wb.active=0
+            # This workbook stores calculated values rather than worksheet formulas.
+            # openpyxl treats strings beginning with "=" as formulas; restore those cells
+            # to literal text so imported employee/device data cannot execute in Excel.
+            for worksheet in wb.worksheets:
+                for row in worksheet.iter_rows():
+                    for cell in row:
+                        if cell.data_type == "f":
+                            cell.data_type = "s"
             wb.save(path)
             messagebox.showinfo("Excel exported",f"Editable Excel workbook saved to:\n{path}\n\nIncludes daily attendance summary and raw punch records.")
         except Exception as e:
@@ -1610,4 +2937,11 @@ class App(tk.Tk):
         doc.build(story,onFirstPage=footer,onLaterPages=footer)
 
 if __name__=="__main__":
-    App().mainloop()
+    try:
+        with application_instance_lock(DB):
+            App().mainloop()
+    except ApplicationAlreadyRunningError:
+        messagebox.showwarning(
+            "SCAFA Workforce is already running",
+            "Another SCAFA Workforce window is already open for this attendance database. Close it before opening another instance.",
+        )

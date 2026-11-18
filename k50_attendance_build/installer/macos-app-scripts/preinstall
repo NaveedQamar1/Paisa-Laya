@@ -1,0 +1,192 @@
+#!/bin/bash
+set -euo pipefail
+
+LABEL="pk.scafa.workforce.monitor"
+APP_BUNDLE="/Applications/SCAFA_Workforce.app"
+CONTENTS_DIR="$APP_BUNDLE/Contents"
+MACOS_DIR="$CONTENTS_DIR/MacOS"
+APP_EXECUTABLE="$MACOS_DIR/SCAFA_Workforce"
+MONITOR_EXECUTABLE="$MACOS_DIR/scafa-monitor"
+STATE_DIR="/var/db/scafa-workforce-installer"
+STATE_FILE="$STATE_DIR/monitor-state"
+
+log() {
+    echo "SCAFA Workforce installer: $*" >&2
+}
+
+fail() {
+    log "ERROR: $*"
+    exit 1
+}
+
+if [ "$(/usr/bin/id -u)" -ne 0 ]; then
+    fail "The Intel macOS installer lifecycle script must run as root."
+fi
+
+# The component package targets this exact bundle path. Refuse a symlink or
+# non-directory target rather than letting a privileged installer follow an
+# unexpected path in /Applications. A missing bundle is valid on clean install.
+if [ -L "$APP_BUNDLE" ]; then
+    fail "The application bundle path is a symbolic link; refusing to continue."
+fi
+if [ -e "$APP_BUNDLE" ] && [ ! -d "$APP_BUNDLE" ]; then
+    fail "The application bundle path exists but is not a directory."
+fi
+
+# Do not let a privileged component install traverse linked bundle parents.
+# Missing parents are allowed on a clean install; existing parents must be real
+# directories so the package cannot write through an unexpected symlink.
+for component_dir in "$CONTENTS_DIR" "$MACOS_DIR"; do
+    if [ -L "$component_dir" ]; then
+        fail "The application bundle contains a symbolic-link directory: $component_dir"
+    fi
+    if [ -e "$component_dir" ] && [ ! -d "$component_dir" ]; then
+        fail "The application bundle path component is not a directory: $component_dir"
+    fi
+done
+
+if [ -L "$STATE_DIR" ]; then
+    fail "The installer recovery directory is a symbolic link; refusing to continue."
+fi
+if [ -e "$STATE_FILE" ] || [ -L "$STATE_FILE" ]; then
+    fail "A previous installation left recovery state at $STATE_FILE. Restore or inspect that monitor state before retrying."
+fi
+
+# Replacing an app bundle while its GUI process is open can leave a running
+# process mapped to files that the package installer has replaced.
+# Match the executable process name, not an arbitrary command line. Using
+# pgrep -f here can produce false positives when a parent shell or diagnostic
+# command itself contains the bundle path in its arguments.
+if gui_pids=$(/usr/bin/pgrep -x 'SCAFA_Workforce' 2>/dev/null); then
+    fail "SCAFA Workforce is still running (PID(s): $gui_pids). Quit the application completely before installing or upgrading."
+else
+    pgrep_status=$?
+    if [ "$pgrep_status" -gt 1 ]; then
+        fail "Could not determine whether the SCAFA Workforce GUI is running (pgrep exit $pgrep_status)."
+    fi
+fi
+
+users=$(/usr/bin/dscl . -list /Users UniqueID 2>&1) || fail "Could not enumerate local macOS users: $users"
+loaded_uid=""
+loaded_home=""
+
+# Check every local account, not only the frontmost console user. Fast user
+# switching can leave more than one GUI bootstrap domain alive.
+while IFS=' ' read -r username uid _; do
+    [ -n "${username:-}" ] && [ -n "${uid:-}" ] || continue
+    case "$uid" in
+        *[!0-9]*|'') continue ;;
+    esac
+    [ "$uid" -gt 0 ] || continue
+
+    # Local Directory Service accounts include system/service users that do
+    # not own a GUI bootstrap domain. Probe the GUI domain first; querying a
+    # service beneath a non-GUI UID can return launchctl error 125
+    # ("Domain does not support specified action"), which is not an
+    # indeterminate monitor state and must not block installation.
+    domain="gui/$uid"
+    if ! domain_output=$(/bin/launchctl print "$domain" 2>&1); then
+        case "$domain_output" in
+            *"Could not find domain"*|*"No such process"*|*"Domain does not support specified action"*) continue ;;
+            *) fail "Could not determine whether GUI domain $domain is available: $domain_output" ;;
+        esac
+    fi
+
+    service="$domain/$LABEL"
+    if service_output=$(/bin/launchctl print "$service" 2>&1); then
+        if [ -n "$loaded_uid" ]; then
+            fail "More than one SCAFA Workforce monitor is loaded. Disable monitoring for the other login session(s) before installing."
+        fi
+
+        home_record=$(/usr/bin/dscl . -read "/Users/$username" NFSHomeDirectory 2>&1) || fail "Could not resolve the home directory for the loaded monitor owner: $home_record"
+        home=${home_record#NFSHomeDirectory: }
+        [ "$home" != "$home_record" ] && [ -n "$home" ] || fail "The loaded monitor owner's home directory is invalid."
+        case "$home" in
+            /*) ;;
+            *) fail "The loaded monitor owner's home directory is not an absolute path." ;;
+        esac
+
+        # Checking only the plist leaf is insufficient: a user-controlled
+        # Library/LaunchAgents parent could redirect this root-run installer
+        # to a different plist outside the account's LaunchAgents directory.
+        for plist_dir in "$home/Library" "$home/Library/LaunchAgents"; do
+            if [ -L "$plist_dir" ] || [ ! -d "$plist_dir" ]; then
+                fail "The loaded monitor's LaunchAgent directory is missing, linked, or not a real directory: $plist_dir"
+            fi
+        done
+
+        plist="$home/Library/LaunchAgents/$LABEL.plist"
+        if [ -L "$plist" ] || [ ! -f "$plist" ]; then
+            fail "The monitor is loaded but its LaunchAgent plist is missing, linked, or not a regular file: $plist"
+        fi
+        plist_owner=$(/usr/bin/stat -f '%u' "$plist") || fail "Could not verify LaunchAgent ownership: $plist"
+        [ "$plist_owner" = "$uid" ] || fail "The LaunchAgent plist is not owned by its login user."
+
+        plist_label=$(/usr/libexec/PlistBuddy -c 'Print :Label' "$plist" 2>/dev/null) || fail "Could not read the loaded LaunchAgent label."
+        [ "$plist_label" = "$LABEL" ] || fail "The loaded LaunchAgent has an unexpected label."
+        program=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$plist" 2>/dev/null) || fail "Could not read the loaded monitor executable path."
+        [ "$program" = "$MONITOR_EXECUTABLE" ] || fail "The loaded monitor points to a different installation. Disable that monitor from its existing installation before upgrading."
+        # A loaded LaunchAgent can outlive its executable if a previous
+        # interrupted/manual repair removed the old app bundle. A genuinely
+        # absent helper is recoverable: persist state, boot out the stale
+        # service, let pkg replace the bundle, then postinstall validates and
+        # restores the new helper. Do not relax checks for links, special files,
+        # or non-executable files.
+        if [ -L "$MONITOR_EXECUTABLE" ]; then
+            fail "The loaded monitor executable is a symbolic link."
+        fi
+        if [ -e "$MONITOR_EXECUTABLE" ] && { [ ! -f "$MONITOR_EXECUTABLE" ] || [ ! -x "$MONITOR_EXECUTABLE" ]; }; then
+            fail "The loaded monitor executable exists but is not a regular executable file."
+        fi
+        if [ ! -e "$MONITOR_EXECUTABLE" ]; then
+            log "The loaded monitor helper is absent; treating the registered LaunchAgent as stale and stopping it before bundle replacement."
+        fi
+
+        loaded_uid="$uid"
+        loaded_home="$home"
+    else
+        case "$service_output" in
+            *"Could not find service"*|*"Could not find domain"*|*"No such process"*) ;;
+            *) fail "Could not determine whether monitor $service is loaded: $service_output" ;;
+        esac
+    fi
+done <<< "$users"
+
+if [ -z "$loaded_uid" ]; then
+    log "No SCAFA Workforce monitor is currently loaded; preserving the disabled/unloaded state."
+    exit 0
+fi
+
+/usr/bin/install -d -o root -g wheel -m 700 "$STATE_DIR" || fail "Could not create the protected installer recovery directory."
+state_dir_owner=$(/usr/bin/stat -f '%u' "$STATE_DIR") || fail "Could not verify installer recovery directory ownership."
+[ "$state_dir_owner" = "0" ] || fail "Installer recovery directory is not owned by root."
+
+tmp_file=$(/usr/bin/mktemp "$STATE_DIR/.monitor-state.XXXXXX") || fail "Could not create installer recovery state."
+if ! printf '%s\n' "$loaded_uid" > "$tmp_file"; then
+    /bin/rm -f "$tmp_file"
+    fail "Could not write installer recovery state."
+fi
+/bin/chmod 600 "$tmp_file" || { /bin/rm -f "$tmp_file"; fail "Could not protect installer recovery state."; }
+/usr/sbin/chown root:wheel "$tmp_file" || { /bin/rm -f "$tmp_file"; fail "Could not set installer recovery-state ownership."; }
+/bin/mv "$tmp_file" "$STATE_FILE" || { /bin/rm -f "$tmp_file"; fail "Could not persist installer recovery state."; }
+
+service="gui/$loaded_uid/$LABEL"
+if bootout_output=$(/bin/launchctl bootout "$service" 2>&1); then
+    bootout_status=0
+else
+    bootout_status=$?
+fi
+
+# A nonzero bootout is acceptable only when launchd positively reports that
+# the service is now absent. Any ambiguous state aborts before bundle replacement.
+if service_output=$(/bin/launchctl print "$service" 2>&1); then
+    /bin/rm -f "$STATE_FILE" || true
+    fail "The attendance monitor is still loaded after bootout; the application bundle was not replaced."
+fi
+case "$service_output" in
+    *"Could not find service"*|*"Could not find domain"*|*"No such process"*) ;;
+    *) fail "Could not confirm that the attendance monitor stopped. Recovery state was retained at $STATE_FILE: $service_output" ;;
+esac
+
+log "Stopped the previously loaded monitor for user ID $loaded_uid (bootout exit $bootout_status)."
+exit 0
