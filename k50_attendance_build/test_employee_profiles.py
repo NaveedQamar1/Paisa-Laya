@@ -873,6 +873,93 @@ class EmployeeProfileSaveTests(unittest.TestCase):
                 0,
             )
 
+    def test_joining_date_edit_preserves_legacy_inactive_period_and_reactivation(self):
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                """INSERT INTO staff(user_id,name,department,designation,joining_date,active,name_source)
+                   VALUES('702','Former Employee','','','',0,'profile')"""
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES('702',0,'2026-11-14','migration')"""
+            )
+            app.save_employee_profile(
+                db, "702", "Former Employee", active=True,
+                current_user_id="702", effective_today="2026-11-15",
+                expected_profile=("Former Employee", "", "", "", False),
+            )
+            app.save_employee_profile(
+                db, "702", "Former Employee", joining_date="2000-01-01",
+                active=True, current_user_id="702", effective_today="2026-11-16",
+                expected_profile=("Former Employee", "", "", "", True),
+            )
+            profile = db.execute(
+                "SELECT joining_date,active FROM staff WHERE user_id='702'"
+            ).fetchone()
+            history = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='702' ORDER BY effective_date,id"""
+            ).fetchall()
+            self.assertFalse(app.employee_active_on(db, "702", "2026-11-14"))
+            self.assertTrue(app.employee_active_on(db, "702", "2026-11-15"))
+            self.assertTrue(app.employee_active_on(db, "702", "2026-11-16"))
+
+        self.assertEqual(profile, ("2000-01-01", 1))
+        self.assertEqual(
+            history,
+            [
+                (1, "2000-01-01", "profile"),
+                (0, "2026-11-14", "migration"),
+                (1, "2026-11-15", "profile"),
+            ],
+        )
+
+    def test_joining_date_edit_cannot_rewrite_or_collide_with_reactivation_history(self):
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                """INSERT INTO staff(user_id,name,department,designation,joining_date,active,name_source)
+                   VALUES('703','Former Employee','','','',0,'profile')"""
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES('703',0,'2026-11-14','migration')"""
+            )
+            app.save_employee_profile(
+                db, "703", "Former Employee", active=True,
+                current_user_id="703", effective_today="2026-11-15",
+                expected_profile=("Former Employee", "", "", "", False),
+            )
+            before = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='703' ORDER BY effective_date,id"""
+            ).fetchall()
+
+            with self.assertRaisesRegex(ValueError, "conflicts with an existing employment-status event"):
+                app.save_employee_profile(
+                    db, "703", "Former Employee", joining_date="2026-11-14",
+                    active=True, current_user_id="703", effective_today="2026-11-16",
+                    expected_profile=("Former Employee", "", "", "", True),
+                )
+            with self.assertRaisesRegex(ValueError, "earlier inactive period and a later reactivation"):
+                app.save_employee_profile(
+                    db, "703", "Former Employee", joining_date="2026-12-01",
+                    active=True, current_user_id="703", effective_today="2026-11-16",
+                    expected_profile=("Former Employee", "", "", "", True),
+                )
+
+            profile = db.execute(
+                "SELECT joining_date,active FROM staff WHERE user_id='703'"
+            ).fetchone()
+            after = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='703' ORDER BY effective_date,id"""
+            ).fetchall()
+            self.assertTrue(app.employee_active_on(db, "703", "2026-11-15"))
+
+        self.assertEqual(profile, ("", 1))
+        self.assertEqual(after, before)
+
+
     def test_status_history_failure_rolls_back_profile_update(self):
         self.save_profile("701", "Original Employee")
         with sqlite3.connect(app.DB) as db:
