@@ -173,8 +173,8 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self._write_command("id", 'echo 0\n')
         self._write_command(
             "pgrep",
-            'if [ "$1" != "-x" ] || [ "$2" != "SCAFA_Workforce" ]; then echo "unexpected pgrep query: $*" >&2; exit 2; fi\\n'
-            'if [ "${SCAFA_TEST_GUI_RUNNING:-0}" = "1" ]; then echo 4242; exit 0; fi\\nexit 1\\n',
+            'if [ "$1" != "-x" ] || [ "$2" != "SCAFA_Workforce" ]; then echo "unexpected pgrep query: $*" >&2; exit 2; fi\n'
+            'if [ "\${SCAFA_TEST_GUI_RUNNING:-0}" = "1" ]; then echo 4242; exit 0; fi\nexit 1\n',
         )
         self._write_command(
             "dscl",
@@ -317,6 +317,7 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self._prepare_loaded_state("loaded")
         result = self._run(PREINSTALL, "preinstall", SCAFA_TEST_GUI_RUNNING="1")
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PID(s): 4242", result.stderr)
         self.assertFalse(self.state_file.exists())
         self.assertEqual(self._calls(), [])
 
