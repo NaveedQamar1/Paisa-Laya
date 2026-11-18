@@ -981,6 +981,71 @@ class EmployeeProfileSaveTests(unittest.TestCase):
         self.assertEqual(after, before)
 
 
+    def test_joining_date_edit_recovers_a_baseline_only_device_sync_history(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                """INSERT INTO staff(user_id,name,department,designation,joining_date,active,name_source)
+                   VALUES('707','Baseline Only Employee','','','',1,'profile')"""
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES('707',0,'0001-01-01','device-sync-baseline')"""
+            )
+            app.save_employee_profile(
+                db, "707", "Baseline Only Employee", joining_date="2021-03-04",
+                active=True, current_user_id="707", effective_today="2026-11-16",
+                expected_profile=("Baseline Only Employee", "", "", "", True),
+            )
+            history = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='707' ORDER BY effective_date,id"""
+            ).fetchall()
+            self.assertFalse(app.employee_active_on(db, "707", "2021-03-03"))
+            self.assertTrue(app.employee_active_on(db, "707", "2021-03-04"))
+
+        self.assertEqual(
+            history,
+            [
+                (0, "0001-01-01", "device-sync-baseline"),
+                (1, "2021-03-04", "profile"),
+            ],
+        )
+
+
+    def test_joining_date_edit_rejects_collision_with_legacy_inactive_event_atomically(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                """INSERT INTO staff(user_id,name,department,designation,joining_date,active,name_source)
+                   VALUES('708','Legacy Former Employee','','','',0,'profile')"""
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES('708',0,'2026-11-14','migration')"""
+            )
+            before = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='708' ORDER BY effective_date,id"""
+            ).fetchall()
+            with self.assertRaisesRegex(ValueError, "conflicts with the first recorded inactive status event"):
+                app.save_employee_profile(
+                    db, "708", "Legacy Former Employee", joining_date="2026-11-14",
+                    active=False, current_user_id="708", effective_today="2026-11-16",
+                    expected_profile=("Legacy Former Employee", "", "", "", False),
+                )
+            profile = db.execute(
+                "SELECT joining_date,active FROM staff WHERE user_id='708'"
+            ).fetchone()
+            after = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='708' ORDER BY effective_date,id"""
+            ).fetchall()
+
+        self.assertEqual(profile, ("", 0))
+        self.assertEqual(after, before)
+
+
     def test_joining_date_edit_cannot_rewrite_or_collide_with_reactivation_history(self):
         with sqlite3.connect(app.DB) as db:
             db.execute(
