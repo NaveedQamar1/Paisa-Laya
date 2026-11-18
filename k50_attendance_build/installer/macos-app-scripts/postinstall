@@ -3,7 +3,9 @@ set -euo pipefail
 
 LABEL="pk.scafa.workforce.monitor"
 APP_BUNDLE="/Applications/SCAFA_Workforce.app"
-MONITOR_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/scafa-monitor"
+CONTENTS_DIR="$APP_BUNDLE/Contents"
+MACOS_DIR="$CONTENTS_DIR/MacOS"
+MONITOR_EXECUTABLE="$MACOS_DIR/scafa-monitor"
 STATE_DIR="/var/db/scafa-workforce-installer"
 STATE_FILE="$STATE_DIR/monitor-state"
 
@@ -68,6 +70,11 @@ plist_owner=$(/usr/bin/stat -f '%u' "$plist") || fail "Could not verify LaunchAg
 if [ -L "$APP_BUNDLE" ] || [ ! -d "$APP_BUNDLE" ]; then
     fail "The new application bundle is missing, linked, or not a real directory; monitor recovery state was retained."
 fi
+for component_dir in "$CONTENTS_DIR" "$MACOS_DIR"; do
+    if [ -L "$component_dir" ] || [ ! -d "$component_dir" ]; then
+        fail "The new application bundle path component is missing, linked, or not a real directory; monitor recovery state was retained: $component_dir"
+    fi
+done
 if [ -L "$MONITOR_EXECUTABLE" ] || [ ! -f "$MONITOR_EXECUTABLE" ] || [ ! -x "$MONITOR_EXECUTABLE" ]; then
     fail "The new monitor helper is missing, linked, or not a regular executable file; monitor recovery state was retained."
 fi
