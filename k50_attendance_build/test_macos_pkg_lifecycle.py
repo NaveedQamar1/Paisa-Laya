@@ -321,6 +321,15 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self.assertEqual(self.state_file.read_text(encoding="ascii").strip(), "501")
         self.assertIn("bootout gui/501/pk.scafa.workforce.monitor", self._calls())
 
+        # Simulate pkg replacing the old bundle with a fresh executable helper.
+        monitor.write_text("new monitor", encoding="utf-8")
+        monitor.chmod(0o755)
+        restored = self._run(POSTINSTALL, "postinstall-after-stale-monitor-recovery")
+        self.assertEqual(restored.returncode, 0, msg=restored.stderr)
+        self.assertEqual(self.launch_state.read_text(encoding="ascii").strip(), "loaded")
+        self.assertFalse(self.state_file.exists())
+        self.assertTrue(any(call.startswith("bootstrap gui/501 ") for call in self._calls()))
+
     def test_preinstall_still_rejects_a_present_non_executable_monitor_helper(self):
         monitor = self.app_bundle / "Contents" / "MacOS" / "scafa-monitor"
         monitor.chmod(0o644)
