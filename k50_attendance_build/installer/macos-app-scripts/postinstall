@@ -60,6 +60,14 @@ case "$home" in
     *) fail "The original monitor owner's home directory is not an absolute path." ;;
 esac
 
+# The marker authorizes restoring the prior monitor only through the
+# original user's real LaunchAgents directory, never a redirected parent.
+for plist_dir in "$home/Library" "$home/Library/LaunchAgents"; do
+    if [ -L "$plist_dir" ] || [ ! -d "$plist_dir" ]; then
+        fail "The previously loaded monitor's LaunchAgent directory is missing, linked, or not a real directory: $plist_dir"
+    fi
+done
+
 plist="$home/Library/LaunchAgents/$LABEL.plist"
 if [ -L "$plist" ] || [ ! -f "$plist" ]; then
     fail "The previously loaded monitor's LaunchAgent plist is missing, linked, or not a regular file: $plist"
