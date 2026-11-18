@@ -213,6 +213,57 @@ class ReportExportTests(unittest.TestCase):
         workbook.close()
 
 
+    def test_excel_export_keeps_formula_like_device_values_as_literal_text(self):
+        from openpyxl import load_workbook
+
+        destination = self.root / "formula-safe-attendance.xlsx"
+        formula_name = '=HYPERLINK("https://example.com","Open employee")'
+        formula_id = "=101"
+        formula_status = "=1+1"
+        stamp = "2026-11-09 09:45:00"
+        ctx = self.context(rows=[(formula_id, stamp, formula_status)])
+        ctx._name = lambda uid: formula_name if str(uid) == formula_id else f"User {uid}"
+
+        with patch.object(app.filedialog, "asksaveasfilename", return_value=str(destination)), \
+             patch.object(app.messagebox, "showinfo") as showinfo, \
+             patch.object(app.messagebox, "showerror") as showerror:
+            app.App.export_excel(ctx)
+
+        showinfo.assert_called_once()
+        showerror.assert_not_called()
+        workbook = load_workbook(destination, data_only=False)
+        raw = workbook["Raw Punches"]
+        self.assertEqual(raw["A2"].value, formula_id)
+        self.assertEqual(raw["A2"].data_type, "s")
+        self.assertEqual(raw["B2"].value, formula_name)
+        self.assertEqual(raw["B2"].data_type, "s")
+        self.assertEqual(raw["D2"].value, formula_status)
+        self.assertEqual(raw["D2"].data_type, "s")
+
+        summary = workbook["Attendance Summary"]
+        self.assertTrue(any(
+            cell.value == formula_name and cell.data_type == "s"
+            for row in summary.iter_rows()
+            for cell in row
+        ))
+        comparison = workbook["Employee Comparison"]
+        self.assertTrue(any(
+            cell.value == formula_name and cell.data_type == "s"
+            for row in comparison.iter_rows()
+            for cell in row
+        ))
+        overview = workbook["Overview"]
+        self.assertEqual(overview["B15"].value, f"{formula_name} • {stamp}")
+        self.assertEqual(overview["B15"].data_type, "s")
+        self.assertFalse(any(
+            cell.data_type == "f"
+            for worksheet in workbook.worksheets
+            for row in worksheet.iter_rows()
+            for cell in row
+        ))
+        workbook.close()
+
+
     def test_collective_pdf_creates_summary_and_individual_employee_pages(self):
         destination = self.root / "attendance.pdf"
         ctx = self.context()
