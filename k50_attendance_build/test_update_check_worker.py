@@ -63,6 +63,8 @@ class UpdateCheckWorkerTests(unittest.TestCase):
         response.read.return_value = json.dumps(release).encode("utf-8")
 
         with patch.object(
+            app, "IN_APP_UPDATES_ENABLED", True
+        ), patch.object(
             app.urllib.request, "urlopen", return_value=response
         ) as open_release, patch.object(app.sys, "platform", platform):
             if platform == "darwin":
@@ -91,6 +93,24 @@ class UpdateCheckWorkerTests(unittest.TestCase):
         delay, callback = self.window.after.call_args.args
         self.assertEqual(delay, 0)
         callback()
+
+    def test_in_app_update_distribution_is_gated_until_manual_acceptance(self):
+        self.assertFalse(app.IN_APP_UPDATES_ENABLED)
+        self.assertEqual(app.UPDATE_BUTTON_STATE, "disabled")
+        self.assertEqual(app.UPDATE_BUTTON_TEXT, "Updates Disabled")
+
+        source = Path(app.__file__).read_text(encoding="utf-8")
+        self.assertIn("text=UPDATE_BUTTON_TEXT", source)
+        self.assertIn("state=UPDATE_BUTTON_STATE", source)
+
+        with patch.object(app.urllib.request, "urlopen") as open_release:
+            self.window.check_for_updates()
+
+        self.window.status.set.assert_called_once_with(
+            "In-app updates are disabled until updater and rollback acceptance is complete."
+        )
+        self.thread_class.assert_not_called()
+        open_release.assert_not_called()
 
     def test_malformed_release_tag_never_reaches_update_offer(self):
         release = self.release(

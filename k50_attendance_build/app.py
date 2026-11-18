@@ -27,6 +27,10 @@ BLUE = "#2f6b45"
 TEAL = "#477c57"
 MUTED = "#68756b"
 APP_VERSION = "1.4.0"
+# Do not distribute in-app updates until real-machine updater and rollback acceptance passes.
+IN_APP_UPDATES_ENABLED = False
+UPDATE_BUTTON_STATE = "normal" if IN_APP_UPDATES_ENABLED else "disabled"
+UPDATE_BUTTON_TEXT = "Check for Updates" if IN_APP_UPDATES_ENABLED else "Updates Disabled"
 MONITOR_COMMAND_TIMEOUT_SECONDS = 30
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 RELEASE_PREFIX = "scafa-v"
@@ -869,6 +873,11 @@ class App(tk.Tk):
 
     def check_for_updates(self):
         """Check GitHub Releases and offer a verified in-app update."""
+        if not IN_APP_UPDATES_ENABLED:
+            self.status.set(
+                "In-app updates are disabled until updater and rollback acceptance is complete."
+            )
+            return
         self.status.set(f"Checking for updates… (installed version {APP_VERSION})")
         def worker():
             try:
@@ -1283,7 +1292,7 @@ class App(tk.Tk):
         ttk.Button(conn,text="Restore Database",command=self.restore_database).grid(row=2,column=7,sticky="w",pady=(8,0))
         ttk.Button(conn,text="Discover Compatible Devices",command=self.discover_device).grid(row=2,column=8,sticky="w",padx=(8,0),pady=(8,0))
         ttk.Button(conn,text="Background Monitoring",command=self.configure_background_monitoring).grid(row=2,column=9,sticky="w",padx=(8,0),pady=(8,0))
-        ttk.Button(conn,text="Check for Updates",command=self.check_for_updates).grid(row=2,column=10,sticky="w",padx=(8,0),pady=(8,0))
+        ttk.Button(conn,text=UPDATE_BUTTON_TEXT,command=self.check_for_updates,state=UPDATE_BUTTON_STATE).grid(row=2,column=10,sticky="w",padx=(8,0),pady=(8,0))
         filters=ttk.Frame(self,padding=(18,0,18,10)); filters.pack(fill="x")
         ttk.Label(filters,text="From").pack(side="left")
         self._date_field(filters,self.start_date).pack(side="left",padx=(6,14))
