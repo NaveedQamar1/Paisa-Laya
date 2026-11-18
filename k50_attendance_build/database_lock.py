@@ -1,4 +1,4 @@
-"""Cross-process locks for the live SQLite attendance database.
+""""Cross-process locks for the live SQLite attendance database.
 
 The maintenance lock coordinates restore, foreground sync and the background
 monitor. The application-instance lock prevents a second GUI process from
@@ -8,6 +8,7 @@ lock a different inode and bypass the first process.
 """
 from contextlib import contextmanager
 import errno
+import math
 import os
 import time
 from pathlib import Path
@@ -22,10 +23,14 @@ def _deadline(timeout):
         return None
     try:
         seconds = float(timeout)
-    except (TypeError, ValueError):
-        raise ValueError("Lock timeout must be a non-negative number or None.") from None
-    if seconds < 0:
-        raise ValueError("Lock timeout must be a non-negative number or None.")
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(
+            "Lock timeout must be a finite non-negative number or None."
+        ) from None
+    if not math.isfinite(seconds) or seconds < 0:
+        raise ValueError(
+            "Lock timeout must be a finite non-negative number or None."
+        )
     return time.monotonic() + seconds
 
 
@@ -83,7 +88,7 @@ def _exclusive_file_lock(lock_path, timeout, timeout_error=TimeoutError):
 
             handle.seek(0, os.SEEK_END)
             if handle.tell() == 0:
-                handle.write(b"\0")
+                handle.write(b"\\0")
                 handle.flush()
 
             def acquire():
