@@ -135,6 +135,33 @@ class DashboardRegressionTests(unittest.TestCase):
             ("Bilal", 0, 0, 0, 0, 0, 0, "0.0%", "—"),
         )
 
+    def test_latest_punch_respects_selected_employee_filter(self):
+        ctx = SimpleNamespace(
+            comparison_tree=FakeTree(),
+            dashboard_employee=SimpleNamespace(get=lambda: "Ayesha (101)"),
+            latest_punch_label=FakeLabel(),
+            start_date=SimpleNamespace(get=lambda: "2026-11-09"),
+            end_date=SimpleNamespace(get=lambda: "2026-11-10"),
+            card_values=[FakeLabel() for _ in range(6)],
+        )
+        ctx._name = lambda uid: {"101": "Ayesha", "102": "Bilal"}.get(str(uid), f"User {uid}")
+        ctx._rules = lambda: app.App._rules(ctx)
+        ctx._attendance_day_status = lambda uid, day, stamps: app.App._attendance_day_status(
+            ctx, uid, day, stamps
+        )
+        rows = [
+            ("101", "2026-11-09 09:45:00", "0"),
+            ("101", "2026-11-09 18:00:00", "1"),
+            ("102", "2026-11-10 09:45:00", "0"),
+            ("102", "2026-11-10 18:00:00", "1"),
+        ]
+
+        app.App._update_dashboard(ctx, rows)
+
+        self.assertIn("Ayesha  (ID 101)", ctx.latest_punch_label.text)
+        self.assertNotIn("Bilal", ctx.latest_punch_label.text)
+        self.assertIn("09 Nov 2026", ctx.latest_punch_label.text)
+
 
     def test_dashboard_counts_only_employment_active_days_and_keeps_later_inactive_punch_visible(self):
         with sqlite3.connect(app.DB) as db:
