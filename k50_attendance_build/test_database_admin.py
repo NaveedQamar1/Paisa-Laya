@@ -779,5 +779,48 @@ with application_instance_lock(sys.argv[1]):
 
 
 
+
+    def test_restore_does_not_overwrite_an_existing_same_second_safety_backup(self):
+        self.add_current_record("101", "Current Staff", "2026-11-16 09:00:00")
+        source = self.root / "restore-source-collision.db"
+        app.write_database_backup(app.DB, source)
+        with sqlite3.connect(source) as backup:
+            backup.execute(
+                "UPDATE staff SET name='Restored Replacement' WHERE user_id='101'"
+            )
+
+        timestamp = "20261118_120000"
+        existing_safety = self.root / f"Pre_Restore_Backup_{timestamp}.db"
+        existing_bytes = b"previous safety snapshot must not be overwritten"
+        existing_safety.write_bytes(existing_bytes)
+        expected_new_safety = self.root / f"Pre_Restore_Backup_{timestamp}_1.db"
+        fixed_datetime = SimpleNamespace(
+            now=lambda: SimpleNamespace(strftime=lambda _format: timestamp)
+        )
+
+        with (
+            patch.object(app, "datetime", fixed_datetime),
+            patch.object(app.filedialog, "askopenfilename", return_value=str(source)),
+            patch.object(app.messagebox, "askyesno", return_value=True),
+            patch.object(app.messagebox, "showinfo") as showinfo,
+            patch.object(app.messagebox, "showerror") as showerror,
+        ):
+            app.App.restore_database(self.ctx)
+
+        showerror.assert_not_called()
+        showinfo.assert_called_once()
+        self.assertEqual(existing_safety.read_bytes(), existing_bytes)
+        self.assertTrue(expected_new_safety.exists())
+        with sqlite3.connect(expected_new_safety) as safety:
+            self.assertEqual(
+                safety.execute("SELECT name FROM staff WHERE user_id='101'").fetchone()[0],
+                "Current Staff",
+            )
+        with sqlite3.connect(app.DB) as restored:
+            self.assertEqual(
+                restored.execute("SELECT name FROM staff WHERE user_id='101'").fetchone()[0],
+                "Restored Replacement",
+            )
+
 if __name__ == "__main__":
     unittest.main()
