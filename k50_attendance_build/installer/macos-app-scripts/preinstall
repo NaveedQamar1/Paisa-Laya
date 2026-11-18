@@ -126,8 +126,20 @@ while IFS=' ' read -r username uid _; do
         [ "$plist_label" = "$LABEL" ] || fail "The loaded LaunchAgent has an unexpected label."
         program=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$plist" 2>/dev/null) || fail "Could not read the loaded monitor executable path."
         [ "$program" = "$MONITOR_EXECUTABLE" ] || fail "The loaded monitor points to a different installation. Disable that monitor from its existing installation before upgrading."
-        if [ -L "$MONITOR_EXECUTABLE" ] || [ ! -f "$MONITOR_EXECUTABLE" ] || [ ! -x "$MONITOR_EXECUTABLE" ]; then
-            fail "The loaded monitor executable is missing, linked, or not a regular executable file."
+        # A loaded LaunchAgent can outlive its executable if a previous
+        # interrupted/manual repair removed the old app bundle. A genuinely
+        # absent helper is recoverable: persist state, boot out the stale
+        # service, let pkg replace the bundle, then postinstall validates and
+        # restores the new helper. Do not relax checks for links, special files,
+        # or non-executable files.
+        if [ -L "$MONITOR_EXECUTABLE" ]; then
+            fail "The loaded monitor executable is a symbolic link."
+        fi
+        if [ -e "$MONITOR_EXECUTABLE" ] && { [ ! -f "$MONITOR_EXECUTABLE" ] || [ ! -x "$MONITOR_EXECUTABLE" ]; }; then
+            fail "The loaded monitor executable exists but is not a regular executable file."
+        fi
+        if [ ! -e "$MONITOR_EXECUTABLE" ]; then
+            log "The loaded monitor helper is absent; treating the registered LaunchAgent as stale and stopping it before bundle replacement."
         fi
 
         loaded_uid="$uid"
