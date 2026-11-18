@@ -62,6 +62,22 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
         self.assertIn('if ($releaseTag -ne "scafa-v$appVersion")', self.workflow)
         self.assertIn('if [[ "$RELEASE_TAG" != "scafa-v$APP_VERSION" ]]', self.workflow)
         self.assertIn('VERSION="$APP_VERSION"', self.workflow)
+        self.assertIn(
+            r'& $iscc "/DMyAppVersion=$version" "k50_attendance_build\installer\SCAFA_Workforce.iss"',
+            self.workflow,
+        )
+        self.assertIn(
+            'pkgbuild --component dist/SCAFA_Workforce.app --install-location /Applications --scripts "$MACOS_INSTALLER_SCRIPTS" --identifier pk.scafa.workforce --version "$VERSION"',
+            self.workflow,
+        )
+        self.assertIn(
+            'pkgbuild --nopayload --scripts icon-patch-scripts --identifier pk.scafa.workforce.iconpatch --version "$VERSION"',
+            self.workflow,
+        )
+        installer_script = (
+            Path(__file__).with_name("installer") / "SCAFA_Workforce.iss"
+        ).read_text(encoding="utf-8")
+        self.assertIn("AppVersion={#MyAppVersion}", installer_script)
         self.assertNotIn('optionally with a prerelease suffix', self.workflow)
         self.assertEqual(
             self.workflow.count(
