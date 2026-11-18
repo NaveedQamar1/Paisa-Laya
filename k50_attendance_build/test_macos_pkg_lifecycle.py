@@ -35,7 +35,13 @@ class MacOSPackageLifecycleTests(unittest.TestCase):
 
     def test_preinstall_checks_all_users_and_fails_closed_on_ambiguous_launchd_state(self):
         self.assertIn("dscl . -list /Users UniqueID", self.preinstall)
+        self.assertIn('launchctl print "$domain"', self.preinstall)
         self.assertIn('launchctl print "$service"', self.preinstall)
+        self.assertLess(
+            self.preinstall.index('launchctl print "$domain"'),
+            self.preinstall.index('launchctl print "$service"'),
+        )
+        self.assertIn('Domain does not support specified action', self.preinstall)
         self.assertIn("Could not determine whether monitor", self.preinstall)
         self.assertIn("More than one SCAFA Workforce monitor is loaded", self.preinstall)
 
