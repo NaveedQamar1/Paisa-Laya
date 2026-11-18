@@ -908,6 +908,7 @@ class EmployeeProfileSaveTests(unittest.TestCase):
         self.assertEqual(
             history,
             [
+                (0, "0001-01-01", "profile-baseline"),
                 (1, "2000-01-01", "profile"),
                 (0, "2026-11-14", "migration"),
                 (1, "2026-11-15", "profile"),
