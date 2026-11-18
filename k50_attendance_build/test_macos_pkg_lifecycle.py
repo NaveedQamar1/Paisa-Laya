@@ -30,7 +30,7 @@ class MacOSPackageLifecycleTests(unittest.TestCase):
 
     def test_preinstall_refuses_to_replace_an_open_gui_application(self):
         self.assertIn("pgrep -x 'SCAFA_Workforce'", self.preinstall)
-        self.assertIn("Quit SCAFA Workforce before installing or upgrading", self.preinstall)
+        self.assertIn("SCAFA Workforce is still running (PID(s):", self.preinstall)
         self.assertIn("exit 1", self.preinstall)
 
     def test_preinstall_checks_all_users_and_fails_closed_on_ambiguous_launchd_state(self):
