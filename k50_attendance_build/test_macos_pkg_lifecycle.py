@@ -184,7 +184,7 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         )
         self._write_command(
             "dscl",
-            'if [ "$2" = "-list" ]; then echo "scafa 501"; exit 0; fi\n'
+            'if [ "$2" = "-list" ]; then printf "scafa 501\\n_buildagent 278\\n"; exit 0; fi\n'
             'if [ "$2" = "-read" ]; then echo "NFSHomeDirectory: $SCAFA_TEST_HOME"; exit 0; fi\n'
             'echo "unexpected dscl call: $*" >&2; exit 2\n',
         )
@@ -215,6 +215,7 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
             'printf "%s\\n" "$*" >> "$SCAFA_TEST_CALL_LOG"\n'
             'case "$1" in\n'
             '  print)\n'
+            '    if [ "$2" = "gui/278" ]; then echo "Could not print domain: 125: Domain does not support specified action" >&2; exit 125; fi\n'
             '    if [ "$2" = "gui/501" ]; then\n'
             '      if [ "${SCAFA_TEST_NO_GUI_DOMAIN:-0}" = "1" ]; then echo "Could not find domain specified." >&2; exit 113; fi\n'
             '      exit 0\n'
@@ -311,6 +312,17 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertFalse(self.state_file.exists())
         self.assertFalse(any(call.startswith("bootout ") for call in self._calls()))
+
+    def test_preinstall_skips_non_gui_service_account_domain_error_125(self):
+        self._prepare_loaded_state("loaded")
+        result = self._run(PREINSTALL, "preinstall")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        calls = self._calls()
+        self.assertIn("print gui/278", calls)
+        self.assertNotIn("print gui/278/pk.scafa.workforce.monitor", calls)
+        self.assertIn("print gui/501/pk.scafa.workforce.monitor", calls)
+        self.assertIn("bootout gui/501/pk.scafa.workforce.monitor", calls)
+        self.assertEqual(self.state_file.read_text(encoding="ascii").strip(), "501")
 
     def test_preinstall_aborts_on_ambiguous_launchd_state_before_stopping(self):
         self._prepare_loaded_state("unknown")
