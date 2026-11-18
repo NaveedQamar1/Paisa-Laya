@@ -202,5 +202,13 @@ class ReleaseWorkflowInputSafetyTests(unittest.TestCase):
             installer_script,
         )
 
+    def test_windows_installer_compiler_is_pinned_to_the_verified_version(self):
+        # The latest successful Windows package log reported Inno Setup 6.7.1.
+        # Pin it so future Chocolatey releases cannot silently change installer output.
+        self.assertIn(
+            "choco install innosetup --version=6.7.1 --yes --no-progress",
+            self.workflow,
+        )
+
 if __name__ == "__main__":
     unittest.main()
