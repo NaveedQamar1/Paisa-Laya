@@ -683,6 +683,18 @@ def paths_refer_to_same_file(first, second):
         return False
 
 
+def next_restore_safety_backup_path(base_dir, timestamp):
+    """Choose a fresh path so a same-second restore cannot overwrite an earlier safety copy."""
+    directory = Path(base_dir)
+    stem = f"Pre_Restore_Backup_{timestamp}"
+    candidate = directory / f"{stem}.db"
+    suffix = 1
+    while candidate.exists() or candidate.is_symlink():
+        candidate = directory / f"{stem}_{suffix}.db"
+        suffix += 1
+    return candidate
+
+
 def write_database_backup(source_path, destination_path):
     """Write and validate a temporary SQLite snapshot before replacing a backup file."""
     destination = Path(destination_path)
@@ -2443,7 +2455,9 @@ class App(tk.Tk):
                 # the safety snapshot through replacement and schema migration. This
                 # prevents a monitor commit from landing between backup and restore.
                 with database_maintenance_lock(DB, timeout=300):
-                    safety=BASE / f"Pre_Restore_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+                    safety=next_restore_safety_backup_path(
+                        BASE, datetime.now().strftime('%Y%m%d_%H%M%S')
+                    )
                     # If the atomic pre-restore snapshot fails, abort before replacing live data.
                     write_database_backup(DB, safety)
                     restore_database_snapshot(staged, DB)
