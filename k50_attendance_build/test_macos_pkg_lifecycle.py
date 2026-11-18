@@ -308,6 +308,32 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self.assertEqual(self.launch_state.read_text(encoding="ascii").strip(), "unloaded")
         self.assertIn("bootout gui/501/pk.scafa.workforce.monitor", self._calls())
 
+    def test_preinstall_recovers_a_loaded_stale_agent_when_old_monitor_helper_is_absent(self):
+        monitor = self.app_bundle / "Contents" / "MacOS" / "scafa-monitor"
+        monitor.unlink()
+        self._prepare_loaded_state("loaded")
+
+        result = self._run(PREINSTALL, "preinstall-missing-old-monitor")
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("helper is absent", result.stderr)
+        self.assertEqual(self.launch_state.read_text(encoding="ascii").strip(), "unloaded")
+        self.assertEqual(self.state_file.read_text(encoding="ascii").strip(), "501")
+        self.assertIn("bootout gui/501/pk.scafa.workforce.monitor", self._calls())
+
+    def test_preinstall_still_rejects_a_present_non_executable_monitor_helper(self):
+        monitor = self.app_bundle / "Contents" / "MacOS" / "scafa-monitor"
+        monitor.chmod(0o644)
+        self._prepare_loaded_state("loaded")
+
+        result = self._run(PREINSTALL, "preinstall-non-executable-old-monitor")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not a regular executable file", result.stderr)
+        self.assertFalse(self.state_file.exists())
+        self.assertEqual(self.launch_state.read_text(encoding="ascii").strip(), "loaded")
+        self.assertFalse(any(call.startswith("bootout ") for call in self._calls()))
+
     def test_preinstall_preserves_an_unloaded_monitor(self):
         self._prepare_loaded_state("unloaded")
         result = self._run(PREINSTALL, "preinstall")
