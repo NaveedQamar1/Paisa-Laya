@@ -90,6 +90,15 @@ while IFS=' ' read -r username uid _; do
             *) fail "The loaded monitor owner's home directory is not an absolute path." ;;
         esac
 
+        # Checking only the plist leaf is insufficient: a user-controlled
+        # Library/LaunchAgents parent could redirect this root-run installer
+        # to a different plist outside the account's LaunchAgents directory.
+        for plist_dir in "$home/Library" "$home/Library/LaunchAgents"; do
+            if [ -L "$plist_dir" ] || [ ! -d "$plist_dir" ]; then
+                fail "The loaded monitor's LaunchAgent directory is missing, linked, or not a real directory: $plist_dir"
+            fi
+        done
+
         plist="$home/Library/LaunchAgents/$LABEL.plist"
         if [ -L "$plist" ] || [ ! -f "$plist" ]; then
             fail "The monitor is loaded but its LaunchAgent plist is missing, linked, or not a regular file: $plist"
