@@ -288,6 +288,7 @@ The Intel macOS component `.pkg` now includes dedicated `preinstall` and `postin
 
 - The preinstall script refuses to replace the app while the SCAFA GUI process is running. Quit the app and rerun the installer.
 - It inspects local user LaunchAgent domains, validates the monitor plist type, ownership, label and executable path, and fails closed if launchd state is ambiguous or more than one SCAFA monitor is loaded.
+- Before reading or restoring the plist, both `~/Library` and `~/Library/LaunchAgents` must be real directories rather than symlinks; this prevents the root-run installer from following a redirected LaunchAgent parent.
 - If exactly one monitor is loaded, it writes a root-owned, mode-600 recovery marker and unloads the service. Bundle replacement proceeds only after launchd confirms the service is absent.
 - The postinstall script restores only a monitor recorded as loaded before installation. It validates the installed helper and original user's plist, bootstraps the service, and confirms the loaded state before deleting the recovery marker.
 - If the original user has no active GUI session, the script defers restoration to the next login only when the plist's `RunAtLoad` property is confirmed. If restoration cannot be confirmed, installation reports an error and retains the recovery marker at `/var/db/scafa-workforce-installer/monitor-state`.
@@ -303,3 +304,44 @@ The Intel macOS component `.pkg` now includes dedicated `preinstall` and `postin
 - [ ] Verify monitor operation after logout/login and after a Mac restart.
 
 The scripts and package contents are syntax-checked and inspected in Intel macOS CI. Real LaunchAgent behaviour, Installer UI behaviour and data preservation remain manual release gates until tested on a physical Intel Mac or disposable macOS VM.
+
+## 10. Recovery after an interrupted Intel macOS installer
+
+The root-owned marker at `/var/db/scafa-workforce-installer/monitor-state` records the UID of a monitor that was loaded before installation. It is a recovery record, **not** a backup of the application or the user's database. If the installer cannot prove that monitor restoration succeeded, it deliberately retains the marker and the next installer run refuses to overwrite it.
+
+### Do not bypass the recovery marker
+
+- Do not delete the marker manually.
+- Do not run another installer while the marker remains.
+- Do not manually boot out or bootstrap a LaunchAgent using a guessed UID.
+- Do not delete the user's application data, database, settings or logs.
+
+First inspect the marker and confirm that the installed application bundle and monitor helper exist:
+
+```bash
+sudo /usr/bin/stat -f '%Su:%Sg %Sp %N' /var/db/scafa-workforce-installer/monitor-state
+sudo /bin/cat /var/db/scafa-workforce-installer/monitor-state
+test -x /Applications/SCAFA_Workforce.app/Contents/MacOS/scafa-monitor
+```
+
+### Controlled retry of postinstall recovery
+
+If the application bundle and monitor helper are present, the original user's LaunchAgent is intact, and the underlying cause of the previous postinstall failure has been corrected, rerun the **postinstall script from the same installer package** that was used for the interrupted installation:
+
+```bash
+RECOVERY_DIR="$(/usr/bin/mktemp -d /tmp/scafa-workforce-recovery.XXXXXX)"
+/usr/sbin/pkgutil --expand "/path/to/SCAFA_Workforce_Installer_Intel.pkg" "$RECOVERY_DIR/package"
+sudo /bin/bash "$RECOVERY_DIR/package/Scripts/postinstall"
+```
+
+The script revalidates the recovery marker, original UID, LaunchAgent path and ownership, installed helper, and launchd state. With the original user's GUI session active, it bootstraps the monitor and confirms that launchd has registered it before clearing the marker. If the GUI session is absent, it clears the marker only when the LaunchAgent's `RunAtLoad` property is confirmed, deferring startup until that user next logs in.
+
+After logging in as the original user, verify the monitor when it is expected to be loaded:
+
+```bash
+launchctl print "gui/$(id -u)/pk.scafa.workforce.monitor"
+```
+
+If the recovery script fails again, keep the marker and preserve its exact error output plus `/var/log/install.log` for support. If the application bundle/helper is missing or the LaunchAgent validation fails, stop and use support-assisted recovery; the marker does not contain an application backup, and manual deletion would discard the only record of the monitor state that must be restored.
+
+**Release acceptance:** on a disposable Mac account, induce a postinstall restore failure, verify that the marker remains, correct the simulated cause, then verify that the controlled retry restores the monitor (or safely defers it to the next login) before the marker is cleared.
