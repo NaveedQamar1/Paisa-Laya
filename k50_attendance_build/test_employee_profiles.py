@@ -961,6 +961,46 @@ class EmployeeProfileSaveTests(unittest.TestCase):
         self.assertEqual(after, before)
 
 
+    def test_joining_date_edit_preserves_device_sync_inactive_period_and_reactivation(self):
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                """INSERT INTO staff(user_id,name,department,designation,joining_date,active,name_source)
+                   VALUES('704','Device Synced Former Employee','','','',0,'profile')"""
+            )
+            self.assertTrue(
+                app.ensure_device_employee_status_history(
+                    db, "704", "2020-01-02", effective_today="2026-11-14"
+                )
+            )
+            app.save_employee_profile(
+                db, "704", "Device Synced Former Employee", active=True,
+                current_user_id="704", effective_today="2026-11-15",
+                expected_profile=("Device Synced Former Employee", "", "", "", False),
+            )
+            app.save_employee_profile(
+                db, "704", "Device Synced Former Employee", joining_date="2000-01-01",
+                active=True, current_user_id="704", effective_today="2026-11-16",
+                expected_profile=("Device Synced Former Employee", "", "", "", True),
+            )
+            history = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='704' ORDER BY effective_date,id"""
+            ).fetchall()
+            self.assertFalse(app.employee_active_on(db, "704", "2026-11-14"))
+            self.assertTrue(app.employee_active_on(db, "704", "2026-11-15"))
+            self.assertTrue(app.employee_active_on(db, "704", "2026-11-16"))
+
+        self.assertEqual(
+            history,
+            [
+                (0, "0001-01-01", "profile-baseline"),
+                (1, "2000-01-01", "profile"),
+                (0, "2026-11-14", "device-sync"),
+                (1, "2026-11-15", "profile"),
+            ],
+        )
+
+
     def test_status_history_failure_rolls_back_profile_update(self):
         self.save_profile("701", "Original Employee")
         with sqlite3.connect(app.DB) as db:
