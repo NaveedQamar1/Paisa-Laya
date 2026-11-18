@@ -925,8 +925,26 @@ class App(tk.Tk):
 
     def _update_no_update(self,latest):
         self.status.set(f"Up to date • version {APP_VERSION}")
-        messagebox.showinfo("SCAFA Workforce updates",
-            f"You are using version {APP_VERSION}. The latest published version is {latest or APP_VERSION}. No update is required.")
+        latest_parts = tuple(int(part) for part in str(latest).split("."))
+        current_parts = tuple(int(part) for part in APP_VERSION.split("."))
+        if latest_parts < current_parts:
+            message = (
+                f"You are using version {APP_VERSION}, which is newer than the "
+                f"latest published release ({latest}). No update is available. "
+                "SCAFA Workforce will not downgrade your installation."
+            )
+        elif latest_parts == current_parts:
+            message = (
+                f"You are using version {APP_VERSION}, the latest published "
+                "version. No update is required."
+            )
+        else:
+            message = (
+                f"The latest published version ({latest}) is newer than installed "
+                f"version {APP_VERSION}, but no update was offered. Please retry "
+                "the update check or contact support."
+            )
+        messagebox.showinfo("SCAFA Workforce updates", message)
 
     def _update_offer(self,latest):
         self.status.set(f"Update available • version {latest}")
