@@ -518,5 +518,50 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
                             path.unlink()
                         original.rename(path)
 
+    def test_preinstall_rejects_symlinked_launchagent_parent_directories_before_bootout(self):
+        for relative_path in ("Library", "Library/LaunchAgents"):
+            with self.subTest(path=relative_path):
+                path = self.home / relative_path
+                original = path.with_name(path.name + ".original")
+                path.rename(original)
+                try:
+                    path.symlink_to(original, target_is_directory=True)
+                    self.call_log.unlink(missing_ok=True)
+                    self._prepare_loaded_state("loaded")
+
+                    result = self._run(PREINSTALL, "preinstall-linked-launchagent-parent")
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("LaunchAgent directory", result.stderr)
+                    self.assertFalse(self.state_file.exists())
+                    self.assertFalse(any(call.startswith("bootout ") for call in self._calls()))
+                finally:
+                    if path.is_symlink() or path.is_file():
+                        path.unlink()
+                    original.rename(path)
+
+    def test_postinstall_retains_recovery_marker_for_symlinked_launchagent_parent_directories(self):
+        for relative_path in ("Library", "Library/LaunchAgents"):
+            with self.subTest(path=relative_path):
+                path = self.home / relative_path
+                original = path.with_name(path.name + ".original")
+                path.rename(original)
+                try:
+                    path.symlink_to(original, target_is_directory=True)
+                    self.call_log.unlink(missing_ok=True)
+                    self._prepare_loaded_state("unloaded")
+                    self._prepare_recovery_marker()
+
+                    result = self._run(POSTINSTALL, "postinstall-linked-launchagent-parent")
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("LaunchAgent directory", result.stderr)
+                    self.assertTrue(self.state_file.exists())
+                    self.assertFalse(any(call.startswith("bootstrap ") for call in self._calls()))
+                finally:
+                    if path.is_symlink() or path.is_file():
+                        path.unlink()
+                    original.rename(path)
+
 if __name__ == "__main__":
     unittest.main()
