@@ -915,6 +915,72 @@ class EmployeeProfileSaveTests(unittest.TestCase):
             ],
         )
 
+    def test_joining_date_edit_reconstructs_legacy_inactive_employment_before_migration_deactivation(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                """INSERT INTO staff(user_id,name,department,designation,joining_date,active,name_source)
+                   VALUES('705','Legacy Former Employee','','','',0,'profile')"""
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES('705',0,'2026-11-14','migration')"""
+            )
+            app.save_employee_profile(
+                db, "705", "Legacy Former Employee", joining_date="2020-01-01",
+                active=False, current_user_id="705", effective_today="2026-11-16",
+                expected_profile=("Legacy Former Employee", "", "", "", False),
+            )
+            history = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='705' ORDER BY effective_date,id"""
+            ).fetchall()
+            self.assertFalse(app.employee_active_on(db, "705", "2019-12-31"))
+            self.assertTrue(app.employee_active_on(db, "705", "2020-01-01"))
+            self.assertTrue(app.employee_active_on(db, "705", "2026-11-13"))
+            self.assertFalse(app.employee_active_on(db, "705", "2026-11-14"))
+            self.assertFalse(app.employee_active_on(db, "705", "2026-11-16"))
+
+        self.assertEqual(
+            history,
+            [
+                (0, "0001-01-01", "profile-baseline"),
+                (1, "2020-01-01", "profile"),
+                (0, "2026-11-14", "migration"),
+            ],
+        )
+
+
+    def test_future_joining_date_does_not_reactivate_legacy_inactive_employee(self):
+        app.init_db()
+        with sqlite3.connect(app.DB) as db:
+            db.execute(
+                """INSERT INTO staff(user_id,name,department,designation,joining_date,active,name_source)
+                   VALUES('706','Future Former Employee','','','',0,'profile')"""
+            )
+            db.execute(
+                """INSERT INTO staff_status_history(user_id,active,effective_date,source)
+                   VALUES('706',0,'2026-11-14','migration')"""
+            )
+            before = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='706' ORDER BY effective_date,id"""
+            ).fetchall()
+            app.save_employee_profile(
+                db, "706", "Future Former Employee", joining_date="2026-12-01",
+                active=False, current_user_id="706", effective_today="2026-11-16",
+                expected_profile=("Future Former Employee", "", "", "", False),
+            )
+            after = db.execute(
+                """SELECT active,effective_date,source FROM staff_status_history
+                   WHERE user_id='706' ORDER BY effective_date,id"""
+            ).fetchall()
+            self.assertFalse(app.employee_active_on(db, "706", "2026-11-14"))
+            self.assertFalse(app.employee_active_on(db, "706", "2026-12-01"))
+
+        self.assertEqual(after, before)
+
+
     def test_joining_date_edit_cannot_rewrite_or_collide_with_reactivation_history(self):
         with sqlite3.connect(app.DB) as db:
             db.execute(
