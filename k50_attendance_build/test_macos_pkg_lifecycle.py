@@ -466,5 +466,57 @@ class MacOSInstallerScriptExecutionTests(unittest.TestCase):
         self.assertTrue(self.state_file.exists())
         self.assertFalse(any(call.startswith("bootstrap ") for call in self._calls()))
 
+
+    def test_preinstall_rejects_symlinked_or_non_directory_bundle_parents_before_bootout(self):
+        for relative_path in ("Contents", "Contents/MacOS"):
+            for invalid_kind in ("symlink", "file"):
+                with self.subTest(path=relative_path, invalid_kind=invalid_kind):
+                    path = self.app_bundle / relative_path
+                    original = path.with_name(path.name + ".original")
+                    path.rename(original)
+                    try:
+                        if invalid_kind == "symlink":
+                            path.symlink_to(original, target_is_directory=True)
+                        else:
+                            path.write_text("not a directory", encoding="utf-8")
+                        self.call_log.unlink(missing_ok=True)
+                        self._prepare_loaded_state("loaded")
+
+                        result = self._run(PREINSTALL, "preinstall-invalid-parent")
+
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertFalse(self.state_file.exists())
+                        self.assertFalse(any(call.startswith("bootout ") for call in self._calls()))
+                    finally:
+                        if path.is_symlink() or path.is_file():
+                            path.unlink()
+                        original.rename(path)
+
+    def test_postinstall_rejects_symlinked_or_non_directory_bundle_parents_and_keeps_recovery_state(self):
+        for relative_path in ("Contents", "Contents/MacOS"):
+            for invalid_kind in ("symlink", "file"):
+                with self.subTest(path=relative_path, invalid_kind=invalid_kind):
+                    path = self.app_bundle / relative_path
+                    original = path.with_name(path.name + ".original")
+                    path.rename(original)
+                    try:
+                        if invalid_kind == "symlink":
+                            path.symlink_to(original, target_is_directory=True)
+                        else:
+                            path.write_text("not a directory", encoding="utf-8")
+                        self.call_log.unlink(missing_ok=True)
+                        self._prepare_loaded_state("unloaded")
+                        self._prepare_recovery_marker()
+
+                        result = self._run(POSTINSTALL, "postinstall-invalid-parent")
+
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertTrue(self.state_file.exists())
+                        self.assertFalse(any(call.startswith("bootstrap ") for call in self._calls()))
+                    finally:
+                        if path.is_symlink() or path.is_file():
+                            path.unlink()
+                        original.rename(path)
+
 if __name__ == "__main__":
     unittest.main()
